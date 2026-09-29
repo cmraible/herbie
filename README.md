@@ -11,7 +11,8 @@ pnpm install
 pnpm start
 ```
 
-Prints `Hello, world!`.
+Prints `Hello, world!` immediately on startup, then every five minutes.
+Press Ctrl+C to stop.
 
 ## Development
 
