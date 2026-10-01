@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Workspace · Subscription template</title>
+  </head>
+  <body>
+    <header><strong>Workspace</strong><span>Subscription template</span></header>
+    <noscript>Enable JavaScript to sign in and manage your workspace.</noscript>
+    <main>
+      <p role="alert" id="error"></p>
+      <p role="status" id="status" aria-live="polite"></p>
+      <fieldset id="interface" disabled>
+        <section id="auth">
+          <h1>A place for your team.</h1>
+          <p>Start a workspace, invite your team, and manage your subscription.</p>
+          <form id="account-form">
+            <label>Name<input id="name" autocomplete="name" /></label
+            ><label>Email<input id="email" type="email" autocomplete="email" required /></label
+            ><label
+              >Password<input
+                id="password"
+                type="password"
+                autocomplete="current-password"
+                minlength="12"
+                required /></label
+            ><button type="submit">Sign in</button
+            ><button type="button" id="signup">Create account</button>
+          </form>
+          <div id="providers"></div>
+          <button id="forgot-password">Forgot password</button>
+          <button id="passkey-login">Sign in with a passkey</button>
+        </section>
+        <section id="app" hidden>
+          <section id="invitation" hidden>
+            <h2>Workspace invitation</h2>
+            <button id="accept-invitation">Accept invitation</button>
+          </section>
+          <div class="row">
+            <h1 id="greeting"></h1>
+            <button id="logout">Sign out</button>
+          </div>
+          <label>Workspace<select id="workspace"></select></label>
+          <form id="workspace-form">
+            <label>Workspace name<input id="workspace-name" required maxlength="100" /></label
+            ><button>Create workspace</button>
+          </form>
+          <section id="workspace-detail" hidden>
+            <h2 id="workspace-title"></h2>
+            <p id="role"></p>
+            <div id="team"></div>
+            <div id="billing"></div>
+          </section>
+          <section id="security">
+            <h2>Account security</h2>
+            <p id="security-status"></p>
+            <button id="add-passkey">Add passkey</button>
+            <div id="passkeys"></div>
+            <label
+              >Current password<input
+                type="password"
+                id="current-password"
+                autocomplete="current-password"
+            /></label>
+            <button id="enable-totp">Set up two-factor</button>
+            <button id="disable-totp" hidden>Disable two-factor</button>
+            <button id="regenerate-codes" hidden>Replace recovery codes</button>
+            <section id="totp-setup" hidden>
+              <p>
+                Add this URI to your authenticator and save the recovery codes before confirming.
+              </p>
+              <label>Authenticator setup URI<input id="totp-uri" readonly /></label>
+              <label>Recovery codes<textarea id="recovery-codes" readonly></textarea></label>
+            </section>
+          </section>
+        </section>
+        <section id="reset" hidden>
+          <h2>Reset your password</h2>
+          <label
+            >New password<input
+              type="password"
+              id="new-password"
+              autocomplete="new-password"
+              minlength="12"
+          /></label>
+          <button id="save-password">Save new password</button>
+        </section>
+        <section id="challenge" hidden>
+          <h2 id="challenge-title">Verify your sign-in</h2>
+          <label>Authentication code<input id="totp-code" autocomplete="one-time-code" /></label>
+          <button id="verify-totp">Verify authentication code</button>
+          <label>Recovery code<input id="recovery-code" autocomplete="off" /></label>
+          <button id="verify-recovery">Use recovery code</button>
+        </section>
+      </fieldset>
+    </main>
+    <script type="module" src="/src/client.ts"></script>
+  </body>
+</html>

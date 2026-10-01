@@ -1,0 +1,146 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #172b3a;
+  background: #f2f5f4;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  padding: 24px 8%;
+  background: #fff;
+  border-bottom: 1px solid #dce4e0;
+}
+header strong {
+  font-size: 22px;
+}
+header span,
+p {
+  color: #52666c;
+}
+main {
+  max-width: 900px;
+  margin: 48px auto;
+  padding: 0 24px;
+}
+section {
+  background: white;
+  border: 1px solid #dce4e0;
+  border-radius: 14px;
+  padding: 28px;
+  margin: 20px 0;
+}
+h1 {
+  font-size: 32px;
+  letter-spacing: -1px;
+}
+label {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 12px;
+  border: 1px solid #b5c6bf;
+  border-radius: 8px;
+}
+button {
+  background: #16594d;
+  color: white;
+  cursor: pointer;
+  margin: 4px 8px 4px 0;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+input,
+select {
+  max-width: 460px;
+  width: 100%;
+  min-width: 0;
+}
+textarea {
+  width: 100%;
+  min-width: 0;
+}
+table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 4px;
+  overflow-wrap: anywhere;
+}
+th:first-child {
+  width: 50%;
+}
+td button {
+  max-width: 100%;
+  padding: 8px;
+}
+.row {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.row h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  main {
+    margin: 24px auto;
+    padding: 0 12px;
+  }
+  section {
+    padding: 16px;
+  }
+  header {
+    padding: 20px 16px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 28px;
+  }
+}
+button:hover {
+  background: #104236;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+[role="alert"] {
+  color: #a32938;
+}
+[role="status"] {
+  color: #16594d;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[hidden] {
+  display: none !important;
+}
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}

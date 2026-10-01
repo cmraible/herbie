@@ -1,0 +1,69 @@
+name: Subscription template
+on:
+  pull_request:
+    paths: ['packages/subscription-template/**', 'pnpm-lock.yaml', '.github/workflows/subscription-template*.yml']
+  push:
+    branches: [main, feat/subscription-template]
+    paths: ['packages/subscription-template/**', 'pnpm-lock.yaml', '.github/workflows/subscription-template*.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: subscription-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['55433:5432']
+        options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55433/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Check types, conventions, and unit tests
+        run: pnpm --filter @herbie/subscription-template typecheck && pnpm --filter @herbie/subscription-template lint && pnpm --filter @herbie/subscription-template format:check && pnpm --filter @herbie/subscription-template test:coverage
+      - name: Validate generated API contract
+        run: pnpm --filter @herbie/subscription-template api:generate && pnpm --filter @herbie/subscription-template format && git diff --exit-code -- packages/subscription-template/docs/openapi.json
+      - run: pnpm --filter @herbie/subscription-template exec playwright install --with-deps chromium
+      - run: pnpm --filter @herbie/subscription-template test:prepare && pnpm --filter @herbie/subscription-template db:migrate && pnpm --filter @herbie/subscription-template build
+      - name: Browser acceptance against real PostgreSQL and Worker
+        run: pnpm --filter @herbie/subscription-template test:e2e
+      - name: Measure HTTP handler coverage in Node
+        run: pnpm --filter @herbie/subscription-template test:coverage:http
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscription-browser-results
+          path: |
+            packages/subscription-template/playwright-report
+            packages/subscription-template/playwright-report-http
+          retention-days: 7
+      - name: Preserve measured coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscription-unit-coverage
+          path: packages/subscription-template/coverage
+          retention-days: 7
+      - name: Preserve deployable assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscription-build
+          path: |
+            packages/subscription-template/dist
+            packages/subscription-template/supabase/migrations
+          retention-days: 7
