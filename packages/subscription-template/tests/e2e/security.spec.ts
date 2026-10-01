@@ -1,9 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { register } from "./helpers";
+import { z } from "zod";
 
 test("a registered passkey signs in after logout and cannot be used after removal", async ({
   page,
   context,
+  browser,
 }) => {
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
@@ -20,6 +22,32 @@ test("a registered passkey signs in after logout and cannot be used after remova
   await register(page, "Passkey user");
   await page.getByRole("button", { name: "Add passkey", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Passkey added");
+  const credentials = z
+    .array(z.object({ id: z.string() }))
+    .parse(await (await page.request.get("/api/auth/passkey/list-user-passkeys")).json());
+  const credential = credentials[0];
+  if (!credential) throw new Error("Missing passkey");
+  const strangerContext = await browser.newContext();
+  try {
+    const stranger = await strangerContext.newPage();
+    await register(stranger, "Other passkey account");
+    expect(
+      (
+        await stranger.request.post("/api/auth/passkey/delete-passkey", {
+          headers: { origin: "http://localhost:8790" },
+          data: { id: credential.id },
+        })
+      ).status(),
+    ).toBe(401);
+    expect(
+      z
+        .array(z.object({ id: z.string() }))
+        .parse(await (await page.request.get("/api/auth/passkey/list-user-passkeys")).json()),
+    ).toContainEqual({ id: credential.id });
+  } finally {
+    await strangerContext.close();
+  }
+
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Welcome, Passkey user" })).toBeVisible();
@@ -116,4 +144,69 @@ test("password reset replaces the password, revokes other sessions, and consumes
   } finally {
     await context.close();
   }
+});
+
+test("replacing recovery codes invalidates old codes and disabling TOTP requires credentials and rotates the session", async ({
+  page,
+  request,
+}) => {
+  const { generate } = await import("otplib");
+  const { password, signIn } = await import("./helpers");
+  const email = await register(page, "Recovery lifecycle");
+  await page.getByLabel("Current password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Set up two-factor", exact: true }).click();
+  const setup = page.getByLabel("Authenticator setup URI", { exact: true });
+  await expect(setup).toHaveValue(/^otpauth:\/\//);
+  const secret = new URL(await setup.inputValue()).searchParams.get("secret");
+  if (!secret) throw new Error("Missing TOTP secret");
+  const codes = page.getByLabel("Recovery codes", { exact: true });
+  const oldCode = (await codes.inputValue()).split("\n")[0];
+  if (!oldCode) throw new Error("Missing recovery code");
+  await page.getByLabel("Authentication code", { exact: true }).fill(await generate({ secret }));
+  await page.getByRole("button", { name: "Verify authentication code", exact: true }).click();
+  await expect(page.getByText("Two-factor authentication enabled", { exact: true })).toBeVisible();
+  await page.getByLabel("Current password", { exact: true }).fill("wrong-password");
+  await page.getByRole("button", { name: "Replace recovery codes", exact: true }).click();
+  await expect(page.getByRole("alert")).not.toBeEmpty();
+  await expect(codes).toBeHidden();
+  await page.getByLabel("Current password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Replace recovery codes", exact: true }).click();
+  await expect(codes).toBeVisible();
+  const replacement = (await codes.inputValue()).split("\n")[0];
+  if (!replacement) throw new Error("Missing replacement code");
+  expect(replacement).not.toBe(oldCode);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await signIn(page, email);
+  await page.getByLabel("Recovery code", { exact: true }).fill(oldCode);
+  await page.getByRole("button", { name: "Use recovery code", exact: true }).click();
+  await expect(page.getByRole("alert")).not.toBeEmpty();
+  expect((await page.request.get("/api/account")).status()).toBe(401);
+  await page.getByLabel("Recovery code", { exact: true }).fill(replacement);
+  await page.getByRole("button", { name: "Use recovery code", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Welcome, Recovery lifecycle", exact: true }),
+  ).toBeVisible();
+  const cookie = (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join("; ");
+  await page.getByLabel("Current password", { exact: true }).fill("wrong-password");
+  await page.getByRole("button", { name: "Disable two-factor", exact: true }).click();
+  await expect(page.getByRole("alert")).not.toBeEmpty();
+  expect((await (await page.request.get("/api/account")).json()).twoFactorEnabled).toBe(true);
+  // Leave newly generated codes visible: disabling must also erase that obsolete secret UI.
+  await page.getByLabel("Current password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Replace recovery codes", exact: true }).click();
+  await expect(codes).toBeVisible();
+  await page.getByLabel("Current password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Disable two-factor", exact: true }).click();
+  await expect(
+    page.getByText("Two-factor authentication not enabled", { exact: true }),
+  ).toBeVisible();
+  await expect(codes).toBeHidden();
+  await expect(codes).toHaveValue("");
+  expect((await request.get("/api/account", { headers: { cookie } })).status()).toBe(401);
+  expect((await (await page.request.get("/api/account")).json()).twoFactorEnabled).toBe(false);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await signIn(page, email);
+  await expect(
+    page.getByRole("heading", { name: "Welcome, Recovery lifecycle", exact: true }),
+  ).toBeVisible();
 });

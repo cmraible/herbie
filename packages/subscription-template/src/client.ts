@@ -358,7 +358,7 @@ handle("verify-recovery", async () => {
 handle("disable-totp", async () => {
   check(await client.twoFactor.disable({ password: input("current-password").value }));
   input("current-password").value = "";
-  await load();
+  await verified();
 });
 handle("regenerate-codes", async () => {
   const result = await client.twoFactor.generateBackupCodes({
