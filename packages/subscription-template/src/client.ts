@@ -4,7 +4,20 @@ import { twoFactorClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { z } from "zod";
 import { Account, WorkspaceList, Workspace, Members, Confirmation } from "./contracts";
-const client = createAuthClient({ plugins: [twoFactorClient(), passkeyClient()] });
+let mfaPending = false;
+const client = createAuthClient({
+  plugins: [
+    twoFactorClient({
+      onTwoFactorRedirect: async () => {
+        mfaPending = true;
+        node("auth").hidden = true;
+        node("challenge").hidden = false;
+        node("challenge-title").textContent = "Verify your sign-in";
+      },
+    }),
+    passkeyClient(),
+  ],
+});
 function node(id: string) {
   const value = document.getElementById(id);
   if (!value) throw new Error("Missing UI element " + id);
@@ -86,6 +99,10 @@ async function load() {
     node("role").textContent = "Your role: " + workspace.role;
     await renderTeam(workspace, current);
   }
+  await renderPasskeys();
+  node("enable-totp").hidden = account.twoFactorEnabled;
+  node("disable-totp").hidden = !account.twoFactorEnabled;
+  node("regenerate-codes").hidden = !account.twoFactorEnabled;
   node("security-status").textContent = account.twoFactorEnabled
     ? "Two-factor authentication enabled"
     : "Two-factor authentication not enabled";
@@ -104,7 +121,7 @@ node("account-form").addEventListener("submit", (e) => {
   e.preventDefault();
   void (async () => {
     check(await client.signIn.email(credentials()));
-    await load();
+    if (!mfaPending) await load();
   })().catch(report);
 });
 handle("logout", async () => {
@@ -127,6 +144,11 @@ node("workspace").addEventListener("change", (e) => {
   }
 });
 async function start() {
+  if (new URL(location.href).searchParams.has("token")) {
+    node("auth").hidden = true;
+    node("reset").hidden = false;
+    return;
+  }
   const session = await client.getSession();
   if (session.data) await load();
 }
@@ -223,4 +245,97 @@ handle("accept-invitation", async () => {
   history.replaceState({}, "", "/");
   await load();
   message("Invitation accepted.");
+});
+
+handle("add-passkey", async () => {
+  check(await client.passkey.addPasskey({ name: "Personal passkey" }));
+  await renderPasskeys();
+  message("Passkey added.");
+});
+handle("passkey-login", async () => {
+  check(await client.signIn.passkey());
+  await load();
+});
+async function renderPasskeys() {
+  const result = await client.passkey.listUserPasskeys();
+  check(result);
+  const container = node("passkeys");
+  container.replaceChildren();
+  for (const passkey of result.data ?? []) {
+    const row = element("p", passkey.name ?? "Passkey");
+    const remove = element("button", "Remove passkey");
+    remove.onclick = () => {
+      void (async () => {
+        check(await client.passkey.deletePasskey({ id: passkey.id }));
+        await renderPasskeys();
+        message("Passkey removed.");
+      })().catch(report);
+    };
+    row.append(remove);
+    container.append(row);
+  }
+}
+
+function recoveryCodes(codes: string[]) {
+  const field = node("recovery-codes");
+  if (!(field instanceof HTMLTextAreaElement)) throw new Error("Invalid recovery field");
+  field.value = codes.join("\n");
+  node("totp-setup").hidden = false;
+}
+handle("enable-totp", async () => {
+  const result = await client.twoFactor.enable({ password: input("current-password").value });
+  check(result);
+  if (!result.data || result.data.method !== "totp") throw new Error("Setup failed");
+  input("totp-uri").value = result.data.totpURI;
+  recoveryCodes(result.data.backupCodes);
+  node("challenge").hidden = false;
+  node("challenge-title").textContent = "Confirm two-factor setup";
+  input("current-password").value = "";
+});
+async function verified() {
+  mfaPending = false;
+  node("challenge").hidden = true;
+  node("totp-setup").hidden = true;
+  input("totp-uri").value = "";
+  input("totp-code").value = "";
+  input("recovery-code").value = "";
+  recoveryCodes([]);
+  node("totp-setup").hidden = true;
+  await load();
+}
+handle("verify-totp", async () => {
+  check(await client.twoFactor.verifyTotp({ code: input("totp-code").value }));
+  await verified();
+});
+handle("verify-recovery", async () => {
+  check(await client.twoFactor.verifyBackupCode({ code: input("recovery-code").value }));
+  await verified();
+});
+handle("disable-totp", async () => {
+  check(await client.twoFactor.disable({ password: input("current-password").value }));
+  input("current-password").value = "";
+  await load();
+});
+handle("regenerate-codes", async () => {
+  const result = await client.twoFactor.generateBackupCodes({
+    password: input("current-password").value,
+  });
+  check(result);
+  if (result.data) recoveryCodes(result.data.backupCodes);
+  input("current-password").value = "";
+});
+
+handle("forgot-password", async () => {
+  check(await client.requestPasswordReset({ email: input("email").value, redirectTo: "/" }));
+  message("If your account exists, check your email for a reset link.");
+});
+handle("save-password", async () => {
+  const token = new URL(location.href).searchParams.get("token");
+  if (!token) throw new Error("Reset link is missing its token");
+  check(await client.resetPassword({ token, newPassword: input("new-password").value }));
+  input("new-password").value = "";
+  history.replaceState({}, "", "/");
+  node("reset").hidden = true;
+  node("auth").hidden = false;
+  message("Password updated. Sign in with your new password.");
 });

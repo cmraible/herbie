@@ -32,8 +32,22 @@ async function route(req: Request, env: Env): Promise<Response> {
         "/api/auth/verify-email",
         "/api/auth/get-session",
         "/api/auth/sign-out",
+        "/api/auth/request-password-reset",
+        "/api/auth/reset-password",
+        "/api/auth/two-factor/enable",
+        "/api/auth/two-factor/disable",
+        "/api/auth/two-factor/verify-totp",
+        "/api/auth/two-factor/verify-backup-code",
+        "/api/auth/two-factor/generate-backup-codes",
+        "/api/auth/passkey/generate-register-options",
+        "/api/auth/passkey/verify-registration",
+        "/api/auth/passkey/generate-authenticate-options",
+        "/api/auth/passkey/verify-authentication",
+        "/api/auth/passkey/list-user-passkeys",
+        "/api/auth/passkey/delete-passkey",
       ]);
-      if (!enabled.has(path)) throw new HttpError(404, "Not found");
+      if (!enabled.has(path) && !/^\/api\/auth\/reset-password\/[^/]+$/.test(path))
+        throw new HttpError(404, "Not found");
       return await identity.handler(req);
     }
     const session = await identity.api.getSession({ headers: req.headers });
