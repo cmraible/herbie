@@ -1,6 +1,92 @@
 import { test, expect } from "@playwright/test";
 import { WorkspaceList, Members } from "../../src/contracts";
 import { register, createWorkspace, emailLink } from "./helpers";
+test("demotion fences concurrent invitations and concurrent acceptance admits the recipient once", async ({
+  page,
+  browser,
+}) => {
+  await register(page, "Race owner");
+  await createWorkspace(page, "Race team");
+  const workspace = WorkspaceList.parse(
+    await (await page.request.get("/api/workspaces")).json(),
+  )[0];
+  if (!workspace) throw new Error("Missing workspace");
+  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  try {
+    const pages = await Promise.all(contexts.map((context) => context.newPage()));
+    const admin = pages[0],
+      recipient = pages[1];
+    if (!admin || !recipient) throw new Error("Missing browser context");
+    const [adminEmail, recipientEmail] = await Promise.all([
+      register(admin, "Race admin"),
+      register(recipient, "Race recipient"),
+    ]);
+    const headers = { origin: "http://localhost:8790" };
+    const base = `/api/workspaces/${workspace.id}`;
+    expect(
+      (
+        await page.request.post(base + "/invitations", {
+          headers,
+          data: { email: adminEmail, role: "admin" },
+        })
+      ).status(),
+    ).toBe(201);
+    const adminInvite = new URL(
+      await emailLink(admin, adminEmail, "Workspace invitation"),
+    ).searchParams.get("invitation");
+    expect(
+      (
+        await admin.request.post(`/api/invitations/${adminInvite}/accept`, { headers, data: {} })
+      ).status(),
+    ).toBe(200);
+    const members = Members.parse(await (await page.request.get(base + "/members")).json());
+    const membership = members.find((member) => member.email === adminEmail);
+    if (!membership) throw new Error("Missing administrator");
+    const [invited, demoted] = await Promise.all([
+      admin.request.post(base + "/invitations", {
+        headers,
+        data: { email: recipientEmail, role: "member" },
+      }),
+      page.request.patch(base + "/members/" + membership.id, { headers, data: { role: "member" } }),
+    ]);
+    expect(demoted.status()).toBe(200);
+    expect([201, 403]).toContain(invited.status());
+    if (invited.status() === 201) {
+      const id = new URL(
+        await emailLink(recipient, recipientEmail, "Workspace invitation"),
+      ).searchParams.get("invitation");
+      expect(
+        (
+          await recipient.request.post(`/api/invitations/${id}/accept`, { headers, data: {} })
+        ).status(),
+      ).toBe(403);
+    }
+    expect((await recipient.request.get(base)).status()).toBe(403);
+    expect(
+      (
+        await page.request.post(base + "/invitations", {
+          headers,
+          data: { email: recipientEmail, role: "member" },
+        })
+      ).status(),
+    ).toBe(201);
+    const id = new URL(
+      await emailLink(recipient, recipientEmail, "Workspace invitation"),
+    ).searchParams.get("invitation");
+    const accepts = await Promise.all(
+      [0, 1].map(() =>
+        recipient.request.post(`/api/invitations/${id}/accept`, { headers, data: {} }),
+      ),
+    );
+    expect(accepts.map((result) => result.status()).sort()).toEqual([200, 409]);
+    const final = Members.parse(await (await page.request.get(base + "/members")).json());
+    expect(final.filter((member) => member.email === recipientEmail)).toHaveLength(1);
+    expect(final.filter((member) => member.role === "owner")).toHaveLength(1);
+    expect(final.find((member) => member.email === adminEmail)?.role).toBe("member");
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});
 test("an invited verified teammate joins once, cannot manage membership or other workspaces, and loses access when removed", async ({
   browser,
   page,
@@ -107,19 +193,14 @@ test("ownership cannot be demoted, removed, or granted through invitations", asy
   const owner = members[0];
   if (!owner) throw new Error("Missing owner");
   const path = "/api/workspaces/" + workspace.id + "/members/" + owner.id;
-  expect(
-    (
-      await page.request.patch(path, {
-        headers: { origin: "http://localhost:8790" },
-        data: { role: "member" },
-      })
-    ).status(),
-  ).toBe(409);
-  expect(
-    (
-      await page.request.delete(path, { headers: { origin: "http://localhost:8790" }, data: {} })
-    ).status(),
-  ).toBe(409);
+  const changes = await Promise.all([
+    page.request.patch(path, {
+      headers: { origin: "http://localhost:8790" },
+      data: { role: "member" },
+    }),
+    page.request.delete(path, { headers: { origin: "http://localhost:8790" }, data: {} }),
+  ]);
+  expect(changes.map((response) => response.status())).toEqual([409, 409]);
   expect(
     (
       await page.request.post("/api/workspaces/" + workspace.id + "/invitations", {

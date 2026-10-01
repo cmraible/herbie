@@ -37,9 +37,15 @@ test("verified owner creates a workspace and retains it after signing out and ba
   ).toBe(404);
   await createWorkspace(page, "Studio");
   await expect(page.getByText("Your role: owner")).toBeVisible();
+  const oldCookie = (await page.context().cookies())
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join("; ");
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   expect((await page.request.get("/api/workspaces")).status()).toBe(401);
+  expect(
+    (await page.request.get("/api/account", { headers: { cookie: oldCookie } })).status(),
+  ).toBe(401);
   await signIn(page, email);
   await expect(page.getByRole("heading", { name: "Studio", exact: true })).toBeVisible();
 });
