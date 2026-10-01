@@ -7,7 +7,15 @@
     "nodejs_compat"
   ],
   "observability": {
-    "enabled": false
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": false
+    }
   },
   "vars": {
     "APP_ORIGIN": "http://localhost:8787",

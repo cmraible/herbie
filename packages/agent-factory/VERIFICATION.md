@@ -50,3 +50,11 @@ Review corrections: bind GitHub state to the exact session; make repository sele
 Better Auth 1.7.7 schema was generated against its actual native-D1 configuration, including the magic-link plugin and persistent rate-limit table. The pinned dependency and generated SQL are committed together. The sender is replaceable; Mailgun is the selected sender, with US/EU routing, tracking disabled per message and sanitized delivery errors.
 
 Full compiled-Worker GitHub OAuth callback coverage exposed Workers global-fetch receiver binding; all fetch-injectable adapters now bind the default transport to globalThis. The callback now returns its expected 303, and magic-link callbacks return 302 through the common response wrapper. Mailgun transport tests use fakes only; no real email was sent.
+
+## Domain verification repair
+
+The old TXT decoder discarded plain-text DoH answers and extracted quoted substrings even when surrounded by unrelated data. A regression reproduced both behaviors. The decoder now preserves plain values and only decodes complete quoted-fragment sequences, while retaining exact record-owner/type/token checks. A real local D1 scenario rejects wrong owners and near-matching tokens, then provisions the exact proof with autojoin disabled.
+
+During diagnosis, a read-only production query confirmed the reported challenge was unexpired, unconsumed and matched the published value; no database data was changed. The workspace could not fetch the live DoH response, so the actual production failure cause was not yet confirmed. Minimal fixed-category failure logs and sanitized retryable DNS errors were added to distinguish resolver failure from absent proof. Automatic invocation logging and traces remain disabled; upstream status is validated before logging.
+
+Local verification: 29 unit/security tests, 10 D1/Worker integrations, package typecheck and Worker dry-run build passed. GitHub Actions reruns all checks on the pushed repair before deployment.

@@ -2,7 +2,7 @@
 
 All deployment runs in `.github/workflows/agent-factory.yml`. Do not deploy from a developer session. Trusted pushes to `work` and `main` run validation and then the `agent-factory-production` environment job; pull requests run validation without provider secrets. `workflow_dispatch` on those branches supports retry after configuration. Protect the deployment branches and restrict that environment to them. Never use `pull_request_target` to execute PR code with these secrets.
 
-The deploy job serializes updates, resolves or creates the named D1 database, applies pending committed migrations, deploys the Worker and SQLite Durable Object migration, and checks `/health`. Every deployment **forces `FACTORY_ENABLED=false`**, disables preview URLs and admits only explicitly listed email domains. Missing configuration fails before resource creation. No plan upgrade, Daytona VM allocation or inference occurs. Worker request logging is disabled to avoid storing magic-link query tokens.
+The deploy job serializes updates, resolves or creates the named D1 database, applies pending committed migrations, deploys the Worker and SQLite Durable Object migration, and checks `/health`. Every deployment **forces `FACTORY_ENABLED=false`**, disables preview URLs and admits only explicitly listed email domains. Missing configuration fails before resource creation. No plan upgrade, Daytona VM allocation or inference occurs. Automatic invocation logs and traces are disabled to avoid storing magic-link query tokens. Fixed DNS/verification error categories are persisted without DNS answers, tokens, headers or request bodies.
 
 ## Required GitHub Actions configuration
 

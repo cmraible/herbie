@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { Access } from '../src/adapters/auth.js';
-import { D1Companies, WorkspaceAdmin } from '../src/adapters/onboarding.js';
+import { D1Companies, DnsOverHttps, WorkspaceAdmin } from '../src/adapters/onboarding.js';
 import { CompanyOnboarding, type CompanyIdentity } from '../src/core/onboarding.js';
 import { Connections } from '../src/adapters/connections.js';
 import type { RepositoryGrant } from '../src/core/connections.js';
@@ -139,5 +139,23 @@ test('revoking the originating session invalidates GitHub state even after the s
     await db.prepare("DELETE FROM sessions WHERE token_hash='session'").run();
     await assert.rejects(c.complete('admin',state,'code','other-session'));
     assert.equal(calls,0);
+  } finally {await mf.dispose();}
+});
+
+test('plain DNS JSON TXT proof provisions a company only when owner and complete token match',async()=>{
+  const {db,mf}=await fixture();
+  try {
+    const person=identity('plain-dns');await new Access(db).signIn(person);
+    let answer:{name:string;type:number;data:string}[]=[];
+    const setup=new CompanyOnboarding(new D1Companies(db),new DnsOverHttps(async()=>Response.json({Status:0,Answer:answer})));
+    const record=await setup.begin(person,'Company');
+    answer=[{name:'attacker.example.',type:16,data:record.value}];
+    await assert.rejects(setup.verify(person),/TXT record/);
+    answer=[{name:record.name+'.',type:16,data:record.value+'wrong'}];
+    await assert.rejects(setup.verify(person),/TXT record/);
+    answer=[{name:record.name+'.',type:16,data:record.value}];
+    const result=await setup.verify(person);
+    assert.equal(await new Access(db).member(person.sub,result.workspace),'admin');
+    assert.equal(result.autojoinEnabled,false);
   } finally {await mf.dispose();}
 });

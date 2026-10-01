@@ -24,19 +24,39 @@ export class D1Companies implements CompanyStore {
     } catch { throw new OnboardingError('conflict', 'Verification expired or the company was registered concurrently. Refresh to continue.'); }
   }
 }
+function dnsUnavailable(reason: 'transport' | 'http' | 'json' | 'rcode', status?: number): never {
+  // Fixed categories only: DNS answers and bearer verification values never enter logs.
+  console.warn(JSON.stringify({event:'company_dns_lookup_failed',reason,status}));
+  throw new HttpError(503,'DNS lookup is temporarily unavailable. Please try verification again.');
+}
 export class DnsOverHttps implements DomainProof {
   constructor(private transport: typeof fetch = globalThis.fetch.bind(globalThis)) {}
   async txt(name: string) {
     const url = new URL('https://cloudflare-dns.com/dns-query'); url.searchParams.set('name',name); url.searchParams.set('type','TXT');
-    const response = await this.transport(url, { headers: { Accept: 'application/dns-json' }, signal: AbortSignal.timeout(10000), redirect: 'error' });
-    if (!response.ok) throw new Error('DNS resolver unavailable');
-    const data = await response.json() as { Status: number; Answer?: { name: string; type: number; data: string }[] };
+    let response:Response;
+    try { response = await this.transport(url, { headers: { Accept: 'application/dns-json' }, signal: AbortSignal.timeout(10000), redirect: 'error' }); }
+    catch { return dnsUnavailable('transport'); }
+    if (!response.ok) return dnsUnavailable('http',response.status);
+    let payload:unknown;
+    try { payload = await response.json(); } catch { return dnsUnavailable('json'); }
+    if (!payload || typeof payload !== 'object') return dnsUnavailable('json');
+    const data = payload as { Status?:unknown; Answer?:unknown };
+    if (typeof data.Status !== 'number' || !Number.isInteger(data.Status) || data.Status < 0 || data.Status > 4095) return dnsUnavailable('json');
     if (data.Status === 3) return []; // NXDOMAIN: propagation may be pending.
-    if (data.Status !== 0) throw new Error('DNS resolver could not verify the domain');
-    return (data.Answer ?? []).filter(a => a.type === 16 && a.name.toLowerCase().replace(/\.$/, '') === name.toLowerCase()).map(a => {
-      // DNS TXT strings may be split into adjacent quoted fragments.
-      try { return (a.data.match(/"(?:[^"\\]|\\.)*"/g) ?? []).map(part => JSON.parse(part) as string).join(''); }
-      catch { return ''; }
+    if (data.Status !== 0) return dnsUnavailable('rcode',data.Status);
+    const answers = data.Answer ?? [];
+    if (!Array.isArray(answers) || !answers.every((a:unknown) => {
+      if (!a || typeof a !== 'object') return false;
+      const record = a as Record<string,unknown>;
+      return typeof record.name === 'string' && typeof record.type === 'number' && typeof record.data === 'string';
+    })) return dnsUnavailable('json');
+    return (answers as {name:string;type:number;data:string}[]).filter(a => a.type === 16 && a.name.toLowerCase().replace(/\.$/, '') === name.toLowerCase()).flatMap(a => {
+      // DoH JSON providers return either plain TXT text or DNS presentation strings.
+      // Decode only a complete sequence of quoted fragments, never a substring.
+      if (!a.data.includes('"')) return [a.data];
+      if (!/^(?:"(?:[^"\\]|\\.)*"\s*)+$/.test(a.data)) return [];
+      try { return [(a.data.match(/"(?:[^"\\]|\\.)*"/g) ?? []).map(part => JSON.parse(part) as string).join('')]; }
+      catch { return []; }
     });
   }
 }

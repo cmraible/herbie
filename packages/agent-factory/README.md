@@ -42,7 +42,7 @@ Only `ALLOWED_EMAIL_DOMAINS` can receive a link or access the app; empty admits 
 
 Admins can enable verified domains, manage member roles/suspension with last-admin protection, and connect GitHub. GitHub App OAuth uses PKCE and expiring one-use state bound to the exact active login session; it separately proves GitHub org-admin or personal-owner authority. Admins choose provider-verified repositories; grants start disabled. Install the app with Contents/Pull requests/Issues write, Checks/Actions/Metadata read and **Organization Members read**. Existing-tenant admin recovery and provider secrets remain operator-managed.
 
-The email sender is an explicit adapter (`LoginEmail`); Mailgun is the selected sender. It requires a verified sender domain and Domain Sending Key. Delivery errors are handled without printing response bodies or links. Worker request logging is disabled because magic-link verification URLs carry credentials.
+The email sender is an explicit adapter (`LoginEmail`); Mailgun is the selected sender. It requires a verified sender domain and Domain Sending Key. Delivery errors are handled without printing response bodies or links. Automatic request logging and traces are disabled because magic-link verification URLs carry credentials. Persisted console logging is limited to fixed DNS/verification failure categories, without tokens or request data.
 
 ## GitHub Actions deployment
 
