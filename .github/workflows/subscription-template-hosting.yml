@@ -43,6 +43,7 @@ jobs:
     concurrency:
       group: subscription-hosting-${{ needs.identify.outputs.pr || 'production' }}
       cancel-in-progress: false
+      queue: max
     steps:
       # Control-plane code and dependencies always come from trusted main, never the PR.
       - uses: actions/checkout@v4

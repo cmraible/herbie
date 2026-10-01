@@ -7,13 +7,14 @@ permissions:
   pull-requests: read
 jobs:
   cleanup:
-    if: vars.SUBSCRIPTION_PREVIEW_ENABLED == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: subscription-template-preview
     concurrency:
       group: subscription-hosting-${{ github.event.pull_request.number }}
       cancel-in-progress: false
+      queue: max
     steps:
       # Never check out or run PR code in this privileged event.
       - uses: actions/checkout@v4
