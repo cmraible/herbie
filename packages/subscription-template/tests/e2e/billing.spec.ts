@@ -1,5 +1,70 @@
 import { test, expect } from "@playwright/test";
 import { register, createWorkspace } from "./helpers";
+import { z } from "zod";
+
+test("Stripe fixture deduplicates by idempotency key, not workspace metadata", async ({
+  request,
+}) => {
+  const workspace = crypto.randomUUID();
+  const create = async (key?: string, value: string = workspace) => {
+    const response = await request.post("http://127.0.0.1:8792/v1/customers", {
+      headers: key ? { "Idempotency-Key": key } : {},
+      form: { "metadata[workspace]": value },
+    });
+    return response;
+  };
+  const key = crypto.randomUUID();
+  const identity = async (response: Awaited<ReturnType<typeof create>>) =>
+    z.object({ id: z.string() }).parse(await response.json()).id;
+  const original = await identity(await create(key));
+  expect(await identity(await create(key))).toBe(original);
+  expect(await identity(await create(crypto.randomUUID()))).not.toBe(original);
+  expect(await identity(await create())).not.toBe(await identity(await create()));
+  expect((await create(key, "changed-" + workspace)).status()).toBe(400);
+});
+
+for (const operation of ["customers", "checkout/sessions"]) {
+  test(`checkout recovers after ${operation} succeeds but both responses time out`, async ({
+    page,
+  }) => {
+    test.setTimeout(65000);
+    const { WorkspaceList, Redirect } = await import("../../src/contracts");
+    await register(page, "Recovery owner");
+    await createWorkspace(page, "Recovery team");
+    const workspace = WorkspaceList.parse(
+      await (await page.request.get("/api/workspaces")).json(),
+    )[0];
+    if (!workspace) throw new Error("Missing workspace");
+    const path = `/api/workspaces/${workspace.id}/billing/checkout`;
+    const headers = { origin: "http://localhost:8790" };
+    expect(
+      (
+        await page.request.post("http://127.0.0.1:8792/fault", {
+          data: {
+            workspace: workspace.id,
+            path: "/v1/" + operation,
+            kind: "timeout_after_success",
+            remaining: 2,
+          },
+        })
+      ).status(),
+    ).toBe(200);
+    expect((await page.request.post(path, { headers, data: {}, timeout: 50000 })).status()).toBe(
+      500,
+    );
+    const recovered = await page.request.post(path, { headers, data: {} });
+    expect(recovered.status()).toBe(200);
+    expect(Redirect.parse(await recovered.json()).url).toContain("/checkout");
+    const state = z
+      .object({ customers: z.number(), sessions: z.number() })
+      .parse(
+        await (
+          await page.request.get("http://127.0.0.1:8792/resources?workspace=" + workspace.id)
+        ).json(),
+      );
+    expect(state).toEqual({ customers: 1, sessions: 1 });
+  });
+}
 
 test("workspace admins can open configured-plan checkout without redirect granting paid access", async ({
   page,
@@ -35,6 +100,11 @@ test("signed webhooks grant and revoke access from current Stripe state, safely 
     page.request.post(base + "/checkout", { headers, data: {} }),
   ]);
   expect(checkout.map((r) => r.status())).toEqual([200, 200]);
+  expect(
+    await (
+      await page.request.get("http://127.0.0.1:8792/resources?workspace=" + workspace.id)
+    ).json(),
+  ).toEqual({ customers: 1, sessions: 1 });
   const control = async (status: string, paid = true, price = "price_local") => {
     const response = await page.request.post("http://127.0.0.1:8792/control", {
       data: { workspace: workspace.id, status, paid, price },
@@ -62,6 +132,16 @@ test("signed webhooks grant and revoke access from current Stripe state, safely 
   expect((await deliver(payload("evt_bad"), "bad")).status()).toBe(400);
   expect(Billing.parse(await (await page.request.get(base)).json()).entitled).toBe(false);
   const event = payload("evt_" + crypto.randomUUID());
+  expect(
+    (
+      await page.request.post("http://127.0.0.1:8792/fault", {
+        data: { workspace: workspace.id, path: "/v1/subscriptions", kind: "error", remaining: 1 },
+      })
+    ).status(),
+  ).toBe(200);
+  expect((await deliver(event)).status()).toBe(500);
+  expect(Billing.parse(await (await page.request.get(base)).json()).entitled).toBe(false);
+  // The failed reconciliation must roll back the receipt so the same delivery can recover.
   const deliveries = await Promise.all([deliver(event), deliver(event)]);
   expect(deliveries.map((r) => r.status())).toEqual([200, 200]);
   await page.reload();
