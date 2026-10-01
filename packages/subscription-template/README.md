@@ -1,6 +1,6 @@
 # Subscription template
 
-An extractable pnpm package for a subscription product on Cloudflare Workers, Supabase Postgres, Better Auth and Stripe. [USE_CASES.md](USE_CASES.md) records acceptance criteria and evidence. [DEPLOYMENT.md](DEPLOYMENT.md) describes hosting prerequisites and trust boundaries.
+An extractable pnpm package for a subscription product on Cloudflare Workers, Supabase Postgres, Better Auth and Stripe. [USE_CASES.md](USE_CASES.md) records acceptance criteria; [QUALITY.md](QUALITY.md) records verification, measured coverage and remaining live checks. [DEPLOYMENT.md](DEPLOYMENT.md) describes hosting prerequisites and trust boundaries.
 
 ## Local development
 
@@ -18,6 +18,8 @@ pnpm typecheck
 pnpm lint
 pnpm format:check
 pnpm test
+pnpm test:coverage
+pnpm test:coverage:http
 pnpm api:generate
 ```
 
