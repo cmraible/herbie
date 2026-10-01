@@ -52,6 +52,31 @@ for (const operation of ["customers", "checkout/sessions"]) {
     expect((await page.request.post(path, { headers, data: {}, timeout: 50000 })).status()).toBe(
       500,
     );
+    if (operation === "customers") {
+      const { mock } = await import("node:test");
+      const { default: worker } = await import("../../src/worker");
+      const { testEnv } = await import("../../scripts/test-env");
+      const cookie = (await page.context().cookies())
+        .map((item) => `${item.name}=${item.value}`)
+        .join("; ");
+      mock.timers.enable({ apis: ["Date"], now: Date.now() + 24 * 3600000 });
+      try {
+        const stale = await worker.fetch(
+          new Request("http://localhost:8790" + path, {
+            method: "POST",
+            headers: { ...headers, cookie, "Content-Type": "application/json" },
+            body: "{}",
+          }),
+          { ...testEnv(), ASSETS: { fetch: async () => new Response("") } },
+        );
+        expect(stale.status).toBe(409);
+        expect(await stale.json()).toEqual({
+          error: "Uncertain billing operation requires operator reconciliation",
+        });
+      } finally {
+        mock.timers.reset();
+      }
+    }
     const recovered = await page.request.post(path, { headers, data: {} });
     expect(recovered.status()).toBe(200);
     expect(Redirect.parse(await recovered.json()).url).toContain("/checkout");
@@ -77,6 +102,36 @@ test("workspace admins can open configured-plan checkout without redirect granti
   await expect(page).toHaveURL(/127\.0\.0\.1:8792\/checkout/);
   await page.goto("/?checkout=success");
   await expect(page.getByText("Paid access: no", { exact: true })).toBeVisible();
+});
+
+test("an expired Checkout requires reconciliation before a new session is created", async ({
+  page,
+}) => {
+  const { WorkspaceList } = await import("../../src/contracts");
+  await register(page, "Expired checkout owner");
+  await createWorkspace(page, "Expired checkout team");
+  const workspace = WorkspaceList.parse(
+    await (await page.request.get("/api/workspaces")).json(),
+  )[0];
+  if (!workspace) throw new Error("Missing workspace");
+  const base = `/api/workspaces/${workspace.id}/billing`;
+  const options = { headers: { origin: "http://localhost:8790" }, data: {} };
+  expect((await page.request.post(base + "/checkout", options)).status()).toBe(200);
+  expect(
+    (
+      await page.request.post("http://127.0.0.1:8792/control", {
+        data: { workspace: workspace.id, status: "canceled", checkoutStatus: "expired" },
+      })
+    ).status(),
+  ).toBe(200);
+  expect((await page.request.post(base + "/checkout", options)).status()).toBe(409);
+  expect((await page.request.post(base + "/refresh", options)).status()).toBe(200);
+  expect((await page.request.post(base + "/checkout", options)).status()).toBe(200);
+  expect(
+    await (
+      await page.request.get("http://127.0.0.1:8792/resources?workspace=" + workspace.id)
+    ).json(),
+  ).toEqual({ customers: 1, sessions: 2 });
 });
 
 test("signed webhooks grant and revoke access from current Stripe state, safely replaying delayed events", async ({
@@ -112,10 +167,10 @@ test("signed webhooks grant and revoke access from current Stripe state, safely 
     return z.object({ customer: z.string() }).parse(await response.json()).customer;
   };
   const customer = await control("active");
-  const payload = (id: string) =>
+  const payload = (id: string, type = "customer.subscription.updated") =>
     JSON.stringify({
       id,
-      type: "customer.subscription.updated",
+      type,
       livemode: false,
       data: { object: { customer, status: "active" } },
     });
@@ -155,6 +210,14 @@ test("signed webhooks grant and revoke access from current Stripe state, safely 
   expect((await deliver(payload("evt_" + crypto.randomUUID()))).status()).toBe(200);
   expect((await deliver(event)).status()).toBe(200);
   expect(Billing.parse(await (await page.request.get(base)).json()).entitled).toBe(false);
+  await control("active", false);
+  for (const status of ["past_due", "unpaid", "paused"]) {
+    await control(status, false);
+    expect(
+      (await deliver(payload("evt_" + crypto.randomUUID(), "invoice.payment_failed"))).status(),
+    ).toBe(200);
+    expect(Billing.parse(await (await page.request.get(base)).json()).entitled).toBe(false);
+  }
   await control("active", false);
   expect((await page.request.post(base + "/refresh", { headers, data: {} })).status()).toBe(200);
   expect(Billing.parse(await (await page.request.get(base)).json()).entitled).toBe(false);

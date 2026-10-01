@@ -54,6 +54,7 @@ const server = createServer(async (req, res) => {
           status: z.string(),
           paid: z.boolean().default(true),
           price: z.string().default("price_local"),
+          checkoutStatus: z.enum(["open", "complete", "expired"]).optional(),
         })
         .parse(JSON.parse(raw));
       const matching = [...customers].filter(([, c]) => c.workspace === state.workspace);
@@ -65,6 +66,10 @@ const server = createServer(async (req, res) => {
         return;
       }
       states.set(customer, state);
+      if (state.checkoutStatus)
+        for (const session of sessions.values()) {
+          if (session.customer === customer) session.status = state.checkoutStatus;
+        }
       respond({ customer });
       return;
     }
