@@ -39,7 +39,7 @@ Checkout uses a server-configured recurring price. Only workspace administrators
 
 Customer mapping commits before downstream Checkout/Portal operations. Pending Checkout attempts retain stable idempotency keys. Uncertain operations older than 23 hours stop for operator reconciliation rather than relying on Stripe's finite key-retention window. Reconcile the customer/session in Stripe before editing a reservation; never clear an uncertain attempt blindly. Closed sessions can be cleared with **Refresh billing** after canonical state permits resubscription.
 
-Cached billing state is scoped by mode, price and a secret-key fingerprint. Changing any of those fails closed until an operator verifies and migrates the customer mapping; even key rotation requires this explicit reconciliation. Use separate databases/accounts for test and live. An administrator can refresh after a missed webhook; configure provider retries and monitor delivery failures. This milestone does not include a background billing reconciliation scheduler or an operator recovery UI.
+Paid access fails closed whenever billing configuration is incomplete, including a missing webhook signing secret; cached entitlement never overrides that policy. Cached billing state is scoped by mode, price and a secret-key fingerprint. Changing any of those fails closed until an operator verifies and migrates the customer mapping; even key rotation requires this explicit reconciliation. Use separate databases/accounts for test and live. An administrator can refresh after a missed webhook; configure provider retries and monitor delivery failures. This milestone does not include a background billing reconciliation scheduler or an operator recovery UI.
 
 ## Contracts and verification
 

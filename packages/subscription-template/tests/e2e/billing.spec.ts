@@ -102,7 +102,7 @@ test("signed webhooks grant and revoke access from current Stripe state, safely 
   }
 });
 
-test("cached entitlement fails closed after a plan, mode, or account-key change", async ({
+test("cached entitlement fails closed after configuration changes or webhook removal", async ({
   page,
 }) => {
   const { default: worker } = await import("../../src/worker");
@@ -142,6 +142,7 @@ test("cached entitlement fails closed after a plan, mode, or account-key change"
     { STRIPE_PRICE_ID: "price_changed" },
     { BILLING_MODE: "live" },
     { STRIPE_SECRET_KEY: "sk_test_other_account" },
+    { STRIPE_WEBHOOK_SECRET: "" },
   ]) {
     const response = await worker.fetch(
       new Request("http://localhost:8790" + path, { headers: { cookie } }),

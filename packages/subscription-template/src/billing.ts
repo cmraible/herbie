@@ -79,11 +79,11 @@ export async function billingRoute(
       [workspace],
     );
     const row = result.rows[0],
-      matches = !row || row.scope === scope;
+      enabled = billingEnabled(env) && (!row || row.scope === scope);
     return Response.json(
       Billing.parse({
-        enabled: billingEnabled(env) && matches,
-        ...(row && matches ? row : { status: "none", entitled: false }),
+        enabled,
+        ...(row && enabled ? row : { status: "none", entitled: false }),
       }),
     );
   }
