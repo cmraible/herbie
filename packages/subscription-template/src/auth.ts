@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { betterAuth } from "better-auth";
 import { organization, twoFactor, genericOAuth } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
@@ -91,9 +92,18 @@ export function authOptions(env: Omit<Env, "ASSETS">, pool: Pool) {
           ? [
               {
                 providerId: "chatgpt",
+                disableProviderLogout: true,
+                accountSubject: ({ profile }) =>
+                  "https://auth.openai.com:" +
+                  env.OPENAI_CLIENT_ID +
+                  ":" +
+                  z.string().min(1).parse(profile.sub),
                 clientId: env.OPENAI_CLIENT_ID,
                 ...(env.OPENAI_CLIENT_SECRET
-                  ? { clientSecret: env.OPENAI_CLIENT_SECRET }
+                  ? {
+                      clientSecret: env.OPENAI_CLIENT_SECRET,
+                      tokenEndpointAuth: { method: "client_secret_basic" as const },
+                    }
                   : { tokenEndpointAuth: { method: "none" as const } }),
                 discoveryUrl: "https://auth.openai.com/.well-known/openid-configuration",
                 scopes: ["openid", "profile", "email"],

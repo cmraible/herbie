@@ -1,4 +1,6 @@
 import { auth } from "./auth";
+import openapi from "../docs/openapi.json" with { type: "json" };
+import { enabledAuthPath } from "./auth-routes";
 import { database } from "./database";
 import type { Env } from "./env";
 import { Account, Workspace, WorkspaceList, CreateWorkspace, Configuration } from "./contracts";
@@ -8,6 +10,7 @@ import { billingRoute, billingWebhook } from "./billing";
 import { billingEnabled } from "./payments";
 async function route(req: Request, env: Env): Promise<Response> {
   const path = new URL(req.url).pathname;
+  if (path === "/api/openapi" && req.method === "GET") return Response.json(openapi);
   if (path === "/health") return Response.json({ ok: true });
   if (path === "/api/config")
     return Response.json(
@@ -32,28 +35,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (path === "/api/billing/webhook") return await billingWebhook(req, env, pool);
     const identity = auth(env, pool);
     if (path.startsWith("/api/auth/")) {
-      const enabled = new Set([
-        "/api/auth/sign-up/email",
-        "/api/auth/sign-in/email",
-        "/api/auth/verify-email",
-        "/api/auth/get-session",
-        "/api/auth/sign-out",
-        "/api/auth/request-password-reset",
-        "/api/auth/reset-password",
-        "/api/auth/two-factor/enable",
-        "/api/auth/two-factor/disable",
-        "/api/auth/two-factor/verify-totp",
-        "/api/auth/two-factor/verify-backup-code",
-        "/api/auth/two-factor/generate-backup-codes",
-        "/api/auth/passkey/generate-register-options",
-        "/api/auth/passkey/verify-registration",
-        "/api/auth/passkey/generate-authenticate-options",
-        "/api/auth/passkey/verify-authentication",
-        "/api/auth/passkey/list-user-passkeys",
-        "/api/auth/passkey/delete-passkey",
-      ]);
-      if (!enabled.has(path) && !/^\/api\/auth\/reset-password\/[^/]+$/.test(path))
-        throw new HttpError(404, "Not found");
+      if (!enabledAuthPath(path)) throw new HttpError(404, "Not found");
       return await identity.handler(req);
     }
     const session = await identity.api.getSession({ headers: req.headers });

@@ -12,10 +12,11 @@
     "format:check": "oxfmt --check .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "db:start": "supabase start",
-    "db:stop": "supabase stop",
+    "db:start": "docker compose -f compose.test.yml up -d --wait",
+    "db:stop": "docker compose -f compose.test.yml down",
     "db:migrate": "tsx scripts/migrate.ts",
-    "test:prepare": "tsx scripts/prepare.ts"
+    "test:prepare": "tsx scripts/prepare.ts",
+    "api:generate": "tsx scripts/openapi.ts"
   },
   "dependencies": {
     "@better-auth/passkey": "1.7.7",
@@ -27,16 +28,14 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "13.1.0",
     "@cloudflare/workers-types": "5.20261001.1",
-    "@electric-sql/pglite": "0.5.8",
-    "@electric-sql/pglite-socket": "0.2.11",
     "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
     "@types/pg": "8.23.1",
     "otplib": "13.5.0",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
-    "supabase": "2.119.0",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.1",

@@ -1,14 +1,13 @@
 // Test infrastructure only. Never included in the Worker bundle.
-import { PGlite } from "@electric-sql/pglite";
-import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createServer } from "node:http";
 import { z } from "zod";
-const db = await PGlite.create();
-const socket = new PGLiteSocketServer({ db, host: "127.0.0.1", port: 55432, maxConnections: 12 });
-await socket.start();
 const emails: { to: string[]; subject: string; text: string }[] = [];
 const server = createServer(async (req, res) => {
   try {
+    if (req.url === "/health") {
+      res.end("ready");
+      return;
+    }
     if (req.method === "POST" && req.url === "/emails") {
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
@@ -37,16 +36,6 @@ const server = createServer(async (req, res) => {
   }
 });
 server.listen(8791, "127.0.0.1");
-console.log("Local Postgres wire server and test-only email sink ready");
-async function stop() {
-  server.close();
-  await socket.stop();
-  await db.close();
-  process.exit(0);
-}
-process.on("SIGINT", () => {
-  void stop();
-});
-process.on("SIGTERM", () => {
-  void stop();
-});
+console.log("Loopback test-only email sink ready");
+process.on("SIGINT", () => server.close());
+process.on("SIGTERM", () => server.close());

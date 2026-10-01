@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "*.config.ts"]
 }

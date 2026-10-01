@@ -9,6 +9,7 @@ import {
   Workspace,
   Members,
   Confirmation,
+  Configuration,
   Billing,
   Redirect,
 } from "./contracts";
@@ -153,6 +154,18 @@ node("workspace").addEventListener("change", (e) => {
   }
 });
 async function start() {
+  const config = await api("/api/config", Configuration);
+  for (const provider of config.providers) {
+    const labels = { google: "Google", github: "GitHub", chatgpt: "ChatGPT" };
+    const button = element("button", "Continue with " + labels[provider]);
+    button.onclick = () => {
+      void client.signIn
+        .social({ provider, callbackURL: "/" + location.search })
+        .then(check)
+        .catch(report);
+    };
+    node("providers").append(button);
+  }
   if (new URL(location.href).searchParams.has("token")) {
     node("auth").hidden = true;
     node("reset").hidden = false;

@@ -41,6 +41,7 @@ export async function teamRoute(
   const path = new URL(req.url).pathname;
   const accept = /^\/api\/invitations\/([^/]+)\/accept$/.exec(path);
   if (accept && req.method === "POST") {
+    await body(req, z.object({}).strict());
     const id = z.string().parse(accept[1]);
     // Serialize acceptance with membership changes; the transaction also fences replay.
     const response = await transaction(pool, async (db) => {

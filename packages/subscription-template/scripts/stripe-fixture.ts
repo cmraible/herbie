@@ -16,6 +16,10 @@ const server = createServer(async (req, res) => {
     const raw = Buffer.concat(chunks).toString();
     const form = Object.fromEntries(new URLSearchParams(raw));
     const path = url.pathname;
+    if (path === "/health") {
+      res.end("ready");
+      return;
+    }
     res.setHeader("Content-Type", "application/json");
     const respond = (value: unknown) => res.end(JSON.stringify(value));
     if (path === "/control" && req.method === "POST") {
