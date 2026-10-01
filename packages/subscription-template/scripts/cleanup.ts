@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { pathToFileURL } from "node:url";
 import { management, findBranch, target, canCleanup } from "./hosting";
-async function cleanup() {
+export async function cleanup() {
   if (
     process.env.GITHUB_ACTIONS !== "true" ||
     process.env.GITHUB_EVENT_NAME !== "pull_request_target"
@@ -65,9 +66,10 @@ async function cleanup() {
   if (branch) await api(`/v1/branches/${branch.project_ref}`, "DELETE");
   console.log("Removed review resources for PR " + pr);
 }
-void cleanup().catch(() => {
-  console.error(
-    "Review cleanup failed; rerun the trusted cleanup job. No production resource was targeted.",
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  void cleanup().catch(() => {
+    console.error(
+      "Review cleanup failed; rerun the trusted cleanup job. No production resource was targeted.",
+    );
+    process.exitCode = 1;
+  });

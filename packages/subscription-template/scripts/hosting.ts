@@ -78,7 +78,12 @@ export async function reviewDatabase(
         with_data: false,
       }),
     );
-  if (branch.is_default || branch.parent_project_ref !== parent || branch.project_ref === parent)
+  if (
+    branch.name !== name ||
+    branch.is_default ||
+    branch.parent_project_ref !== parent ||
+    branch.project_ref === parent
+  )
     throw new Error("Invalid review branch response");
   const Details = z.object({
     ref: z.string(),
