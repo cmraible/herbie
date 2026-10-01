@@ -34,7 +34,7 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: Check types, conventions, and unit tests
-        run: pnpm --filter @herbie/subscription-template typecheck && pnpm --filter @herbie/subscription-template lint && pnpm --filter @herbie/subscription-template format:check && pnpm --filter @herbie/subscription-template test
+        run: pnpm --filter @herbie/subscription-template typecheck && pnpm --filter @herbie/subscription-template lint && pnpm --filter @herbie/subscription-template format:check && pnpm --filter @herbie/subscription-template test:coverage
       - name: Validate generated API contract
         run: pnpm --filter @herbie/subscription-template api:generate && pnpm --filter @herbie/subscription-template format && git diff --exit-code -- packages/subscription-template/docs/openapi.json
       - run: pnpm --filter @herbie/subscription-template exec playwright install --with-deps chromium
@@ -47,6 +47,13 @@ jobs:
         with:
           name: subscription-browser-results
           path: packages/subscription-template/playwright-report
+          retention-days: 7
+      - name: Preserve measured coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscription-unit-coverage
+          path: packages/subscription-template/coverage
           retention-days: 7
       - name: Preserve deployable assets
         uses: actions/upload-artifact@v4
