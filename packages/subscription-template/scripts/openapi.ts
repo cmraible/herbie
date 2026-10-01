@@ -76,12 +76,28 @@ try {
     const operation = {
       summary: endpoint.summary,
       security: endpoint.public ? [] : [{ session: [] }],
-      parameters: [...endpoint.path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
-        name: match[1],
-        in: "path",
-        required: true,
-        schema: { type: "string" },
-      })),
+      parameters: [
+        ...[...endpoint.path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
+          name: match[1],
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+        })),
+        ...(endpoint.method !== "get"
+          ? [
+              {
+                name: endpoint.path === "/api/billing/webhook" ? "Stripe-Signature" : "Origin",
+                in: "header",
+                required: true,
+                schema: { type: "string" },
+                description:
+                  endpoint.path === "/api/billing/webhook"
+                    ? "Stripe signature over the exact raw request body"
+                    : "Must equal the deployed application origin",
+              },
+            ]
+          : []),
+      ],
       ...(endpoint.input
         ? {
             requestBody: {

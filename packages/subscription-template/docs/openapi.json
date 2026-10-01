@@ -4381,7 +4381,17 @@
             "session": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -4606,6 +4616,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -4690,6 +4709,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -4769,6 +4797,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -4853,6 +4890,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "responses": {
@@ -4987,6 +5033,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -5059,6 +5114,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -5131,6 +5195,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal the deployed application origin"
           }
         ],
         "requestBody": {
@@ -5207,7 +5280,17 @@
       "post": {
         "summary": "Stripe signed event; raw JSON with Stripe-Signature required",
         "security": [],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stripe signature over the exact raw request body"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {

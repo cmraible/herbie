@@ -97,7 +97,7 @@ export async function teamRoute(
     );
     return Response.json(Workspace.parse({ ...result.rows[0], role }));
   }
-  if (resource === "members" && req.method === "GET") {
+  if (resource === "members" && !target && req.method === "GET") {
     const result = await pool.query<{
       id: string;
       userId: string;
@@ -110,7 +110,7 @@ export async function teamRoute(
     );
     return Response.json(Members.parse(result.rows));
   }
-  if (resource === "invitations" && req.method === "POST") {
+  if (resource === "invitations" && !target && req.method === "POST") {
     requireAdmin(role);
     const input = await body(req, Invite);
     if (input.role === "admin" && role !== "owner")

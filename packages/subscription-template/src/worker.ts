@@ -10,6 +10,11 @@ import { billingRoute, billingWebhook } from "./billing";
 import { billingEnabled } from "./payments";
 async function route(req: Request, env: Env): Promise<Response> {
   const path = new URL(req.url).pathname;
+  if (["/health", "/ready", "/api/config", "/api/openapi"].includes(path) && req.method !== "GET")
+    return Response.json(
+      { error: "Method not allowed" },
+      { status: 405, headers: { Allow: "GET" } },
+    );
   if (path === "/api/openapi" && req.method === "GET") return Response.json(openapi);
   if (path === "/health") return Response.json({ ok: true });
   if (path === "/ready" && req.method === "GET") {
