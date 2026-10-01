@@ -37,14 +37,30 @@ test("keyboard retries and repeated submits create one workspace and clear resol
   ).toHaveLength(1);
 });
 
-test("mobile workspace controls remain inside the viewport", async ({ page }, info) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await register(page, "Mobile keyboard user");
-  await page.getByLabel("Workspace name", { exact: true }).fill("Mobile workspace");
-  await page.getByLabel("Workspace name", { exact: true }).press("Enter");
-  await expect(page.getByRole("heading", { name: "Mobile workspace", exact: true })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("mobile.png"), fullPage: true });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
-});
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 1280, height: 800 },
+]) {
+  test(`workspace controls fit the ${viewport.width}px viewport and support keyboard navigation`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize(viewport);
+    await register(page, "Mobile keyboard user");
+    await page.getByLabel("Workspace name", { exact: true }).fill("Mobile workspace");
+    await page.getByLabel("Workspace name", { exact: true }).press("Enter");
+    await expect(
+      page.getByRole("heading", { name: "Mobile workspace", exact: true }),
+    ).toBeVisible();
+    const create = page.getByRole("button", { name: "Create workspace", exact: true });
+    await expect(create).toBeEnabled();
+    await page.getByLabel("Workspace name", { exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(create).toBeFocused();
+    const screenshot = info.outputPath(`viewport-${viewport.width}.png`);
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await info.attach("Workspace screenshot", { path: screenshot, contentType: "image/png" });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+}

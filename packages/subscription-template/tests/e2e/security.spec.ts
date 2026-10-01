@@ -108,6 +108,7 @@ test("password reset replaces the password, revokes other sessions, and consumes
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Welcome, Reset user" })).toBeVisible();
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     await page.goto(resetUrl);
     await page.getByLabel("New password", { exact: true }).fill(password + "-again");
     await page.getByRole("button", { name: "Save new password", exact: true }).click();
