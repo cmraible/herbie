@@ -1,0 +1,90 @@
+name: Subscription template hosting
+on:
+  workflow_run:
+    workflows: ['Subscription template']
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  identify:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.target.outputs.eligible }}
+      pr: ${{ steps.target.outputs.pr }}
+    steps:
+      - uses: actions/github-script@v7
+        id: target
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (run.path !== '.github/workflows/subscription-template.yml') return;
+            if (run.event === 'push' && run.head_branch === 'main') {
+              const branch = await github.rest.repos.getBranch({...context.repo, branch:'main'});
+              if (branch.data.commit.sha === run.head_sha) core.setOutput('eligible','true');
+              return;
+            }
+            if (run.event !== 'pull_request' || run.head_repository.id !== context.payload.repository.id) return;
+            const number = run.pull_requests[0]?.number;
+            if (!number) return;
+            const {data:pr} = await github.rest.pulls.get({...context.repo,pull_number:number});
+            if (pr.state !== 'open' || pr.head.sha !== run.head_sha || pr.head.repo.id !== context.payload.repository.id) return;
+            if (!['OWNER','MEMBER','COLLABORATOR'].includes(pr.author_association)) return;
+            core.setOutput('pr', String(number));
+            core.setOutput('eligible','true');
+  deploy:
+    needs: identify
+    if: needs.identify.outputs.eligible == 'true' && ((needs.identify.outputs.pr != '' && vars.SUBSCRIPTION_PREVIEW_ENABLED == 'true') || (needs.identify.outputs.pr == '' && vars.SUBSCRIPTION_PRODUCTION_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: ${{ needs.identify.outputs.pr != '' && 'subscription-template-preview' || 'subscription-template-production' }}
+    concurrency:
+      group: subscription-hosting-${{ needs.identify.outputs.pr || 'production' }}
+      cancel-in-progress: false
+    steps:
+      # Control-plane code and dependencies always come from trusted main, never the PR.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: subscription-build
+          path: /tmp/subscription-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Deploy validated artifact into isolated resources
+        working-directory: packages/subscription-template
+        run: pnpm exec tsx scripts/deploy.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+          ARTIFACT_DIR: /tmp/subscription-artifact
+          PR_NUMBER: ${{ needs.identify.outputs.pr }}
+          PREVIEW_ENABLED: ${{ vars.SUBSCRIPTION_PREVIEW_ENABLED }}
+          PRODUCTION_ENABLED: ${{ vars.SUBSCRIPTION_PRODUCTION_ENABLED }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PREVIEW_PROJECT_REF: ${{ vars.SUPABASE_PREVIEW_PROJECT_REF }}
+          SUPABASE_PRODUCTION_PROJECT_REF: ${{ vars.SUPABASE_PRODUCTION_PROJECT_REF }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+          EMAIL_API_URL: ${{ vars.EMAIL_API_URL }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GITHUB_CLIENT_ID: ${{ vars.OAUTH_GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          OPENAI_CLIENT_ID: ${{ vars.OPENAI_CLIENT_ID }}
+          OPENAI_CLIENT_SECRET: ${{ secrets.OPENAI_CLIENT_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_ID: ${{ vars.STRIPE_PRICE_ID }}
+          BILLING_MODE: ${{ vars.BILLING_MODE }}
