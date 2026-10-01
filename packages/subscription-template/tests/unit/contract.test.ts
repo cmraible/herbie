@@ -31,3 +31,28 @@ test("documented authentication schemes resolve and callbacks match the public a
   expect(document.paths["/api/auth/sign-in/email"].post.security).toEqual([]);
   expect(document.paths["/api/auth/sign-up/email"].post.security).toEqual([]);
 });
+
+test("auth contracts include coordinator rejections as well as Better Auth error bodies", () => {
+  const response = z.object({
+    content: z.object({
+      "application/json": z.object({
+        schema: z.object({
+          anyOf: z.array(
+            z.object({ properties: z.record(z.string(), z.unknown()).optional() }).passthrough(),
+          ),
+        }),
+      }),
+    }),
+  });
+  const operation = z
+    .object({
+      responses: z.record(z.string(), z.unknown()),
+      parameters: z.array(z.object({ name: z.string(), in: z.string(), required: z.boolean() })),
+    })
+    .parse(document.paths["/api/auth/sign-in/email"].post);
+  const alternatives = response.parse(operation.responses["403"]).content["application/json"].schema
+    .anyOf;
+  expect(alternatives.some((schema) => schema.properties?.error !== undefined)).toBe(true);
+  expect(alternatives.some((schema) => schema.properties?.message !== undefined)).toBe(true);
+  expect(operation.parameters).toContainEqual({ name: "Origin", in: "header", required: true });
+});

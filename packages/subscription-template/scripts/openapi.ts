@@ -61,10 +61,55 @@ try {
           .array(z.record(z.string(), z.unknown()))
           .parse(operation.parameters ?? [])
           .filter((p) => !(candidate.startsWith("/callback/") && p.in === "path"));
+        if (!["get", "head"].includes(method))
+          parameters.push({
+            name: "Origin",
+            in: "header",
+            required: true,
+            schema: { type: "string" },
+            description: "Must equal the deployed application origin",
+          });
+        const responses = z.record(z.string(), z.unknown()).parse(operation.responses ?? {});
+        for (const [status, rawResponse] of Object.entries(responses)) {
+          if (!/^[45]/.test(status)) continue;
+          const response = z.record(z.string(), z.unknown()).parse(rawResponse);
+          const content = z.record(z.string(), z.unknown()).parse(response.content ?? {});
+          const json = z.record(z.string(), z.unknown()).parse(content["application/json"] ?? {});
+          responses[status] = {
+            ...response,
+            content: {
+              ...content,
+              "application/json": {
+                ...json,
+                schema: {
+                  anyOf: [
+                    json.schema ?? z.toJSONSchema(z.object({ message: z.string() })),
+                    z.toJSONSchema(ErrorBody),
+                  ],
+                },
+              },
+            },
+          };
+        }
+        const rejection = {
+          description: "Authentication or coordinator rejection",
+          content: {
+            "application/json": {
+              schema: z.toJSONSchema(
+                z.union([
+                  ErrorBody,
+                  z.object({ message: z.string(), code: z.string().optional() }),
+                ]),
+              ),
+            },
+          },
+        };
+        for (const status of ["403", "500", "default"]) responses[status] ??= rejection;
         normalized[method] = {
           ...operation,
           operationId: method + full.replaceAll(/[^a-zA-Z0-9]/g, "_"),
           parameters,
+          responses,
           security:
             anonymous.has(candidate) || candidate.startsWith("/callback/") ? [] : [{ session: [] }],
         };
