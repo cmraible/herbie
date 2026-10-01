@@ -1,0 +1,8 @@
+# Copy to .dev.vars locally; use Worker secret bindings in hosted environments.
+GOOGLE_CLIENT_ID=your-google-client-id
+GITHUB_APP_ID=your-github-app-id
+GITHUB_APP_PRIVATE_KEY=your-pem-key
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+DAYTONA_API_KEY=your-coordinator-only-daytona-key
+OPENAI_API_KEY=your-service-openai-api-key
+RUN_TOKEN_SECRET=at-least-32-random-bytes

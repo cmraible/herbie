@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "herbie-agent-factory",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": { "APP_ORIGIN": "http://localhost:8787", "GOOGLE_CLIENT_ID": "configure-before-use", "DAYTONA_SNAPSHOT": "herbie-codex-vm", "CODEX_MODEL": "gpt-5.3-codex", "FACTORY_ENABLED": "false", "GITHUB_APP_ID": "configure-before-use" },
+  "d1_databases": [{ "binding": "DB", "database_name": "agent-factory", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "durable_objects": { "bindings": [{ "name": "GOALS", "class_name": "GoalCoordinator" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GoalCoordinator"] }],
+  "triggers": { "crons": ["*/5 * * * *"] }
+}
