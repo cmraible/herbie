@@ -33,3 +33,19 @@ export const Invite = z
   .strict();
 export const MembershipChange = z.object({ role: z.enum(["admin", "member"]) }).strict();
 export const Confirmation = z.object({ ok: z.literal(true) });
+export const Billing = z.object({
+  enabled: z.boolean(),
+  status: z.enum([
+    "none",
+    "incomplete",
+    "incomplete_expired",
+    "trialing",
+    "active",
+    "past_due",
+    "canceled",
+    "unpaid",
+    "paused",
+  ]),
+  entitled: z.boolean(),
+});
+export const Redirect = z.object({ url: z.url() });

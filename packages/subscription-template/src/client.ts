@@ -3,7 +3,15 @@ import { createAuthClient } from "better-auth/client";
 import { twoFactorClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { z } from "zod";
-import { Account, WorkspaceList, Workspace, Members, Confirmation } from "./contracts";
+import {
+  Account,
+  WorkspaceList,
+  Workspace,
+  Members,
+  Confirmation,
+  Billing,
+  Redirect,
+} from "./contracts";
 let mfaPending = false;
 const client = createAuthClient({
   plugins: [
@@ -98,6 +106,7 @@ async function load() {
     node("workspace-title").textContent = workspace.name;
     node("role").textContent = "Your role: " + workspace.role;
     await renderTeam(workspace, current);
+    await renderBilling(workspace, current);
   }
   await renderPasskeys();
   node("enable-totp").hidden = account.twoFactorEnabled;
@@ -339,3 +348,43 @@ handle("save-password", async () => {
   node("auth").hidden = false;
   message("Password updated. Sign in with your new password.");
 });
+
+async function renderBilling(workspace: z.infer<typeof Workspace>, current: number) {
+  const base = "/api/workspaces/" + workspace.id + "/billing";
+  const billing = await api(base, Billing);
+  if (current !== generation) return;
+  const section = node("billing");
+  section.replaceChildren(
+    element("h3", "Subscription"),
+    element("p", "Subscription status: " + billing.status),
+    element("p", "Paid access: " + (billing.entitled ? "yes" : "no")),
+  );
+  if (!billing.enabled) {
+    section.append(element("p", "Billing is not configured yet."));
+    return;
+  }
+  if (workspace.role === "member") return;
+  for (const [action, label] of [
+    ["checkout", "Subscribe"],
+    ["portal", "Manage billing"],
+  ]) {
+    const button = element("button", label);
+    button.onclick = () => {
+      button.disabled = true;
+      void api(base + "/" + action, Redirect, {})
+        .then((result) => location.assign(result.url))
+        .catch(report)
+        .finally(() => {
+          button.disabled = false;
+        });
+    };
+    section.append(button);
+  }
+  const refresh = element("button", "Refresh billing");
+  refresh.onclick = () => {
+    void api(base + "/refresh", Billing, {})
+      .then(load)
+      .catch(report);
+  };
+  section.append(refresh);
+}

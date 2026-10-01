@@ -1,10 +1,11 @@
-import { z } from "zod";
 import { auth } from "./auth";
 import { database } from "./database";
 import type { Env } from "./env";
 import { Account, Workspace, WorkspaceList, CreateWorkspace, Configuration } from "./contracts";
 import { HttpError, body } from "./http";
 import { teamRoute } from "./team";
+import { billingRoute, billingWebhook } from "./billing";
+import { billingEnabled } from "./payments";
 async function route(req: Request, env: Env): Promise<Response> {
   const path = new URL(req.url).pathname;
   if (path === "/health") return Response.json({ ok: true });
@@ -16,14 +17,19 @@ async function route(req: Request, env: Env): Promise<Response> {
           ...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? ["github"] : []),
           ...(env.OPENAI_CLIENT_ID ? ["chatgpt"] : []),
         ],
-        billingEnabled: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_ID),
+        billingEnabled: billingEnabled(env),
       }),
     );
   if (!path.startsWith("/api/")) return env.ASSETS.fetch(req);
-  if (!["GET", "HEAD"].includes(req.method) && req.headers.get("origin") !== env.APP_ORIGIN)
+  if (
+    path !== "/api/billing/webhook" &&
+    !["GET", "HEAD"].includes(req.method) &&
+    req.headers.get("origin") !== env.APP_ORIGIN
+  )
     throw new HttpError(403, "Origin rejected");
   const pool = database(env.DATABASE_URL);
   try {
+    if (path === "/api/billing/webhook") return await billingWebhook(req, env, pool);
     const identity = auth(env, pool);
     if (path.startsWith("/api/auth/")) {
       const enabled = new Set([
@@ -78,6 +84,8 @@ async function route(req: Request, env: Env): Promise<Response> {
         status: 201,
       });
     }
+    const billing = await billingRoute(req, env, pool, session.user.id);
+    if (billing) return billing;
     const team = await teamRoute(req, pool, env, session.user);
     if (team) return team;
     throw new HttpError(404, "Not found");
@@ -91,8 +99,7 @@ export default {
     try {
       response = await route(req, env);
     } catch (error) {
-      const status =
-        error instanceof HttpError ? error.status : error instanceof z.ZodError ? 400 : 500;
+      const status = error instanceof HttpError ? error.status : 500;
       response = Response.json(
         {
           error:
