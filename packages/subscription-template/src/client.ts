@@ -174,7 +174,9 @@ async function start() {
   const session = await client.getSession();
   if (session.data) await load();
 }
-void start().catch(report);
+void start()
+  .then(() => node("interface").removeAttribute("disabled"))
+  .catch(report);
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) {
   const item = document.createElement(tag);
   if (text) item.textContent = text;

@@ -1,5 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { register, signIn, createWorkspace, password } from "./helpers";
+test("sign-in waits for JavaScript initialization before accepting interaction", async ({
+  page,
+}) => {
+  const ready = Promise.withResolvers<void>();
+  await page.route("**/assets/*.js", async (route) => {
+    await ready.promise;
+    await route.continue();
+  });
+  try {
+    await page.goto("/", { waitUntil: "commit" });
+    const submit = page.locator('#account-form button[type="submit"]');
+    await expect(submit).toBeVisible();
+    await expect(submit.click({ trial: true, timeout: 500 })).rejects.toThrow(/Timeout/);
+  } finally {
+    ready.resolve();
+  }
+  await signIn(page, "missing-" + crypto.randomUUID() + "@example.test");
+  await expect(page.getByRole("alert")).not.toBeEmpty();
+  expect(new URL(page.url()).search).toBe("");
+});
 test("verified owner creates a workspace and retains it after signing out and back in", async ({
   page,
 }) => {
