@@ -12,6 +12,22 @@ async function route(req: Request, env: Env): Promise<Response> {
   const path = new URL(req.url).pathname;
   if (path === "/api/openapi" && req.method === "GET") return Response.json(openapi);
   if (path === "/health") return Response.json({ ok: true });
+  if (path === "/ready" && req.method === "GET") {
+    const pool = database(env.DATABASE_URL);
+    try {
+      // Validate required relations/columns and access without reading customer rows.
+      await pool.query('SELECT id,email FROM subscription_auth."user" LIMIT 0');
+      await pool.query(
+        "SELECT workspace,scope,checkout_attempt FROM subscription_billing.workspace LIMIT 0",
+      );
+      await pool.query("SELECT name,checksum FROM subscription_meta.migrations LIMIT 0");
+      return Response.json({ ok: true });
+    } catch {
+      throw new HttpError(503, "Service not ready");
+    } finally {
+      await pool.end();
+    }
+  }
   if (path === "/api/config")
     return Response.json(
       Configuration.parse({

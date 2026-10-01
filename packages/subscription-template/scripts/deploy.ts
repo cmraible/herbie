@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { migrate } from "./migrate";
-import { management, reviewDatabase, target, assertCurrentTarget } from "./hosting";
+import {
+  management,
+  reviewDatabase,
+  target,
+  assertCurrentTarget,
+  productionDatabase,
+} from "./hosting";
 function required(name: string) {
   const value = process.env[name];
   if (!value) throw new Error("Missing deployment setting: " + name);
@@ -82,7 +88,11 @@ async function deploy() {
     if (parent === required("SUPABASE_PRODUCTION_PROJECT_REF"))
       throw new Error("Review project must be separate from production");
     connection = await reviewDatabase(management(required("SUPABASE_ACCESS_TOKEN")), parent, name);
-  } else connection = required("DATABASE_URL");
+  } else
+    connection = productionDatabase(
+      required("DATABASE_URL"),
+      required("SUPABASE_PRODUCTION_PROJECT_REF"),
+    );
   const subdomainResponse = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${account}/workers/subdomain`,
     { headers: { Authorization: "Bearer " + cfToken }, signal: AbortSignal.timeout(30000) },
@@ -150,7 +160,7 @@ async function deploy() {
       CLOUDFLARE_API_TOKEN: cfToken,
       CI: "true",
     });
-    const response = await fetch(origin + "/health", { signal: AbortSignal.timeout(30000) });
+    const response = await fetch(origin + "/ready", { signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error("Hosted health check failed");
     z.object({ ok: z.literal(true) }).parse(await response.json());
     if (process.env.GITHUB_STEP_SUMMARY)

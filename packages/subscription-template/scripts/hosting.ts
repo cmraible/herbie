@@ -1,4 +1,28 @@
 import { z } from "zod";
+export function productionDatabase(connection: string, project: string) {
+  z.string()
+    .regex(/^[a-z0-9]{20}$/)
+    .parse(project);
+  const url = new URL(connection);
+  const direct = url.hostname === `db.${project}.supabase.co`;
+  const pooled =
+    /^[a-z0-9.-]+\.pooler\.supabase\.com$/.test(url.hostname) &&
+    decodeURIComponent(url.username).endsWith("." + project);
+  if (
+    !["postgres:", "postgresql:"].includes(url.protocol) ||
+    (!direct && !pooled) ||
+    !url.username ||
+    !url.password ||
+    url.pathname !== "/postgres" ||
+    !["", "5432", "6543"].includes(url.port) ||
+    url.hash ||
+    url.searchParams.get("sslmode") !== "verify-full" ||
+    [...url.searchParams.keys()].some((key) => key !== "sslmode") ||
+    url.searchParams.getAll("sslmode").length !== 1
+  )
+    throw new Error("Production database must use verified TLS to the approved Supabase project");
+  return connection;
+}
 export function target(pr: string | undefined) {
   if (pr === undefined) return "herbie-subscription-template";
   return (

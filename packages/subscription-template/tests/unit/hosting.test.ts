@@ -1,5 +1,27 @@
 import { test, expect } from "vitest";
-import { assertCurrentTarget, findBranch, target, canCleanup } from "../../scripts/hosting";
+import {
+  assertCurrentTarget,
+  findBranch,
+  target,
+  canCleanup,
+  productionDatabase,
+} from "../../scripts/hosting";
+test("production accepts only verified TLS to the explicitly selected Supabase project", () => {
+  const project = "abcdefghijklmnopqrst";
+  const direct = `postgresql://postgres:local-test@db.${project}.supabase.co:5432/postgres?sslmode=verify-full`;
+  expect(productionDatabase(direct, project)).toBe(direct);
+  const pooled = `postgresql://postgres.${project}:local-test@aws-0-us-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`;
+  expect(productionDatabase(pooled, project)).toBe(pooled);
+  for (const url of [
+    direct.replace("?sslmode=verify-full", ""),
+    direct.replace("verify-full", "require"),
+    direct + "&ssl=no-verify",
+    direct.replace(project, "anotherprojectrefxxxx"),
+    direct.replace(`db.${project}.supabase.co`, "localhost"),
+    pooled.replace(`postgres.${project}`, "postgres.wrongprojectrefxxxxx"),
+  ])
+    expect(() => productionDatabase(url, project)).toThrow();
+});
 test("a queued preview is rejected after closure, a new commit, or a fork substitution", async () => {
   const sha = "a".repeat(40),
     repository = "example/template";

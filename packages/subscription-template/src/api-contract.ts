@@ -25,6 +25,13 @@ export const endpoints: Endpoint[] = [
   { method: "get", path: "/health", summary: "Service health", output: Confirmation, public: true },
   {
     method: "get",
+    path: "/ready",
+    summary: "Database and schema readiness; 503 when unavailable",
+    output: Confirmation,
+    public: true,
+  },
+  {
+    method: "get",
     path: "/api/config",
     summary: "Enabled integrations",
     output: Configuration,
