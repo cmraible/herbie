@@ -2,10 +2,10 @@ export const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <style>body{font:16px system-ui;background:#f5f6f8;color:#17202a;max-width:960px;margin:40px auto;padding:0 20px}header{display:flex;align-items:center;justify-content:space-between}h1{letter-spacing:-1px}article,section{background:white;padding:24px;border:1px solid #dde2e8;border-radius:12px;margin:20px 0}label{display:block;margin:16px 0}textarea,input,select,button{font:inherit;padding:10px;border:1px solid #bbc4cf;border-radius:6px}textarea{box-sizing:border-box;width:100%;min-height:120px}button{cursor:pointer;background:#183e70;color:white}button.secondary{background:white;color:#183e70}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px system-ui}.muted{color:#586675}#error{color:#a32626}small{display:block}a{color:#183e70}</style>
 <script src="/app.js" defer></script></head><body>
 <header><h1>Herbie</h1><span>Agent factory</span></header><p class="muted">Shared goals. Focused improvements. Human-reviewed pull requests.</p><p id="error" role="alert"></p>
-<section id="signin"><h2>Sign in with your company account</h2><p>Sign in to join your company or verify a new company workspace.</p><form id="login-form"><label>Work email <input id="email" type="email" required autocomplete="email"></label><button>Email me a sign-in link</button></form><p id="login-status"></p></section>
-<main id="app" hidden><section id="onboarding" hidden><h2>Set up your company</h2><p id="onboarding-status"></p><form id="company-form"><label>Company name <input id="company-name" required maxlength="120"></label><button>Get DNS verification record</button></form><pre id="dns-record"></pre><button id="verify-domain" hidden>Verify DNS record</button><button id="join-company" hidden>Join company workspace</button><p>Existing companies cannot be claimed again. Ask your company administrator to enable access if needed.</p></section><label>Workspace <select id="workspace"></select></label><button id="logout" class="secondary">Sign out</button>
+<section id="signin"><h2>Sign in to Herbie</h2><p>Use your email to access your workspaces or create a private workspace.</p><form id="login-form"><label>Work email <input id="email" type="email" required autocomplete="email"></label><button>Email me a sign-in link</button></form><p id="login-status"></p></section>
+<main id="app" hidden><section id="onboarding" hidden><h2>Create your private workspace</h2><p>Only you will have access. People with the same email domain are not added automatically.</p><form id="workspace-form"><label>Workspace name <input id="workspace-name" required maxlength="120"></label><button id="create-workspace">Create workspace</button></form></section><label>Workspace <select id="workspace"></select></label><button id="logout" class="secondary">Sign out</button>
 <div id="workspace-content"><section><h2>New goal</h2><form id="new"><label>Connected repository <select id="repo" required></select></label><label>What should improve?<textarea id="prompt" required maxlength="20000" placeholder="Describe an outcome or a precise checklist"></textarea></label><label>Outstanding PR target <input id="target" type="number" value="1" min="1" max="10" required></label><button>Create goal</button></form></section>
-<div id="goals"></div><section id="settings" hidden><h2>Workspace settings</h2><p>Verify company access and connect repositories you administer. Connection grants are disabled until you explicitly enable them.</p><h3>Company domain</h3><div id="domains"></div><h3>GitHub</h3><button id="connect-github">Connect GitHub</button><a id="install-github" hidden>Install GitHub App</a><p id="github-status"></p><div id="github-proposals"></div><div id="connections"></div><h3>Members</h3><div id="members"></div><pre id="billing"></pre></section></div></main></body></html>`;
+<div id="goals"></div><section id="settings" hidden><h2>Workspace settings</h2><p>Manage members and connect repositories you administer. Connection grants are disabled until you explicitly enable them.</p><h3>GitHub</h3><button id="connect-github">Connect GitHub</button><a id="install-github" hidden>Install GitHub App</a><p id="github-status"></p><div id="github-proposals"></div><div id="connections"></div><h3>Members</h3><div id="members"></div><pre id="billing"></pre></section></div></main></body></html>`;
 export const script = `
 const $ = id => document.getElementById(id);
 let workspaces = [], workspace;
@@ -21,11 +21,7 @@ async function load() {
   $('workspace').replaceChildren(...data.map(w => { const o = el('option', w.name); o.value = w.id; return o; }));
   workspace = data.some(w=>w.id===workspace) ? workspace : data[0]?.id; $('workspace').value = workspace;
   $('signin').hidden = true; $('app').hidden = false;
-  const account = await api('/api/account');
   $('onboarding').hidden = data.length > 0; $('workspace-content').hidden = !workspace;
-  $('onboarding-status').textContent = account.companyRegistered ? 'Your company is already registered. Join if access is enabled, or contact its administrator.' : 'Prove control of ' + account.identity.domain + ' to create a new workspace.';
-  $('company-form').hidden = account.companyRegistered;
-  $('join-company').hidden = !account.autojoinEnabled;
   await refresh();
 }
 async function refresh() {
@@ -50,9 +46,7 @@ async function refresh() {
   }));
   const admin = workspaces.find(w => w.id === workspace)?.role === 'admin'; $('settings').hidden = !admin;
   if (admin) {
-    const [domains, members] = await Promise.all([api(base + '/domains'), api(base + '/members')]);
-    $('domains').replaceChildren(...domains.map(d => { const line = el('p', d.domain + ' — ' + (d.enabled ? 'Company autojoin enabled ' : 'Company autojoin disabled ')), button = el('button', d.enabled ? 'Disable autojoin' : 'Enable autojoin');
-      button.onclick = () => api(base + '/domains', { method: 'PATCH', body: JSON.stringify({domain:d.domain,enabled:!d.enabled}) }).then(refresh).catch(report); line.append(button); return line; }));
+    const members = await api(base + '/members');
     $('members').replaceChildren(...members.map(m => { const line = el('p', m.name + (m.email ? ' (' + m.email + ')' : '') + ' — ' + m.role + ', ' + m.status + ' ');
       const role = el('button', m.role === 'admin' ? 'Make member' : 'Make administrator'), status = el('button', m.status === 'active' ? 'Suspend access' : 'Restore access');
       role.onclick = () => api(base + '/members', { method:'PATCH', body:JSON.stringify({sub:m.sub,role:m.role==='admin'?'member':'admin',status:m.status}) }).then(load).catch(report);
@@ -71,9 +65,16 @@ async function refresh() {
       button.onclick = () => api(base + '/repositories', { method: 'PATCH', body: JSON.stringify({ repo: r.repo, enabled: !r.enabled }) }).then(refresh).catch(report); line.append(button); return line; }));
   }
 }
-$('company-form').onsubmit = e => { e.preventDefault(); api('/api/onboarding/company',{method:'POST',body:JSON.stringify({name:$('company-name').value})}).then(record=>{ $('dns-record').textContent='Add this DNS TXT record:\\nName: '+record.name+'\\nValue: '+record.value; $('verify-domain').hidden=false; }).catch(report); };
-$('verify-domain').onclick = () => api('/api/onboarding/verify',{method:'POST',body:'{}'}).then(()=>load()).catch(report);
-$('join-company').onclick = () => api('/api/onboarding/join',{method:'POST',body:'{}'}).then(()=>load()).catch(report);
+$('workspace-form').onsubmit = async e => {
+  e.preventDefault();
+  if ($('create-workspace').disabled) return;
+  $('create-workspace').disabled = true; $('error').textContent = '';
+  try {
+    const result = await api('/api/onboarding/workspace',{method:'POST',body:JSON.stringify({name:$('workspace-name').value})});
+    workspace = result.workspace; await load();
+  } catch(e) { report(e); }
+  finally { $('create-workspace').disabled = false; }
+};
 $('connect-github').onclick = () => api('/api/workspaces/'+workspace+'/github/start',{method:'POST',body:'{}'}).then(result=>{ location.assign(result.url); }).catch(report);
 $('workspace').onchange = () => { workspace = $('workspace').value; refresh().catch(report); };
 $('new').onsubmit = e => { e.preventDefault(); api('/api/workspaces/' + workspace + '/goals', { method: 'POST', body: JSON.stringify({ repo: $('repo').value, prompt: $('prompt').value, target: Number($('target').value) }) }).then(() => { $('prompt').value = ''; return refresh(); }).catch(report); };

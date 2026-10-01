@@ -18,7 +18,7 @@ The fake-adapter suite covers initial reservations, create/repair/merge-to-next 
 
 The production adapters are tested at their interfaces with transport/SDK fakes: VM-only enforcement, deterministic VM recovery, confirmed deletion, no master API key in uploaded job data, paginated progress-comment reconciliation, and problem-first draft PR metadata.
 
-Security tests cover webhook body authentication, scoped run tokens and branch-limited Git pushes. Better Auth native-D1 integration covers hashed magic links, concurrent single-use redemption, expiry, off-origin callbacks, private admission, session revocation and lack of workspace privileges from email verification alone. Compiled Worker tests redeem actual magic links through the Worker response wrapper. The compiled Worker test exercises workspace isolation, automatic member—not admin—join, disabled domains, colleague goal editing, admin-only connection settings, execution-disabled behavior, CAS/quota persistence, signed webhook replay and early CI inbox retention.
+Security tests cover webhook body authentication, scoped run tokens and branch-limited Git pushes. Better Auth native-D1 integration covers hashed magic links, concurrent single-use redemption, expiry, off-origin callbacks, private admission, session revocation and lack of workspace privileges from email verification alone. Compiled Worker tests redeem actual magic links through the Worker response wrapper. The compiled Worker test exercises workspace isolation, disabled domain-based autojoin, private creation and retired DNS routes, colleague goal editing, admin-only connection settings, execution-disabled behavior, CAS/quota persistence, signed webhook replay and early CI inbox retention.
 
 ## Standards review
 
@@ -58,3 +58,9 @@ The old TXT decoder discarded plain-text DoH answers and extracted quoted substr
 During diagnosis, a read-only production query confirmed the reported challenge was unexpired, unconsumed and matched the published value; no database data was changed. The workspace could not fetch the live DoH response, so the actual production failure cause was not yet confirmed. Minimal fixed-category failure logs and sanitized retryable DNS errors were added to distinguish resolver failure from absent proof. Automatic invocation logging and traces remain disabled; upstream status is validated before logging.
 
 Local verification: 29 unit/security tests, 10 D1/Worker integrations, package typecheck and Worker dry-run build passed. GitHub Actions reruns all checks on the pushed repair before deployment.
+
+## Private workspace revision
+
+DNS onboarding is superseded by private workspace creation. Local D1 tests exercise concurrent/repeated creation, same-domain isolation even with a legacy enabled domain, pending DNS challenges, preservation of existing members, suspension/deletion/demotion on retries, and last-admin protection. Compiled Worker tests redeem actual magic links, enforce authentication and origin checks on creation, reject retired domain routes and preserve existing goal/GitHub authorization. UI-script tests exercise successful creation, duplicate-click suppression, workspace selection and retry after failure against a minimal DOM/HTTP boundary; these are not full browser tests.
+
+The additive `0004` migration preserves all existing data. No automatic migration assigns pending DNS claimants to company workspaces. Autonomous execution remains disabled. Live provider execution, delivery contracts and full browser smoke testing remain separate prerequisites.

@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { Access } from '../src/adapters/auth.js';
-import { D1Companies, DnsOverHttps, WorkspaceAdmin } from '../src/adapters/onboarding.js';
-import { CompanyOnboarding, type CompanyIdentity } from '../src/core/onboarding.js';
+import { PrivateWorkspaces, WorkspaceAdmin } from '../src/adapters/onboarding.js';
+import { type CompanyIdentity } from '../src/core/onboarding.js';
 import { Connections } from '../src/adapters/connections.js';
 import type { RepositoryGrant } from '../src/core/connections.js';
 async function fixture() {
   const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default { fetch(){ return new Response("test") } }',d1Databases:{DB:'onboarding'}}));
   const db=await mf.getD1Database('DB');
-  for (const file of ['0001_factory.sql','0002_onboarding.sql']) {
+  for (const file of ['0001_factory.sql','0002_onboarding.sql','0004_private_workspaces.sql']) {
     const sql=await readFile('migrations/'+file,'utf8');
     await db.exec(sql.replace(/^--.*$/gm,'').split(';').map(s=>s.trim().replaceAll('\n',' ')).filter(Boolean).join(';\n')+';');
   }
@@ -18,57 +18,61 @@ async function fixture() {
   return {db,mf};
 }
 const identity=(sub:string,domain='company.example'):CompanyIdentity=>({sub,domain,name:sub,email:sub+'@'+domain});
-test('self-service company lifecycle: verified email identity, DNS proof, disabled domain, explicit enable, colleague autojoin',async()=>{
+test('private workspace creation is idempotent, isolated by identity, and never claims a company domain',async()=>{
   const {db,mf}=await fixture();
   try {
-    const access=new Access(db), admin=new WorkspaceAdmin(db), alice=identity('alice');
+    const access=new Access(db), setup=new PrivateWorkspaces(db), alice=identity('alice'),bob=identity('bob');
+    await access.signIn(alice); await access.signIn(bob);
+    await db.exec("INSERT INTO workspaces(id,name) VALUES('legacy','Legacy');\nINSERT INTO company_domains VALUES('company.example','legacy',1,1);\nINSERT INTO members(workspace,sub,role) VALUES('legacy','existing','admin');");
     await access.signIn(alice);
+    await assert.rejects(access.member('alice','legacy'));
+    const results=await Promise.all(Array.from({length:5},()=>setup.create(alice.sub,' Alice workspace ')));
+    const workspace=results[0].workspace;
+    assert.ok(results.every(r=>r.workspace===workspace));
+    assert.equal(await access.member('alice',workspace),'admin');
+    assert.equal((await setup.create('alice','Different name')).workspace,workspace);
+    assert.equal((await db.prepare('SELECT name FROM workspaces WHERE id=?').bind(workspace).first<{name:string}>())!.name,'Alice workspace');
+    const other=await setup.create(bob.sub,'Bob workspace');
+    assert.notEqual(other.workspace,workspace);
+    await assert.rejects(access.member('bob',workspace));
+    await assert.rejects(access.member('alice',other.workspace));
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM workspaces').first<{n:number}>())!.n,3);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM workspace_audit').first<{n:number}>())!.n,2);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM company_domains').first<{n:number}>())!.n,1);
+    assert.equal(await access.member('existing','legacy'),'admin');
+  } finally {await mf.dispose();}
+});
+test('pending DNS setup does not block private creation and retries never restore revoked access',async()=>{
+  const {db,mf}=await fixture();
+  try {
+    const access=new Access(db), setup=new PrivateWorkspaces(db), person=identity('pending');
+    await access.signIn(person);
+    await db.prepare('INSERT INTO domain_challenges(id,sub,domain,workspace,name,token,expires) VALUES(?,?,?,?,?,?,?)').bind('challenge',person.sub,person.domain,'old-workspace','Old company','test-only',Date.now()+60000).run();
+    const {workspace}=await setup.create(person.sub,'Private');
+    assert.equal(await access.member(person.sub,workspace),'admin');
+    await db.prepare("UPDATE members SET status='suspended' WHERE workspace=?").bind(workspace).run();
+    await assert.rejects(setup.create(person.sub,'Restore'),{status:403});
+    await access.signIn(person);
+    await assert.rejects(access.member(person.sub,workspace));
+    await db.prepare('DELETE FROM members WHERE workspace=?').bind(workspace).run();
+    await assert.rejects(setup.create(person.sub,'Restore'),{status:403});
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM members').first<{n:number}>())!.n,0);
-    let records:string[]=[];
-    const setup=new CompanyOnboarding(new D1Companies(db),{async txt(){return records;}});
-    const record=await setup.begin(alice,'Example company');
-    await assert.rejects(setup.verify(alice),/TXT record/);
-    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM workspaces').first<{n:number}>())!.n,0);
-    records=[record.value]; const created=await setup.verify(alice);
-    assert.equal(await access.member('alice',created.workspace),'admin');
-    await access.signIn(identity('colleague'));
-    await assert.rejects(access.member('colleague',created.workspace));
-    await admin.setDomain('alice',created.workspace,'company.example',true);
-    await access.signIn(identity('colleague'));
-    assert.equal(await access.member('colleague',created.workspace),'member');
-    await assert.rejects(admin.setDomain('colleague',created.workspace,'company.example',false));
-    await admin.setMember('alice',created.workspace,'colleague','member','suspended');
-    await access.signIn(identity('colleague'));
-    await assert.rejects(access.member('colleague',created.workspace));
-    await assert.rejects(admin.setMember('alice',created.workspace,'alice','member','active'),/last administrator/);
-    await assert.rejects(setup.begin(identity('colleague'),'Take over'),/already/);
-    await assert.rejects(setup.verify(alice),/expired|registered/);
-  } finally {await mf.dispose();}
-});
-test('concurrent DNS-proven claims cannot create duplicate tenants or assign both claimants as admin',async()=>{
-  const {db,mf}=await fixture();
-  try {
-    const access=new Access(db), a=identity('a'),b=identity('b'); await access.signIn(a); await access.signIn(b);
-    const records:string[]=[]; const setup=new CompanyOnboarding(new D1Companies(db),{async txt(){return records;}});
-    records.push((await setup.begin(a,'A')).value,(await setup.begin(b,'B')).value);
-    const results=await Promise.allSettled([setup.verify(a),setup.verify(b)]);
-    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+    assert.equal((await db.prepare('SELECT consumed FROM domain_challenges').first<{consumed:number}>())!.consumed,0);
+    await assert.rejects(setup.create('unknown','Unauthorized'),{status:401});
+    await assert.rejects(setup.create(person.sub,'   '),{status:400});
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM workspaces').first<{n:number}>())!.n,1);
-    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM members WHERE role='admin'").first<{n:number}>())!.n,1);
   } finally {await mf.dispose();}
 });
-test('DNS challenges bind verified identity, expire, and cannot reclaim pre-existing disabled tenants',async()=>{
+test('private workspace retries preserve demotion and last-admin protection',async()=>{
   const {db,mf}=await fixture();
   try {
-    const a=identity('a'),b=identity('b'); const access=new Access(db); await access.signIn(a);await access.signIn(b);
-    let now=Date.now(); const store=new D1Companies(db); let records:string[]=[];
-    const setup=new CompanyOnboarding(store,{async txt(){return records;}},()=>now);
-    records=[(await setup.begin(a,'A')).value];
-    await assert.rejects(setup.verify(b),/expired/);
-    now+=25*3600000;await assert.rejects(setup.verify(a),/expired/);
-    await db.exec("INSERT INTO workspaces(id,name) VALUES('existing','Existing');\nINSERT INTO company_domains VALUES('company.example','existing',1,0);");
-    await assert.rejects(setup.begin(b,'B'),/already/);
-    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM members WHERE workspace='existing'").first<{n:number}>())!.n,0);
+    await new Access(db).signIn(identity('owner'));
+    const setup=new PrivateWorkspaces(db),admin=new WorkspaceAdmin(db),{workspace}=await setup.create('owner','Private');
+    await assert.rejects(admin.setMember('owner',workspace,'owner','member','active'),/last administrator/);
+    await db.prepare("INSERT INTO members(workspace,sub,role) VALUES(?,'second','admin')").bind(workspace).run();
+    await admin.setMember('second',workspace,'owner','member','active');
+    assert.equal((await setup.create('owner','Again')).workspace,workspace);
+    assert.equal(await new Access(db).member('owner',workspace),'member');
   } finally {await mf.dispose();}
 });
 test('GitHub state is bound, expiring and single-use; only selected verified repositories can be connected',async()=>{
@@ -139,23 +143,5 @@ test('revoking the originating session invalidates GitHub state even after the s
     await db.prepare("DELETE FROM sessions WHERE token_hash='session'").run();
     await assert.rejects(c.complete('admin',state,'code','other-session'));
     assert.equal(calls,0);
-  } finally {await mf.dispose();}
-});
-
-test('plain DNS JSON TXT proof provisions a company only when owner and complete token match',async()=>{
-  const {db,mf}=await fixture();
-  try {
-    const person=identity('plain-dns');await new Access(db).signIn(person);
-    let answer:{name:string;type:number;data:string}[]=[];
-    const setup=new CompanyOnboarding(new D1Companies(db),new DnsOverHttps(async()=>Response.json({Status:0,Answer:answer})));
-    const record=await setup.begin(person,'Company');
-    answer=[{name:'attacker.example.',type:16,data:record.value}];
-    await assert.rejects(setup.verify(person),/TXT record/);
-    answer=[{name:record.name+'.',type:16,data:record.value+'wrong'}];
-    await assert.rejects(setup.verify(person),/TXT record/);
-    answer=[{name:record.name+'.',type:16,data:record.value}];
-    const result=await setup.verify(person);
-    assert.equal(await new Access(db).member(person.sub,result.workspace),'admin');
-    assert.equal(result.autojoinEnabled,false);
   } finally {await mf.dispose();}
 });

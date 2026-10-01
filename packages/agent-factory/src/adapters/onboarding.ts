@@ -1,77 +1,33 @@
-import { type CompanyIdentity, type CompanyStore, type DomainChallenge, type DomainProof, OnboardingError } from '../core/onboarding.js';
-import { HttpError } from './auth.js';
-export class D1Companies implements CompanyStore {
+import type { CompanyIdentity } from '../core/onboarding.js';
+import { Access, hash, HttpError } from './auth.js';
+
+export class PrivateWorkspaces {
   constructor(private db: D1Database) {}
-  async domainExists(domain: string) { return Boolean(await this.db.prepare('SELECT 1 FROM company_domains WHERE domain=?').bind(domain).first()); }
-  async challenge(sub: string, domain: string) {
-    return await this.db.prepare('SELECT id,sub,domain,workspace,name,token,expires FROM domain_challenges WHERE sub=? AND domain=? AND consumed=0').bind(sub, domain).first<DomainChallenge>() ?? undefined;
-  }
-  async saveChallenge(c: DomainChallenge) {
-    await this.db.prepare(`INSERT INTO domain_challenges(id,sub,domain,workspace,name,token,expires) VALUES(?,?,?,?,?,?,?)
-      ON CONFLICT(sub,domain) DO UPDATE SET id=excluded.id,workspace=excluded.workspace,name=excluded.name,token=excluded.token,expires=excluded.expires,consumed=0 WHERE domain_challenges.expires<?`)
-      .bind(c.id,c.sub,c.domain,c.workspace,c.name,c.token,c.expires,Date.now()).run();
-  }
-  async provision(c: DomainChallenge, now: number) {
-    try {
-      const results = await this.db.batch([
-        this.db.prepare('INSERT INTO workspaces(id,name) SELECT workspace,name FROM domain_challenges WHERE id=? AND sub=? AND expires>? AND consumed=0').bind(c.id,c.sub,now),
-        this.db.prepare('INSERT INTO company_domains(domain,workspace,verified_at,enabled) SELECT ?,id,?,0 FROM workspaces WHERE id=?').bind(c.domain,now,c.workspace),
-        this.db.prepare("INSERT INTO members(workspace,sub,role) SELECT id,?,'admin' FROM workspaces WHERE id=?").bind(c.sub,c.workspace),
-        this.db.prepare('INSERT INTO workspace_audit(workspace,actor,action,detail,at) SELECT id,?,?,?,? FROM workspaces WHERE id=?').bind(c.sub,'company.verified',c.domain,now,c.workspace),
-        this.db.prepare('UPDATE domain_challenges SET consumed=1 WHERE id=?').bind(c.id),
-      ]);
-      if (!results[0].meta.changes) throw new Error();
-    } catch { throw new OnboardingError('conflict', 'Verification expired or the company was registered concurrently. Refresh to continue.'); }
+  async create(sub: string, name: string) {
+    if (!name.trim() || name.length > 120) throw new HttpError(400,'Workspace name must contain 1–120 characters');
+    await new WorkspaceAdmin(this.db).identity(sub);
+    const workspace = 'private-' + await hash(sub);
+    // D1 batches are atomic. The receipt is inserted last, so every earlier write
+    // happens only on the first creation. Retries cannot restore revoked membership.
+    await this.db.batch([
+      this.db.prepare('INSERT INTO workspaces(id,name) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM private_workspaces WHERE sub=?)').bind(workspace,name.trim(),sub),
+      this.db.prepare("INSERT INTO members(workspace,sub,role) SELECT ?,?,'admin' WHERE NOT EXISTS(SELECT 1 FROM private_workspaces WHERE sub=?)").bind(workspace,sub,sub),
+      this.db.prepare("INSERT INTO workspace_audit(workspace,actor,action,detail,at) SELECT ?,?,'workspace.created','private',? WHERE NOT EXISTS(SELECT 1 FROM private_workspaces WHERE sub=?)").bind(workspace,sub,Date.now(),sub),
+      this.db.prepare('INSERT OR IGNORE INTO private_workspaces(sub,workspace) VALUES(?,?)').bind(sub,workspace),
+    ]);
+    const receipt = await this.db.prepare('SELECT workspace FROM private_workspaces WHERE sub=?').bind(sub).first<{workspace:string}>();
+    if (!receipt) throw new HttpError(500,'Workspace creation could not be confirmed');
+    await new Access(this.db).member(sub,receipt.workspace);
+    return { workspace: receipt.workspace };
   }
 }
-function dnsUnavailable(reason: 'transport' | 'http' | 'json' | 'rcode', status?: number): never {
-  // Fixed categories only: DNS answers and bearer verification values never enter logs.
-  console.warn(JSON.stringify({event:'company_dns_lookup_failed',reason,status}));
-  throw new HttpError(503,'DNS lookup is temporarily unavailable. Please try verification again.');
-}
-export class DnsOverHttps implements DomainProof {
-  constructor(private transport: typeof fetch = globalThis.fetch.bind(globalThis)) {}
-  async txt(name: string) {
-    const url = new URL('https://cloudflare-dns.com/dns-query'); url.searchParams.set('name',name); url.searchParams.set('type','TXT');
-    let response:Response;
-    try { response = await this.transport(url, { headers: { Accept: 'application/dns-json' }, signal: AbortSignal.timeout(10000), redirect: 'error' }); }
-    catch { return dnsUnavailable('transport'); }
-    if (!response.ok) return dnsUnavailable('http',response.status);
-    let payload:unknown;
-    try { payload = await response.json(); } catch { return dnsUnavailable('json'); }
-    if (!payload || typeof payload !== 'object') return dnsUnavailable('json');
-    const data = payload as { Status?:unknown; Answer?:unknown };
-    if (typeof data.Status !== 'number' || !Number.isInteger(data.Status) || data.Status < 0 || data.Status > 4095) return dnsUnavailable('json');
-    if (data.Status === 3) return []; // NXDOMAIN: propagation may be pending.
-    if (data.Status !== 0) return dnsUnavailable('rcode',data.Status);
-    const answers = data.Answer ?? [];
-    if (!Array.isArray(answers) || !answers.every((a:unknown) => {
-      if (!a || typeof a !== 'object') return false;
-      const record = a as Record<string,unknown>;
-      return typeof record.name === 'string' && typeof record.type === 'number' && typeof record.data === 'string';
-    })) return dnsUnavailable('json');
-    return (answers as {name:string;type:number;data:string}[]).filter(a => a.type === 16 && a.name.toLowerCase().replace(/\.$/, '') === name.toLowerCase()).flatMap(a => {
-      // DoH JSON providers return either plain TXT text or DNS presentation strings.
-      // Decode only a complete sequence of quoted fragments, never a substring.
-      if (!a.data.includes('"')) return [a.data];
-      if (!/^(?:"(?:[^"\\]|\\.)*"\s*)+$/.test(a.data)) return [];
-      try { return [(a.data.match(/"(?:[^"\\]|\\.)*"/g) ?? []).map(part => JSON.parse(part) as string).join('')]; }
-      catch { return []; }
-    });
-  }
-}
+
 export class WorkspaceAdmin {
   constructor(private db: D1Database) {}
   async identity(sub: string): Promise<CompanyIdentity> {
     const identity = await this.db.prepare('SELECT sub,domain,name,email FROM identities WHERE sub=?').bind(sub).first<CompanyIdentity>();
-    if (!identity) throw new HttpError(401, 'Sign in again to verify your company identity');
+    if (!identity) throw new HttpError(401, 'Sign in again to verify your identity');
     return identity;
-  }
-  async setDomain(actor: string, workspace: string, domain: string, enabled: boolean) {
-    const result = await this.db.prepare(`UPDATE company_domains SET enabled=? WHERE workspace=? AND domain=? AND verified_at>0
-      AND EXISTS(SELECT 1 FROM members WHERE workspace=? AND sub=? AND role='admin' AND status='active')`).bind(Number(enabled),workspace,domain,workspace,actor).run();
-    if (!result.meta.changes) throw new HttpError(403,'Verified domain administrator access required');
-    await this.audit(workspace,actor,'domain.enabled',JSON.stringify({domain,enabled}));
   }
   async setMember(actor: string, workspace: string, sub: string, role: string, status: string) {
     if (!['admin','member'].includes(role) || !['active','suspended'].includes(status)) throw new HttpError(400,'Invalid member settings');

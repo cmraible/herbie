@@ -9,7 +9,6 @@ import { json, string } from './http.js';
 import { receiveWebhook, processDelivery } from './webhooks.js';
 import { gitProxy, modelProxy } from './proxy.js';
 import { onboardingRoute } from './onboarding.js';
-import { OnboardingError } from '../core/onboarding.js';
 import { html, script } from './ui.js';
 export { GoalCoordinator } from './coordinator.js';
 
@@ -93,9 +92,8 @@ export default {
       response.headers.set('Cache-Control', 'no-store'); response.headers.set('X-Content-Type-Options', 'nosniff');
       response.headers.set('Referrer-Policy', 'no-referrer'); return response;
     } catch (e) {
-      const status = e instanceof HttpError ? e.status : e instanceof OnboardingError ? ({invalid:400,conflict:409,pending:422,expired:410}[e.code]) : 500;
-      if (new URL(req.url).pathname === '/api/onboarding/verify') console.warn(JSON.stringify({event:'company_domain_verification_failed',status,reason:e instanceof OnboardingError ? e.code : 'request_error'}));
-      return Response.json({ error: e instanceof HttpError || e instanceof OnboardingError ? e.message : 'Operation failed; please retry or contact your administrator' }, {
+      const status = e instanceof HttpError ? e.status : 500;
+      return Response.json({ error: e instanceof HttpError ? e.message : 'Operation failed; please retry or contact your administrator' }, {
         status, headers: { 'Cache-Control': 'no-store', ...(status === 401 && new URL(req.url).pathname.startsWith('/git/') ? { 'WWW-Authenticate': 'Basic realm="Herbie run"' } : {}) } });
     }
   },

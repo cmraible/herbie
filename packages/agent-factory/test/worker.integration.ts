@@ -25,12 +25,12 @@ test('real Worker + D1 + Durable Objects: isolation, membership, shared goal edi
       GITHUB_APP_ID:'42', GITHUB_CLIENT_ID:'test-client', GITHUB_CLIENT_SECRET:'test-client-secret', GITHUB_APP_SLUG:'test-app', GITHUB_WEBHOOK_SECRET: 'test-secret', RUN_TOKEN_SECRET: 'test-only-secret-at-least-32-characters' } }));
   try {
     const db = await mf.getD1Database('DB');
-    const sql = await readFile('migrations/0001_factory.sql', 'utf8') + '\n' + await readFile('migrations/0002_onboarding.sql', 'utf8') + '\n' + await readFile('migrations/0003_better_auth.sql','utf8');
+    const sql = await readFile('migrations/0001_factory.sql', 'utf8') + '\n' + await readFile('migrations/0002_onboarding.sql', 'utf8') + '\n' + await readFile('migrations/0003_better_auth.sql','utf8') + '\n' + await readFile('migrations/0004_private_workspaces.sql','utf8');
     // D1 exec accepts one statement per line; migration comments are removed for this helper.
     await db.exec(sql.replace(/^--.*$/gm, '').split(';').map(s => s.trim().replaceAll('\n', ' ')).filter(Boolean).join(';\n') + ';');
     await db.exec("INSERT INTO workspaces(id,name) VALUES('a','Company A'),('b','Company B');\nINSERT INTO company_domains VALUES('a.example','a',1,1),('disabled.example','b',1,0);\nINSERT INTO members(workspace,sub,role) VALUES('a','admin','admin'),('a','alice','member'),('a','colleague','member'),('b','bob','admin');\nINSERT INTO repositories VALUES('a','a/repo',1,1),('b','b/repo',2,1);");
     const cookies:Record<string,string>={};
-    for (const sub of ['admin','alice','colleague','bob']) {
+    for (const sub of ['admin','alice','colleague','bob','newcomer']) {
       let link='';
       const auth=login({DB:db,APP_ORIGIN:'https://herbie.test',BETTER_AUTH_SECRET:'local-test-secret-with-over-32-characters',ALLOWED_EMAIL_DOMAINS:'a.example,b.example'},{async send(_email,url){link=url;}});
       await auth.handler(new Request('https://herbie.test/api/auth/sign-in/magic-link',{method:'POST',headers:{origin:'https://herbie.test','Content-Type':'application/json','cf-connecting-ip':'192.0.2.'+(Object.keys(cookies).length+1)},body:JSON.stringify({email:sub+'@'+(sub==='bob'?'b':'a')+'.example',callbackURL:'/'})}));
@@ -39,13 +39,27 @@ test('real Worker + D1 + Durable Objects: isolation, membership, shared goal edi
       await db.prepare('UPDATE members SET sub=? WHERE sub=?').bind('ba:'+user!.id,sub).run();
     }
     const access = new Access(db);
-    await access.join({ sub: 'new-employee', domain: 'a.example' });
-    assert.equal(await access.member('new-employee', 'a'), 'member');
-    await assert.rejects(access.member('new-employee', 'a', true));
-    await assert.rejects(access.join({ sub: 'intruder', domain: 'unknown.example' }));
-    await assert.rejects(access.join({ sub: 'intruder', domain: 'disabled.example' }));
+    await access.signIn({sub:'new-employee',domain:'a.example',name:'New',email:'new@a.example'});
+    await assert.rejects(access.member('new-employee','a'));
     const request = (path: string, sub = 'alice', method = 'GET', body?: object) => mf.dispatchFetch('https://herbie.test' + path, { method, redirect:'manual',
       headers: { cookie: cookies[sub], origin: 'https://herbie.test', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    assert.deepEqual(await (await request('/api/workspaces','newcomer')).json(),[]);
+    const account=await (await request('/api/account','newcomer')).json() as {identity:{sub:string}};
+    await db.prepare('INSERT INTO domain_challenges(id,sub,domain,workspace,name,token,expires) VALUES(?,?,?,?,?,?,?)').bind('old-dns',account.identity.sub,'a.example','old-pending','Pending','test-only',Date.now()+60000).run();
+    assert.equal((await mf.dispatchFetch('https://herbie.test/api/onboarding/workspace',{method:'POST',headers:{origin:'https://herbie.test','Content-Type':'application/json'},body:'{"name":"Anonymous"}'})).status,401);
+    assert.equal((await mf.dispatchFetch('https://herbie.test/api/onboarding/workspace',{method:'POST',headers:{cookie:cookies.newcomer,origin:'https://evil.test','Content-Type':'application/json'},body:'{"name":"Cross origin"}'})).status,403);
+    const privateResponses=await Promise.all([request('/api/onboarding/workspace','newcomer','POST',{name:'Private'}),request('/api/onboarding/workspace','newcomer','POST',{name:'Private'})]);
+    assert.ok(privateResponses.every(r=>r.status===200));
+    const privateResults=await Promise.all(privateResponses.map(r=>r.json() as Promise<{workspace:string}>));
+    assert.equal(privateResults[0].workspace,privateResults[1].workspace);
+    assert.equal((await (await request('/api/workspaces','newcomer')).json() as unknown[]).length,1);
+    assert.equal((await request('/api/workspaces/a/goals','newcomer')).status,403);
+    assert.equal((await request('/api/workspaces/'+privateResults[0].workspace+'/goals','alice')).status,403);
+    for (const route of ['company','verify','join']) assert.equal((await request('/api/onboarding/'+route,'newcomer','POST',{name:'Claim'})).status,410);
+    assert.equal((await request('/api/workspaces/a/domains','admin','PATCH',{domain:'a.example',enabled:true})).status,410);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM members WHERE workspace='a'").first<{n:number}>())!.n,3);
+    const page=await (await request('/')).text();
+    assert.match(page,/Create your private workspace/);assert.doesNotMatch(page,/Get DNS|Verify DNS|Join company|Enable autojoin/);
     assert.equal((await request('/health')).status, 200);
     await request('/api/workspaces');
     const beforeLogout=(await db.prepare('SELECT COUNT(*) AS n FROM sessions').first<{n:number}>())!.n;

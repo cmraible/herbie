@@ -13,14 +13,6 @@ export class Access {
   constructor(private db: D1Database) {}
   async signIn(identity: CompanyIdentity) {
     await this.db.prepare('INSERT INTO identities(sub,domain,name,email,verified_at) VALUES(?,?,?,?,?) ON CONFLICT(sub) DO UPDATE SET domain=excluded.domain,name=excluded.name,email=excluded.email,verified_at=excluded.verified_at').bind(identity.sub,identity.domain,identity.name,identity.email,Date.now()).run();
-    const enabled = await this.db.prepare('SELECT 1 FROM company_domains WHERE domain=? AND enabled=1 AND verified_at>0').bind(identity.domain).first();
-    if (enabled) await this.join(identity);
-  }
-  async join(identity: { sub: string; domain: string }) {
-    const domain = await this.db.prepare('SELECT workspace FROM company_domains WHERE domain=? AND enabled=1 AND verified_at>0')
-      .bind(identity.domain).first<{ workspace: string }>();
-    if (!domain) throw new HttpError(403, 'Company domain is not enabled');
-    await this.db.prepare("INSERT OR IGNORE INTO members(workspace,sub,role) VALUES(?,?,'member')").bind(domain.workspace, identity.sub).run();
   }
   async member(sub: string, workspace: string, admin = false) {
     const row = await this.db.prepare("SELECT role FROM members WHERE sub=? AND workspace=? AND status='active'").bind(sub, workspace).first<{ role: string }>();
