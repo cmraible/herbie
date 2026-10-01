@@ -1,0 +1,52 @@
+import { test, expect } from "@playwright/test";
+import { register, signIn, createWorkspace, password } from "./helpers";
+test("verified owner creates a workspace and retains it after signing out and back in", async ({
+  page,
+}) => {
+  const email = await register(page, "Alice");
+  const document = await page.request.get("/");
+  expect(document.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(document.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(
+    (
+      await page.request.post("/api/auth/organization/create", {
+        headers: { origin: "http://localhost:8790" },
+        data: { name: "", slug: crypto.randomUUID() },
+      })
+    ).status(),
+  ).toBe(404);
+  await createWorkspace(page, "Studio");
+  await expect(page.getByText("Your role: owner")).toBeVisible();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  expect((await page.request.get("/api/workspaces")).status()).toBe(401);
+  await signIn(page, email);
+  await expect(page.getByRole("heading", { name: "Studio", exact: true })).toBeVisible();
+});
+test("unverified signup cannot create a workspace and cross-origin writes are rejected", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const email = "unverified-" + crypto.randomUUID() + "@example.test";
+  const signup = await page.request.post("/api/auth/sign-up/email", {
+    headers: { origin: "http://localhost:8790" },
+    data: { name: "Unverified", email, password },
+  });
+  expect(signup.ok()).toBe(true);
+  expect(
+    (
+      await page.request.post("/api/workspaces", {
+        headers: { origin: "http://localhost:8790" },
+        data: { name: "No access" },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await page.request.post("/api/workspaces", {
+        headers: { origin: "https://other.test" },
+        data: { name: "No access" },
+      })
+    ).status(),
+  ).toBe(403);
+});
