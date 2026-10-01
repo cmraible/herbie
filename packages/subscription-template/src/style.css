@@ -4,6 +4,9 @@
   background: #f2f5f4;
   font-synthesis: none;
 }
+* {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
 }
@@ -63,6 +66,56 @@ button:disabled {
 input,
 select {
   max-width: 460px;
+  width: 100%;
+  min-width: 0;
+}
+textarea {
+  width: 100%;
+  min-width: 0;
+}
+table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 4px;
+  overflow-wrap: anywhere;
+}
+th:first-child {
+  width: 50%;
+}
+td button {
+  max-width: 100%;
+  padding: 8px;
+}
+.row {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.row h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  main {
+    margin: 24px auto;
+    padding: 0 12px;
+  }
+  section {
+    padding: 16px;
+  }
+  header {
+    padding: 20px 16px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 28px;
+  }
 }
 button:hover {
   background: #104236;

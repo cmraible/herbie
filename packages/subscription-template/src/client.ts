@@ -66,10 +66,30 @@ async function api<T>(
   }
   return schema.parse(data);
 }
+const pending = new WeakSet<HTMLElement>();
+async function runAction(source: HTMLElement, action: () => Promise<void>) {
+  const scope = source.closest("form") ?? source;
+  if (pending.has(scope)) return;
+  pending.add(scope);
+  const buttons =
+    scope instanceof HTMLButtonElement ? [scope] : [...scope.querySelectorAll("button")];
+  const enabled = buttons.filter((button) => !button.disabled);
+  for (const button of enabled) button.disabled = true;
+  node("error").textContent = "";
+  message("");
+  try {
+    await action();
+  } catch (error) {
+    report(error);
+  } finally {
+    pending.delete(scope);
+    for (const button of enabled) button.disabled = false;
+  }
+}
 function handle(id: string, action: () => Promise<void>) {
-  node(id).addEventListener("click", () => {
-    node("error").textContent = "";
-    void action().catch(report);
+  const source = node(id);
+  source.addEventListener("click", () => {
+    void runAction(source, action);
   });
 }
 function credentials() {
@@ -129,10 +149,10 @@ handle("signup", async () => {
 });
 node("account-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  void (async () => {
+  void runAction(node("account-form"), async () => {
     check(await client.signIn.email(credentials()));
     if (!mfaPending) await load();
-  })().catch(report);
+  });
 });
 handle("logout", async () => {
   check(await client.signOut());
@@ -140,12 +160,12 @@ handle("logout", async () => {
 });
 node("workspace-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  void (async () => {
+  void runAction(node("workspace-form"), async () => {
     const w = await api("/api/workspaces", Workspace, { name: input("workspace-name").value });
     selected = w.id;
     input("workspace-name").value = "";
     await load();
-  })().catch(report);
+  });
 });
 node("workspace").addEventListener("change", (e) => {
   if (e.target instanceof HTMLSelectElement) {
