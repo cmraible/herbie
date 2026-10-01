@@ -79,3 +79,72 @@ test('crash lease expires and timed-out attempt is terminated before recovery', 
   assert.equal((await store.goal()).runs[0].attempt, 2);
   assert.equal(executor.jobs.size, 0);
 });
+test('repeated successful repairs with failing CI eventually require human intervention', async () => {
+  const { store, factory } = setup();
+  await factory.tick('g'); await factory.tick('g');
+  for (let cycle = 0; cycle < 6; cycle++) {
+    await change(store, 'g', g => feedback(g, `failure-${cycle}`, 1, 'Still failing'));
+    await factory.tick('g'); await factory.tick('g');
+  }
+  assert.equal((await store.goal()).runs.filter(r => r.kind === 'repair').length, 5);
+  assert.match((await store.goal()).reason!, /5 repair runs/);
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'active'));
+  await factory.tick('g');
+  assert.equal((await store.goal()).runs.filter(r => r.kind === 'repair').length, 6);
+});
+test('pausing terminates execution even when GitHub is unavailable', async () => {
+  const { store, repo, executor, factory } = setup();
+  await factory.tick('g'); await factory.tick('g');
+  await change(store, 'g', g => feedback(g, 'review', 1, 'fix'));
+  executor.result = { status: 'running' }; await factory.tick('g');
+  await change(store, 'g', g => { g.status = 'paused'; });
+  repo.inspect = async () => { throw new Error('GitHub unavailable'); };
+  await factory.tick('g');
+  assert.equal(executor.jobs.size, 0);
+  assert.equal((await store.goal()).runs.at(-1)!.status, 'suspended');
+});
+import { executionPrompt } from '../src/core/policy.js';
+test('a reopened PR counts toward capacity after a human resumes the goal', async () => {
+  const { store, repo, factory } = setup();
+  await factory.tick('g'); await factory.tick('g');
+  repo.prs[0].state = 'closed'; await factory.tick('g');
+  repo.prs[0].state = 'open';
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'active'));
+  await factory.tick('g');
+  assert.equal(outstanding(await store.goal()), 1);
+  assert.equal((await store.goal()).runs.length, 1);
+});
+test('broad goals instruct one small problem with proportionate verification and problem-first summaries', () => {
+  const g = createGoal('g', 'w', 'owner/repo', 'Fix reliability, improve performance, and clean up the UI');
+  reserve(g, 1);
+  const prompt = executionPrompt(g.runs[0]);
+  assert.match(prompt, /Solve only one problem/);
+  assert.match(prompt, /couple of lines/);
+  assert.match(prompt, /not a numeric line cap/);
+  assert.match(prompt, /proportionate verification/);
+  assert.match(prompt, /Lead with the concrete problem/);
+  assert.match(prompt, /choose one small next step/);
+});
+test('pause after a lost publication response preserves the PR reservation across resume', async () => {
+  const { store, repo, factory } = setup();
+  await factory.tick('g'); repo.losePublishResponse = true;
+  await assert.rejects(factory.tick('g'));
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'paused'));
+  await factory.tick('g');
+  assert.equal(outstanding(await store.goal()), 1);
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'active'));
+  await factory.tick('g');
+  assert.equal(repo.prs.length, 1);
+  assert.equal((await store.goal()).runs.length, 1);
+});
+test('pause and resume preserves repair feedback and creates a fresh VM attempt', async () => {
+  const { store, executor, factory } = setup();
+  await factory.tick('g'); await factory.tick('g');
+  await change(store, 'g', g => feedback(g, 'review', 1, 'Fix the parser'));
+  executor.result = { status: 'running' }; await factory.tick('g');
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'paused')); await factory.tick('g');
+  await change(store, 'g', g => editGoal(g, g.prompt, g.target, 'active')); await factory.tick('g');
+  const repaired = (await store.goal()).runs.at(-1)!;
+  assert.deepEqual(repaired.feedback, ['Fix the parser']); assert.equal(repaired.attempt, 2);
+  assert.equal(executor.jobs.size, 1);
+});

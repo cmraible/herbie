@@ -1,11 +1,12 @@
+import type { ChangeSummary } from './policy.js';
 /** Portable domain: no Cloudflare, Daytona, HTTP or SDK types. */
-export type RunStatus = 'queued' | 'running' | 'publishing' | 'done' | 'failed';
+export type RunStatus = 'queued' | 'suspended' | 'running' | 'publishing' | 'done' | 'failed';
 export interface Run {
   id: string; branch: string; prompt: string; version: number;
   kind: 'create' | 'repair'; pr?: number; feedback: string[];
-  status: RunStatus; attempt: number; startedAt?: number; checkpoint?: string;
+  status: RunStatus; attempt: number; startedAt?: number; checkpoint?: string; summary?: ChangeSummary; feedbackRestored?: boolean; terminated?: boolean;
 }
-export interface PullRequest { number: number; branch: string; head: string; state: 'open' | 'merged' | 'closed'; feedback: string[] }
+export interface PullRequest { number: number; branch: string; head: string; state: 'open' | 'merged' | 'closed'; feedback: string[]; repairs?: number }
 export interface Goal {
   id: string; workspace: string; repo: string; prompt: string; version: number;
   target: number; status: 'active' | 'paused'; reason?: string;
@@ -26,6 +27,17 @@ export function editGoal(g: Goal, prompt: string, target: number, status: Goal['
   validatePrompt(prompt, target);
   if (status !== 'active' && status !== 'paused') throw new Error('Invalid status');
   if (g.prompt !== prompt) g.version++;
+  if (g.status === 'paused' && status === 'active') {
+    for (const pr of g.prs) pr.repairs = 0;
+    for (const run of g.runs) {
+      if (run.status === 'suspended') { run.status = 'queued'; run.attempt++; delete run.startedAt; delete run.terminated; }
+      if (run.status === 'failed' && run.kind === 'repair' && !run.feedbackRestored) {
+        const pr = g.prs.find(p => p.number === run.pr);
+        if (pr) pr.feedback.push(...run.feedback);
+        run.feedbackRestored = true;
+      }
+    }
+  }
   g.prompt = prompt; g.target = target; g.status = status; delete g.reason;
 }
 export function active(r: Run) { return !['done', 'failed'].includes(r.status); }
@@ -40,7 +52,11 @@ export function reserve(g: Goal, now: number) {
   if (g.status !== 'active') return;
   for (const p of g.prs.filter(p => p.state === 'open' && p.feedback.length)) {
     if (!g.runs.some(r => r.pr === p.number && active(r))) {
-      addRun(g, now, p); p.feedback = [];
+      if ((p.repairs ?? 0) >= 5) {
+        g.status = 'paused'; g.reason = `PR #${p.number} exhausted 5 repair runs; human intervention required`;
+        record(g, now, g.reason); return;
+      }
+      addRun(g, now, p); p.repairs = (p.repairs ?? 0) + 1; p.feedback = [];
     }
   }
   while (outstanding(g) < g.target) addRun(g, now);

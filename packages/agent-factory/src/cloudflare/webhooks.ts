@@ -29,7 +29,7 @@ export async function receiveWebhook(req: Request, env: AppEnv) {
   await env.DB.prepare('INSERT OR IGNORE INTO deliveries(id,received,body,event) VALUES(?,?,?,?)').bind(id, Date.now(), body, event).run();
   return id;
 }
-export async function processDelivery(env: AppEnv, id: string) {
+export async function processDelivery(env: Pick<AppEnv, 'DB' | 'GITHUB_APP_ID' | 'GITHUB_APP_PRIVATE_KEY'> & { GOALS: { getByName(id: string): { wake(id: string): Promise<void> } } }, id: string) {
   const row = await env.DB.prepare('SELECT body,event FROM deliveries WHERE id=? AND completed=0').bind(id).first<{ body: string; event: string }>();
   if (!row) return;
   const p = JSON.parse(row.body) as Payload;
@@ -42,7 +42,7 @@ export async function processDelivery(env: AppEnv, id: string) {
         const prNumber = p.pull_request?.number ?? (p.issue?.pull_request ? p.issue.number : undefined);
         // A review/check can arrive between GitHub publication and its D1 checkpoint.
         // Keep the inbox pending until the publication reservation is reconciled.
-        if (goal.runs.some(r => r.status === 'publishing') && !goal.prs.some(pr => pr.number === prNumber)) {
+        if (goal.runs.some(r => r.kind === 'create' && ['running', 'publishing'].includes(r.status)) && !goal.prs.some(pr => pr.number === prNumber)) {
           await env.GOALS.getByName(goal.id).wake(goal.id);
           throw new Error('Publication still reconciling');
         }

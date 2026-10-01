@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { Access, hash } from '../src/adapters/auth.js';
 import { D1Goals } from '../src/adapters/d1.js';
-import { createGoal } from '../src/core/model.js';
+import { processDelivery } from '../src/cloudflare/webhooks.js';
+import { createGoal, reserve } from '../src/core/model.js';
 
 test('real Worker + D1 + Durable Objects: isolation, membership, shared goal edits, admin settings and disabled execution', async () => {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: 'dist/worker.js', compatibilityDate: '2026-10-01', compatibilityFlags: ['nodejs_compat'],
@@ -42,6 +43,24 @@ test('real Worker + D1 + Durable Objects: isolation, membership, shared goal edi
     assert.equal((await request('/api/workspaces/a/goals', 'alice', 'POST', { repo: 'a/repo', prompt: 'no connection' })).status, 403);
     assert.equal((await mf.dispatchFetch('https://herbie.test/webhooks/github', { method: 'POST', body: '{}' })).status, 401);
     assert.equal((await mf.dispatchFetch('https://herbie.test/api/workspaces/a/goals', { method: 'POST', headers: { cookie: '__Host-herbie=alice', origin: 'https://evil.test' } })).status, 403);
+    // Signed delivery replay is persisted once and acknowledged without executing a job.
+    const webhookBody = JSON.stringify({ zen: 'local test' });
+    const signingKey = await crypto.subtle.importKey('raw', new TextEncoder().encode('test-secret'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signature = 'sha256=' + Buffer.from(await crypto.subtle.sign('HMAC', signingKey, new TextEncoder().encode(webhookBody))).toString('hex');
+    for (let i = 0; i < 2; i++) assert.equal((await mf.dispatchFetch('https://herbie.test/webhooks/github', { method: 'POST', body: webhookBody,
+      headers: { 'x-hub-signature-256': signature, 'x-github-delivery': 'same-delivery', 'x-github-event': 'ping' } })).status, 202);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE id='same-delivery'").first<{ n: number }>())!.n, 1);
+    // CI can complete after push but before the run/PR publication checkpoint.
+    const early = createGoal('early', 'b', 'b/repo', 'Fix one thing'); reserve(early, Date.now()); early.runs[0].status = 'running';
+    await new D1Goals(db).create(early);
+    const ci = { action: 'completed', installation: { id: 2 }, repository: { full_name: 'b/repo' },
+      check_run: { name: 'test', conclusion: 'failure', head_sha: 'abc' } };
+    await db.prepare('INSERT INTO deliveries(id,received,body,event) VALUES(?,?,?,?)').bind('early-ci', Date.now(), JSON.stringify(ci), 'check_run').run();
+    let woke = false;
+    await assert.rejects(processDelivery({ DB: db, GITHUB_APP_ID: 'test', GITHUB_APP_PRIVATE_KEY: 'unused',
+      GOALS: { getByName() { return { async wake() { woke = true; } }; } } }, 'early-ci'), /reconciling/);
+    assert.equal(woke, true);
+    assert.equal((await db.prepare("SELECT completed FROM deliveries WHERE id='early-ci'").first<{ completed: number }>())!.completed, 0);
     const saved = await new D1Goals(db).load(goal.id);
     assert.equal(saved!.goal.prompt, 'Fix performance');
     assert.equal(saved!.goal.runs.length, 0); // Safe default never starts a real factory.

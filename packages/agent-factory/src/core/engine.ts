@@ -10,23 +10,31 @@ export class Factory {
     const owner = crypto.randomUUID();
     const claimed = await change(this.store, id, g => {
       if (g.lease && g.lease.until > this.now()) return false;
-      g.lease = { owner, until: this.now() + 300000 }; return true;
+      g.lease = { owner, until: this.now() + 600000 }; return true;
     });
     if (!claimed) return;
     const update = <T>(fn: (g: Goal) => T) => change(this.store, id, g => {
       if (g.lease?.owner !== owner) throw new Error('Lease lost');
-      g.lease.until = this.now() + 300000;
+      g.lease.until = this.now() + 600000;
       return fn(g);
     });
     try {
       let g = (await this.store.load(id))!.goal;
+      // Pausing must stop customer execution even when GitHub is unavailable.
+      if (g.status === 'paused') {
+        for (const run of g.runs.filter(r => active(r) && !r.terminated)) {
+          await this.executor.stop(g, run);
+          await update(s => { const r = s.runs.find(r => r.id === run.id)!; r.terminated = true; if (r.status !== 'publishing') r.status = 'suspended'; });
+        }
+        return;
+      }
       // Reconcile provider truth, including after missed or reordered webhooks.
-      for (const known of g.prs.filter(p => p.state === 'open')) {
+      for (const known of g.prs.filter(p => p.state !== 'merged')) {
         const actual = await this.repos.inspect(g.repo, known.number);
         await update(s => {
           const p = s.prs.find(p => p.number === actual.number)!;
           p.state = actual.state; p.head = actual.head;
-          if (actual.state === 'closed') {
+          if (actual.state === 'closed' && known.state !== 'closed') {
             s.status = 'paused'; s.reason = `PR #${p.number} closed without merge`;
             record(s, this.now(), s.reason);
           }
@@ -39,11 +47,19 @@ export class Factory {
       if (!run) return;
       if (g.status === 'paused' || (run.pr && g.prs.find(p => p.number === run.pr)?.state !== 'open')) {
         await this.executor.stop(g, run);
-        await update(s => { s.runs.find(r => r.id === run.id)!.status = 'failed'; });
+        await update(s => {
+          const r = s.runs.find(r => r.id === run.id)!;
+          r.terminated = true;
+          if (s.status === 'paused') { if (r.status !== 'publishing') r.status = 'suspended'; }
+          else r.status = 'failed';
+        });
         return;
       }
       if (run.status === 'publishing') {
-        await this.executor.stop(g, run);
+        if (!run.terminated) {
+          await this.executor.stop(g, run);
+          await update(s => { s.runs.find(r => r.id === run.id)!.terminated = true; });
+        }
         const pr = await this.repos.publish(g.repo, run);
         await update(s => {
           const r = s.runs.find(r => r.id === run.id)!;
@@ -70,9 +86,10 @@ export class Factory {
         // Checkpoint is persisted outside the VM before cleanup or PR publication.
         await update(s => {
           const r = s.runs.find(r => r.id === run.id)!;
-          r.checkpoint = result.checkpoint; r.status = 'publishing';
+          r.checkpoint = result.checkpoint; r.summary = result.summary; r.status = 'publishing';
         });
         await this.executor.stop(g, run);
+        await update(s => { s.runs.find(r => r.id === run.id)!.terminated = true; });
       }
     } finally {
       await change(this.store, id, g => { if (g.lease?.owner === owner) delete g.lease; });
@@ -86,7 +103,7 @@ export class Factory {
         r.status = 'failed'; s.status = 'paused'; s.reason = `Run ${r.id} exhausted 3 attempts; human intervention required`;
         record(s, this.now(), s.reason);
       } else {
-        r.attempt++; r.status = 'queued'; delete r.startedAt;
+        r.attempt++; r.status = 'queued'; delete r.startedAt; delete r.terminated;
         record(s, this.now(), `Recovering ${r.id}, attempt ${r.attempt}`);
       }
     });

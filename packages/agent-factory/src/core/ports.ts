@@ -1,3 +1,4 @@
+import type { ChangeSummary } from './policy.js';
 import type { Goal, PullRequest, Run } from './model.js';
 export interface VersionedGoal { revision: number; goal: Goal }
 export interface GoalStore {
@@ -8,7 +9,7 @@ export interface Repository {
   inspect(repo: string, pr: number): Promise<PullRequest>;
   publish(repo: string, run: Run): Promise<PullRequest>;
 }
-export type ExecutionResult = { status: 'running' } | { status: 'succeeded'; checkpoint: string } | { status: 'lost' | 'failed' };
+export type ExecutionResult = { status: 'running' } | { status: 'succeeded'; checkpoint: string; summary?: ChangeSummary } | { status: 'lost' | 'failed' };
 export interface Execution {
   /** Idempotently start or inspect one attempt. External resources use run.id + attempt. */
   advance(goal: Goal, run: Run): Promise<ExecutionResult>;

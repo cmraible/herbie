@@ -37,6 +37,21 @@ try {
   if (remote) await git(['checkout', '-B', job.branch, `origin/${job.branch}`]);
   else if (job.kind === 'repair') throw new Error('Repair branch disappeared');
   else await git(['checkout', '-b', job.branch]);
+  // A push can succeed immediately before VM loss or a lost result response.
+  // The commit itself carries the logical-run checkpoint outside the VM.
+  const initialHead = await git(['rev-parse', 'HEAD']);
+  const priorMessage = await git(['log', '-1', '--format=%B']);
+  const marker = 'Herbie-Checkpoint: ';
+  const checkpointLine = priorMessage.split('\n').find(line => line.startsWith(marker));
+  if (checkpointLine) {
+    try {
+      const prior = JSON.parse(checkpointLine.slice(marker.length));
+      if (prior.run === job.runId) {
+        await finish({ status: 'succeeded', checkpoint: await git(['rev-parse', 'HEAD']), summary: prior.summary });
+        process.exit(0);
+      }
+    } catch { /* A foreign commit message is not a Herbie checkpoint. */ }
+  }
   await mkdir(env.CODEX_HOME, { recursive: true });
   await writeFile(`${env.CODEX_HOME}/config.toml`, [
     `model = ${JSON.stringify(job.model)}`, 'model_provider = "herbie"',
@@ -44,20 +59,27 @@ try {
     `base_url = ${JSON.stringify(job.origin + '/model/v1')}`, 'env_key = "HERBIE_RUN_TOKEN"',
     'wire_api = "responses"', 'requires_openai_auth = false',
   ].join('\n'));
-  const prompt = [
-    'Make one focused incremental improvement toward the goal. Read repository instructions first.',
-    'Run relevant tests, including real Docker/Compose development stacks when needed. Do not merge or create PRs.',
-    'Do not push; the runner will checkpoint your changes. Do not change the Git remote or access credentials.',
-    'Goal:', job.prompt, 'Review and CI feedback:', ...job.feedback,
-  ].join('\n\n');
+  const prompt = job.instructions;
+  const summaryPath = `${root}/summary.json`;
+  const schemaPath = `${root}/summary-schema.json`;
+  await writeFile(schemaPath, JSON.stringify({ type: 'object', additionalProperties: false,
+    properties: { problem: { type: 'string', minLength: 1, maxLength: 2000 }, change: { type: 'string', minLength: 1, maxLength: 2000 }, verification: { type: 'string', minLength: 1, maxLength: 2000 } },
+    required: ['problem', 'change', 'verification'] }));
   // The enclosing dedicated VM is the isolation boundary; there is no host Docker socket.
-  await exec('codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'], { cwd: repo, env, input: prompt });
+  await exec('codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', '--output-schema', schemaPath, '--output-last-message', summaryPath, '-'], { cwd: repo, env, input: prompt });
+  const summary = JSON.parse(await readFile(summaryPath, 'utf8'));
+  for (const key of ['problem', 'change', 'verification']) if (typeof summary[key] !== 'string' || !summary[key].trim() || summary[key].length > 2000) throw new Error('Invalid summary');
   await git(['add', '-A']);
-  if (await git(['status', '--porcelain'])) await git(['commit', '-m', 'Implement incremental goal improvement']);
+  if (await git(['status', '--porcelain'])) await git(['commit', '-m', summary.problem.split('\n')[0].slice(0, 150), '-m', marker + JSON.stringify({ run: job.runId, summary })]);
+  // Repository instructions may have caused Codex to commit itself. Attach the
+  // checkpoint to its unpushed tip as well, without creating a metadata-only commit.
+  if (await git(['rev-parse', 'HEAD']) !== initialHead && !(await git(['log', '-1', '--format=%B'])).includes(marker + JSON.stringify({ run: job.runId, summary }))) {
+    await git(['commit', '--amend', '-m', summary.problem.split('\n')[0].slice(0, 150), '-m', marker + JSON.stringify({ run: job.runId, summary })]);
+  }
   const checkpoint = await git(['rev-parse', 'HEAD']);
   // A scoped Git proxy enforces the one branch writable by this job.
   await git(['push', 'origin', `HEAD:refs/heads/${job.branch}`]);
-  await finish({ status: 'succeeded', checkpoint });
+  await finish({ status: 'succeeded', checkpoint, summary });
 } catch {
   await finish({ status: 'failed' }); process.exitCode = 1;
 }

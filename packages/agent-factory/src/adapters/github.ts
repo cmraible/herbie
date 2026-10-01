@@ -37,8 +37,14 @@ export class GitHub implements Repository {
       if (pr.state !== 'open') return pr;
       // Idempotent progress reply: marker is durable on GitHub, not in the VM.
       const marker = `<!-- herbie:${run.id} -->`;
-      const comments = await this.request<{ body: string }[]>(`/repos/${repo}/issues/${run.pr}/comments?per_page=100`, token);
-      if (!comments.some(c => c.body.includes(marker))) await this.request(`/repos/${repo}/issues/${run.pr}/comments`, token, {
+      let found = false;
+      for (let page = 1; ; page++) {
+        const comments = await this.request<{ body: string }[]>(`/repos/${repo}/issues/${run.pr}/comments?per_page=100&page=${page}`, token);
+        if (comments.some(c => c.body.includes(marker))) { found = true; break; }
+        if (comments.length < 100) break;
+        if (page >= 20) throw new Error('Comment history exceeds automatic reconciliation limit');
+      }
+      if (!found) await this.request(`/repos/${repo}/issues/${run.pr}/comments`, token, {
         method: 'POST', body: JSON.stringify({ body: `${marker}\nAddressed queued review/CI feedback in ${run.checkpoint}. Please review the updated changes and checks.` }) });
       return pr;
     }
@@ -46,8 +52,8 @@ export class GitHub implements Repository {
     if (found.length) return this.toPR(found[0], repo);
     const info = await this.request<{ default_branch: string }>(`/repos/${repo}`, token);
     const pr = await this.request<GitHubPR>(`/repos/${repo}/pulls`, token, { method: 'POST', body: JSON.stringify({
-      head: run.branch, base: info.default_branch, draft: true, title: `Herbie: ${run.prompt.split('\n')[0].slice(0, 150)}`,
-      body: `Incremental work toward:\n\n${run.prompt}\n\nPrompt version ${run.version}. Checkpoint: ${run.checkpoint}.\n\nReview tests and CI before merging.`,
+      head: run.branch, base: info.default_branch, draft: true, title: (run.summary?.problem ?? 'Small improvement toward the goal').split('\n')[0].slice(0, 150),
+      body: `${run.summary?.problem ?? 'Small improvement toward the configured goal.'}\n\n${run.summary?.change ?? 'See the focused diff.'}\n\nVerification: ${run.summary?.verification ?? 'Review CI before merging.'}\n\n<!-- herbie:${run.id}; prompt-v${run.version}; checkpoint:${run.checkpoint} -->`,
     }) });
     return this.toPR(pr, repo);
   }
