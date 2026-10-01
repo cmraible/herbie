@@ -17,3 +17,19 @@ export const Configuration = z.object({
   billingEnabled: z.boolean(),
 });
 export const ErrorBody = z.object({ error: z.string() });
+export const Member = z.object({
+  id: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  email: z.email(),
+  role: z.enum(["owner", "admin", "member"]),
+});
+export const Members = z.array(Member);
+export const Invite = z
+  .object({
+    email: z.email().transform((e) => e.toLowerCase()),
+    role: z.enum(["admin", "member"]).default("member"),
+  })
+  .strict();
+export const MembershipChange = z.object({ role: z.enum(["admin", "member"]) }).strict();
+export const Confirmation = z.object({ ok: z.literal(true) });

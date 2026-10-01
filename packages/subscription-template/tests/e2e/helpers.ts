@@ -19,7 +19,12 @@ export async function emailLink(page: Page, email: string, subject: string) {
   return link;
 }
 export async function register(page: Page, prefix: string) {
-  const email = prefix.toLowerCase() + "-" + crypto.randomUUID() + "@example.test";
+  await page.context().setExtraHTTPHeaders({
+    "cf-connecting-ip":
+      "2001:db8:" + crypto.randomUUID().replaceAll("-", "").slice(0, 24).match(/.{4}/g)?.join(":"),
+  });
+  const email =
+    prefix.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + crypto.randomUUID() + "@example.test";
   await page.goto("/");
   await page.getByLabel("Name", { exact: true }).fill(prefix);
   await page.getByLabel("Email", { exact: true }).fill(email);

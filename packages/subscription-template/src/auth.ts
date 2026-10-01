@@ -39,6 +39,7 @@ export function authOptions(env: Omit<Env, "ASSETS">, pool: Pool) {
     logger: { disabled: true },
     session: { expiresIn: 7 * 86400, cookieCache: { enabled: false } },
     advanced: {
+      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
       useSecureCookies: env.APP_ORIGIN.startsWith("https://"),
       defaultCookieAttributes: { httpOnly: true, sameSite: "lax" as const },
     },

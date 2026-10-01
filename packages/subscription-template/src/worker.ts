@@ -3,14 +3,8 @@ import { auth } from "./auth";
 import { database } from "./database";
 import type { Env } from "./env";
 import { Account, Workspace, WorkspaceList, CreateWorkspace, Configuration } from "./contracts";
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { HttpError, body } from "./http";
+import { teamRoute } from "./team";
 async function route(req: Request, env: Env): Promise<Response> {
   const path = new URL(req.url).pathname;
   if (path === "/health") return Response.json({ ok: true });
@@ -60,7 +54,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       return Response.json(WorkspaceList.parse(result.rows));
     }
     if (path === "/api/workspaces" && req.method === "POST") {
-      const input = CreateWorkspace.parse(await req.json());
+      const input = await body(req, CreateWorkspace);
       const created = await identity.api.createOrganization({
         headers: req.headers,
         body: { name: input.name, slug: crypto.randomUUID() },
@@ -70,6 +64,8 @@ async function route(req: Request, env: Env): Promise<Response> {
         status: 201,
       });
     }
+    const team = await teamRoute(req, pool, env, session.user);
+    if (team) return team;
     throw new HttpError(404, "Not found");
   } finally {
     await pool.end();
