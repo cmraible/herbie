@@ -2,12 +2,14 @@
   "name": "herbie",
   "version": "0.1.0",
   "private": true,
-  "description": "A controller for managing AI loops.",
+  "description": "Herbie workspace: an AI loop controller and ChatGPT demo.",
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "start": "pnpm --filter @herbie/loop start",
+    "demo": "pnpm --filter @herbie/demo start",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   },
   "engines": {
     "node": ">=24"
@@ -17,5 +19,6 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
-  "packageManager": "pnpm@10.34.6"
+  "packageManager": "pnpm@10.34.6",
+  "license": "MIT"
 }

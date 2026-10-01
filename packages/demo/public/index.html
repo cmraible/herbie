@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Herbie · ChatGPT demo</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body><main>
+<header><span class="eyebrow">HERBIE / LOCAL DEMO</span><h1>A little room to think.</h1><p>Bring your ChatGPT plan. Ask something. Watch the answer arrive.</p></header>
+<section class="account" aria-label="ChatGPT account">
+  <label for="accounts">Account</label><select id="accounts"><option value="">Add a ChatGPT account</option></select>
+  <div class="row"><button id="login">Continue with ChatGPT</button><button id="logout" class="secondary" hidden>Sign out</button></div>
+  <p id="plan">Sign in and allow eligible requests to use your ChatGPT plan.</p>
+  <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Manage usage ↗</a>
+</section>
+<form id="composer"><label for="model">Model</label><select id="model" disabled><option>Sign in to load models</option></select>
+<label for="prompt">Your prompt</label><textarea id="prompt" rows="4" maxlength="16000" placeholder="Explain something you've always wondered about…" required></textarea>
+<div class="row"><button id="send" disabled>Send prompt</button><button id="stop" type="button" class="secondary" hidden>Stop</button><span class="muted">Each prompt starts fresh.</span></div></form>
+<p id="status" role="status" aria-live="polite"></p>
+<section class="answer" aria-label="Response"><span class="eyebrow">RESPONSE</span><div id="answer">Your answer will appear here.</div></section>
+<footer>Runs on your computer. Prompts are sent to OpenAI when you press Send.</footer>
+<dialog id="welcome"><h2>You're using your ChatGPT plan</h2><p>Eligible requests in Herbie use your plan or available credits. You can manage limits in ChatGPT settings.</p><button id="got-it">Got it</button></dialog>
+</main></body></html>
