@@ -3,3 +3,5 @@ playwright-report/
 coverage/
 supabase/.temp/
 supabase/.branches/
+test-results-http/
+playwright-report-http/

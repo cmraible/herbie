@@ -41,12 +41,16 @@ jobs:
       - run: pnpm --filter @herbie/subscription-template test:prepare && pnpm --filter @herbie/subscription-template db:migrate && pnpm --filter @herbie/subscription-template build
       - name: Browser acceptance against real PostgreSQL and Worker
         run: pnpm --filter @herbie/subscription-template test:e2e
+      - name: Measure HTTP handler coverage in Node
+        run: pnpm --filter @herbie/subscription-template test:coverage:http
       - name: Preserve browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: subscription-browser-results
-          path: packages/subscription-template/playwright-report
+          path: |
+            packages/subscription-template/playwright-report
+            packages/subscription-template/playwright-report-http
           retention-days: 7
       - name: Preserve measured coverage
         if: always()

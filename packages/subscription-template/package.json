@@ -12,6 +12,7 @@
     "format:check": "oxfmt --check .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:http": "vitest run --coverage --config vitest.coverage.config.ts",
     "test:e2e": "playwright test",
     "db:start": "docker compose -f compose.test.yml up -d --wait",
     "db:stop": "docker compose -f compose.test.yml down",

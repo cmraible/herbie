@@ -6,6 +6,7 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.ts", "scripts/hosting.ts", "scripts/migrate.ts"],
       reporter: ["text", "json-summary", "html"],
+      reportsDirectory: "coverage/unit",
     },
   },
 });
