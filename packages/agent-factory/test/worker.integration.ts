@@ -1,36 +1,65 @@
+import { login } from '../src/adapters/login.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { Access, hash } from '../src/adapters/auth.js';
+import { Access } from '../src/adapters/auth.js';
 import { D1Goals } from '../src/adapters/d1.js';
 import { processDelivery } from '../src/cloudflare/webhooks.js';
 import { createGoal, reserve } from '../src/core/model.js';
 
 test('real Worker + D1 + Durable Objects: isolation, membership, shared goal edits, admin settings and disabled execution', async () => {
-  const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: 'dist/worker.js', compatibilityDate: '2026-10-01', compatibilityFlags: ['nodejs_compat'],
+  const outboundService=async(req:Request)=>{
+    const url=new URL(req.url);
+    if(url.hostname==='github.com' && url.pathname==='/login/oauth/access_token') return Response.json({access_token:'test-oauth-token'});
+    if(url.hostname==='api.github.com') {
+      if(url.pathname==='/user') return Response.json({id:7});
+      if(url.pathname==='/user/installations') return Response.json({installations:[{id:1,app_id:42,account:{id:7,login:'a',type:'User'},suspended_at:null}]});
+      if(url.pathname==='/user/installations/1/repositories') return Response.json({repositories:[{full_name:'a/repo',owner:{id:7}}]});
+    }
+    throw new Error('Unexpected provider request');
+  };
+  const mf = new Miniflare(convertV4MiniflareOptions({ outboundService, modules: true, scriptPath: 'dist/worker.js', compatibilityDate: '2026-10-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: { DB: 'test-db' }, durableObjects: { GOALS: { className: 'GoalCoordinator', useSQLite: true } },
-    bindings: { APP_ORIGIN: 'https://herbie.test', GOOGLE_CLIENT_ID: 'test', FACTORY_ENABLED: 'false',
-      GITHUB_WEBHOOK_SECRET: 'test-secret', RUN_TOKEN_SECRET: 'test-only-secret-at-least-32-characters' } }));
+    bindings: { APP_ORIGIN: 'https://herbie.test', BETTER_AUTH_SECRET: 'local-test-secret-with-over-32-characters', ALLOWED_EMAIL_DOMAINS:'a.example,b.example', EMAIL_FROM:'test@a.example', FACTORY_ENABLED: 'false',
+      GITHUB_APP_ID:'42', GITHUB_CLIENT_ID:'test-client', GITHUB_CLIENT_SECRET:'test-client-secret', GITHUB_APP_SLUG:'test-app', GITHUB_WEBHOOK_SECRET: 'test-secret', RUN_TOKEN_SECRET: 'test-only-secret-at-least-32-characters' } }));
   try {
     const db = await mf.getD1Database('DB');
-    const sql = await readFile('migrations/0001_factory.sql', 'utf8');
+    const sql = await readFile('migrations/0001_factory.sql', 'utf8') + '\n' + await readFile('migrations/0002_onboarding.sql', 'utf8') + '\n' + await readFile('migrations/0003_better_auth.sql','utf8');
     // D1 exec accepts one statement per line; migration comments are removed for this helper.
     await db.exec(sql.replace(/^--.*$/gm, '').split(';').map(s => s.trim().replaceAll('\n', ' ')).filter(Boolean).join(';\n') + ';');
-    await db.exec("INSERT INTO workspaces(id,name) VALUES('a','Company A'),('b','Company B');\nINSERT INTO company_domains VALUES('a.example','a',1,1),('disabled.example','b',1,0);\nINSERT INTO members VALUES('a','admin','admin'),('a','alice','member'),('a','colleague','member'),('b','bob','admin');\nINSERT INTO repositories VALUES('a','a/repo',1,1),('b','b/repo',2,1);");
-    for (const sub of ['admin', 'alice', 'colleague', 'bob']) await db.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await hash(sub), sub, Date.now() + 3600000).run();
+    await db.exec("INSERT INTO workspaces(id,name) VALUES('a','Company A'),('b','Company B');\nINSERT INTO company_domains VALUES('a.example','a',1,1),('disabled.example','b',1,0);\nINSERT INTO members(workspace,sub,role) VALUES('a','admin','admin'),('a','alice','member'),('a','colleague','member'),('b','bob','admin');\nINSERT INTO repositories VALUES('a','a/repo',1,1),('b','b/repo',2,1);");
+    const cookies:Record<string,string>={};
+    for (const sub of ['admin','alice','colleague','bob']) {
+      let link='';
+      const auth=login({DB:db,APP_ORIGIN:'https://herbie.test',BETTER_AUTH_SECRET:'local-test-secret-with-over-32-characters',ALLOWED_EMAIL_DOMAINS:'a.example,b.example'},{async send(_email,url){link=url;}});
+      await auth.handler(new Request('https://herbie.test/api/auth/sign-in/magic-link',{method:'POST',headers:{origin:'https://herbie.test','Content-Type':'application/json','cf-connecting-ip':'192.0.2.'+(Object.keys(cookies).length+1)},body:JSON.stringify({email:sub+'@'+(sub==='bob'?'b':'a')+'.example',callbackURL:'/'})}));
+      const response=await mf.dispatchFetch(link,{redirect:'manual'});assert.equal(response.status,302);cookies[sub]=response.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+      const user=await db.prepare('SELECT id FROM user WHERE email=?').bind(sub+'@'+(sub==='bob'?'b':'a')+'.example').first<{id:string}>();
+      await db.prepare('UPDATE members SET sub=? WHERE sub=?').bind('ba:'+user!.id,sub).run();
+    }
     const access = new Access(db);
     await access.join({ sub: 'new-employee', domain: 'a.example' });
     assert.equal(await access.member('new-employee', 'a'), 'member');
     await assert.rejects(access.member('new-employee', 'a', true));
     await assert.rejects(access.join({ sub: 'intruder', domain: 'unknown.example' }));
     await assert.rejects(access.join({ sub: 'intruder', domain: 'disabled.example' }));
-    const request = (path: string, sub = 'alice', method = 'GET', body?: object) => mf.dispatchFetch('https://herbie.test' + path, { method,
-      headers: { cookie: '__Host-herbie=' + sub, origin: 'https://herbie.test', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const request = (path: string, sub = 'alice', method = 'GET', body?: object) => mf.dispatchFetch('https://herbie.test' + path, { method, redirect:'manual',
+      headers: { cookie: cookies[sub], origin: 'https://herbie.test', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     assert.equal((await request('/health')).status, 200);
+    await request('/api/workspaces');
+    const beforeLogout=(await db.prepare('SELECT COUNT(*) AS n FROM sessions').first<{n:number}>())!.n;
+    assert.equal((await request('/api/auth/sign-out')).status,405);
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM sessions').first<{n:number}>())!.n,beforeLogout);
     assert.equal((await request('/api/workspaces/a/goals', 'bob')).status, 403);
     assert.equal((await request('/api/workspaces/a/settings')).status, 403);
     assert.equal((await request('/api/workspaces/a/settings', 'admin')).status, 200);
+    const start=await request('/api/workspaces/a/github/start','admin','POST',{});
+    assert.equal(start.status,200);
+    const state=new URL((await start.json() as {url:string}).url).searchParams.get('state')!;
+    const callback=await request('/auth/github/callback?state='+encodeURIComponent(state)+'&code=test','admin');
+    assert.equal(callback.status,303);assert.equal(callback.headers.get('location'),'https://herbie.test/?github=connected');
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM github_proposals').first<{n:number}>())!.n,1);
     const created = await request('/api/workspaces/a/goals', 'alice', 'POST', { repo: 'a/repo', prompt: 'Improve tests' });
     assert.equal(created.status, 201);
     const goal = await created.json() as { id: string; target: number };

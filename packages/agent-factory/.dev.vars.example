@@ -1,8 +1,14 @@
+BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+MAILGUN_API_KEY=replace-with-sending-only-key
 # Copy to .dev.vars locally; use Worker secret bindings in hosted environments.
-GOOGLE_CLIENT_ID=your-google-client-id
 GITHUB_APP_ID=your-github-app-id
 GITHUB_APP_PRIVATE_KEY=your-pem-key
 GITHUB_WEBHOOK_SECRET=your-webhook-secret
 DAYTONA_API_KEY=your-coordinator-only-daytona-key
 OPENAI_API_KEY=your-service-openai-api-key
 RUN_TOKEN_SECRET=at-least-32-random-bytes
+GITHUB_CLIENT_SECRET=your-github-app-oauth-client-secret
+ALLOWED_EMAIL_DOMAINS=your-company.example
+EMAIL_FROM=Herbie <login@your-verified-sender.example>
+MAILGUN_DOMAIN=your-verified-sender.example
+MAILGUN_REGION=us

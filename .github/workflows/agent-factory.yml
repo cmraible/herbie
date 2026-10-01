@@ -1,0 +1,64 @@
+name: Agent factory
+on:
+  pull_request:
+    paths: ['packages/agent-factory/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.github/workflows/agent-factory.yml']
+  push:
+    branches: [main, work]
+    paths: ['packages/agent-factory/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.github/workflows/agent-factory.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck && pnpm build
+      - run: pnpm --filter @herbie/agent-factory typecheck
+      - run: pnpm --filter @herbie/agent-factory test
+      - run: pnpm --filter @herbie/agent-factory test:worker
+  deploy:
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work')
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: agent-factory-production
+    concurrency:
+      group: agent-factory-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Provision, migrate and deploy disabled pilot
+        working-directory: packages/agent-factory
+        run: node scripts/deploy.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
+          MAILGUN_DOMAIN: ${{ vars.MAILGUN_DOMAIN }}
+          MAILGUN_REGION: ${{ vars.MAILGUN_REGION }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          ALLOWED_EMAIL_DOMAINS: ${{ vars.ALLOWED_EMAIL_DOMAINS }}
+          GITHUB_APP_ID: ${{ vars.HERBIE_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ vars.HERBIE_GITHUB_APP_SLUG }}
+          GITHUB_CLIENT_ID: ${{ vars.HERBIE_GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.HERBIE_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.HERBIE_GITHUB_WEBHOOK_SECRET }}
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          DAYTONA_SNAPSHOT: ${{ vars.DAYTONA_SNAPSHOT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RUN_TOKEN_SECRET: ${{ secrets.RUN_TOKEN_SECRET }}
+          CODEX_MODEL: ${{ vars.CODEX_MODEL }}

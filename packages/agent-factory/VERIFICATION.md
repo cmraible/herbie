@@ -1,16 +1,16 @@
 # Milestone verification
 
-Validated locally on 2026-10-01 with Node 24.19.0 and the repository's pnpm 10.34.6. No deployment, credential creation, capacity purchase, live repository execution, external PR publication or merge occurred.
+Validated locally on 2026-10-01 with Node 24.19.0 and the repository's pnpm 10.34.6. No direct provider deployment, credential creation, capacity purchase, live factory execution, external PR publication or merge occurred. GitHub Actions publication is now authorized; its outcome is reported separately.
 
 | Check | Result |
 | --- | --- |
 | Frozen-lockfile pnpm install | Passed |
 | Root controller typecheck and build | Passed; existing controller source unchanged |
 | Agent-factory typecheck | Passed |
-| Domain, provider-adapter and security suite | 21 tests passed |
-| Compiled Worker integration | 1 test passed with real local D1/SQLite and Durable Objects |
-| Worker dry-run build | Passed; approximately 2,252 KiB uncompressed / 285 KiB gzip |
-| Local D1 migration | All 11 SQL commands applied successfully |
+| Domain, provider-adapter and security suite | 27 tests passed |
+| Compiled Worker integration | 9 tests passed with real local D1/SQLite and Durable Objects |
+| Worker dry-run build | Passed; approximately 4,154 KiB uncompressed / 616 KiB gzip |
+| Local D1 migration | All three migrations applied successfully to local D1 |
 | Runner JavaScript and Docker-preflight shell syntax | Passed |
 | Git whitespace/diff check | Passed |
 
@@ -18,7 +18,7 @@ The fake-adapter suite covers initial reservations, create/repair/merge-to-next 
 
 The production adapters are tested at their interfaces with transport/SDK fakes: VM-only enforcement, deterministic VM recovery, confirmed deletion, no master API key in uploaded job data, paginated progress-comment reconciliation, and problem-first draft PR metadata.
 
-Cryptographic tests cover signed Google identities and rejected issuer/audience/signature/expiry/nonce/domain claims, webhook body authentication, scoped run tokens, and branch-limited Git pushes. The compiled Worker test exercises workspace isolation, automatic member—not admin—join, disabled domains, colleague goal editing, admin-only connection settings, execution-disabled behavior, CAS/quota persistence, signed webhook replay and early CI inbox retention.
+Security tests cover webhook body authentication, scoped run tokens and branch-limited Git pushes. Better Auth native-D1 integration covers hashed magic links, concurrent single-use redemption, expiry, off-origin callbacks, private admission, session revocation and lack of workspace privileges from email verification alone. Compiled Worker tests redeem actual magic links through the Worker response wrapper. The compiled Worker test exercises workspace isolation, automatic member—not admin—join, disabled domains, colleague goal editing, admin-only connection settings, execution-disabled behavior, CAS/quota persistence, signed webhook replay and early CI inbox retention.
 
 ## Standards review
 
@@ -39,4 +39,14 @@ The originating spec is the supplied task, recorded in `SPEC.md`, including the 
 4. Pausing after a lost PR-publication response discarded its reservation. Publishing checkpoints now survive pause and reconcile on resume.
 5. Pausing discarded consumed repair feedback. Suspended repairs retain feedback and resume with a fresh attempt; exhausted repair feedback is restored once on explicit resume. The reviewer confirmed both pause fixes and their regression coverage.
 
-Four Standards findings and five Spec findings were addressed. These reviews and local tests do not establish production readiness. The provider smoke tests, operator setup, billing/onboarding product gaps and scale limits are detailed in `README.md`.
+Four Standards findings and five Spec findings were addressed. These reviews and local tests do not establish production readiness. The provider smoke tests, operator setup, remaining product gaps and scale limits are detailed in `README.md`.
+
+## Onboarding, authentication and Actions review
+
+DNS proof/expiry and competing company claims, existing tenant protection, explicit enablement, suspension and last-admin protection are tested against local D1. GitHub tests cover provider-derived authority, exact-session OAuth state, revocation, selection rollback across workspaces, concurrent acceptance and admin revocation. Deployment tests prove missing-config/enablement rejection and resource reuse.
+
+Review corrections: bind GitHub state to the exact session; make repository selection and audit atomic; report missing Organization Members permission; clone redirect responses before common headers; enforce POST before logout side effects; allow logout after admission is removed. Targeted reviewers inspected both onboarding and the revised Better Auth/Actions implementation. No live sender/provider contracts have been validated.
+
+Better Auth 1.7.7 schema was generated against its actual native-D1 configuration, including the magic-link plugin and persistent rate-limit table. The pinned dependency and generated SQL are committed together. The sender is replaceable; Mailgun is the selected sender, with US/EU routing, tracking disabled per message and sanitized delivery errors.
+
+Full compiled-Worker GitHub OAuth callback coverage exposed Workers global-fetch receiver binding; all fetch-injectable adapters now bind the default transport to globalThis. The callback now returns its expected 303, and magic-link callbacks return 302 through the common response wrapper. Mailgun transport tests use fakes only; no real email was sent.

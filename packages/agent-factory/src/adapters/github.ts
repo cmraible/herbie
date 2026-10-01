@@ -4,7 +4,7 @@ import type { Repository } from '../core/ports.js';
 interface GitHubPR { number: number; state: string; merged_at: string | null; head: { ref: string; sha: string; repo: { full_name: string } | null } }
 export class GitHub implements Repository {
   constructor(private appId: string, private pem: string, private installation: number,
-    private transport: typeof fetch = fetch) {}
+    private transport: typeof fetch = globalThis.fetch.bind(globalThis)) {}
   async token(repo: string, writePR = true) {
     const key = await importPKCS8(this.pem.replaceAll('\\n', '\n'), 'RS256');
     const jwt = await new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).setIssuer(this.appId)

@@ -1,26 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPair, SignJWT } from 'jose';
-import { GoogleIdentity, requireOrigin } from '../src/adapters/auth.js';
+import { requireOrigin } from '../src/adapters/auth.js';
 import { runToken, verifyRunToken } from '../src/adapters/capability.js';
 import { verifySignature } from '../src/cloudflare/webhooks.js';
 import { validatePush } from '../src/cloudflare/proxy.js';
 
-test('Google identity requires correct signature, issuer, audience, expiry, nonce, verified email and hosted domain', async () => {
-  const { publicKey, privateKey } = await generateKeyPair('RS256');
-  const verifier = new GoogleIdentity('client', async () => publicKey);
-  async function token(changes: Record<string, unknown> = {}) {
-    return new SignJWT({ sub: 'stable-google-sub', email: 'person@company.example', email_verified: true,
-      hd: 'company.example', nonce: 'nonce', iss: 'https://accounts.google.com', aud: 'client',
-      iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, ...changes })
-      .setProtectedHeader({ alg: 'RS256' }).sign(privateKey);
-  }
-  assert.deepEqual(await verifier.verify(await token(), 'nonce'), { sub: 'stable-google-sub', domain: 'company.example' });
-  for (const changes of [{ hd: undefined }, { email_verified: false }, { aud: 'other' }, { iss: 'attacker' }, { exp: 1 }, { nonce: 'other' }, { sub: undefined }])
-    await assert.rejects(verifier.verify(await token(changes), 'nonce'));
-  const other = await generateKeyPair('RS256');
-  await assert.rejects(new GoogleIdentity('client', async () => other.publicKey).verify(await token(), 'nonce'));
-});
 test('signed webhooks reject altered content, unsigned requests and malformed signatures', async () => {
   const body = new TextEncoder().encode('{"action":"closed"}'), secret = 'test-only-secret';
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);

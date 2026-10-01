@@ -1,0 +1,41 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { Miniflare,convertV4MiniflareOptions } from 'miniflare';
+import { login,requireLogin } from '../src/adapters/login.js';
+const origin='https://herbie.test';
+const secret='local-test-secret-with-over-32-characters';
+test('Better Auth native D1: hashed single-use links, expiry, origin, admission and session revocation',async()=>{
+ const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:'export default {fetch(){return new Response()}}',d1Databases:{DB:'login'}}));
+ try {
+  const DB=await mf.getD1Database('DB');
+  for(const file of ['0001_factory.sql','0002_onboarding.sql','0003_better_auth.sql']) await DB.exec((await readFile('migrations/'+file,'utf8')).replace(/^--.*$/gm,'').split(';').map(s=>s.trim().replaceAll('\n',' ')).filter(Boolean).join(';\n')+';');
+  let link='';let sent=0;
+  const env={DB,APP_ORIGIN:origin,BETTER_AUTH_SECRET:secret,ALLOWED_EMAIL_DOMAINS:'company.example'};
+  const auth=login(env,{async send(_email,url){link=url;sent++;}});
+  const request=(path:string,body?:object,cookie?:string)=>new Request(origin+'/api/auth'+path,{method:body?'POST':'GET',headers:{origin,'Content-Type':'application/json','cf-connecting-ip':'192.0.2.1',...(cookie?{cookie}:{})},body:body?JSON.stringify(body):undefined});
+  assert.equal((await auth.handler(request('/sign-in/magic-link',{email:'person@company.example',callbackURL:'/'}))).status,200);
+  const token=new URL(link).searchParams.get('token')!;
+  const rows=await DB.prepare('SELECT identifier FROM verification').all<{identifier:string}>();
+  assert.ok(rows.results.every(r=>!r.identifier.includes(token)));
+  const responses=await Promise.all([auth.handler(new Request(link)),auth.handler(new Request(link))]);
+  const success=responses.filter(r=>r.headers.get('set-cookie')?.includes('session_token'));
+  assert.equal(success.length,1);
+  const cookie=success[0].headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+  const current=await requireLogin(auth,request('/get-session',undefined,cookie),env);
+  assert.ok(current.sub.startsWith('ba:'));
+  assert.equal((await DB.prepare('SELECT COUNT(*) AS n FROM members').first<{n:number}>())!.n,0,'email verification alone grants no workspace');
+  const blocked=await auth.handler(request('/sign-in/magic-link',{email:'attacker@elsewhere.example',callbackURL:'/'}));
+  assert.equal(blocked.status,200);assert.equal(sent,1);
+  await assert.rejects(requireLogin(auth,request('/get-session',undefined,cookie),{...env,ALLOWED_EMAIL_DOMAINS:''}));
+  const wrong=await auth.handler(request('/sign-in/magic-link',{email:'person@company.example',callbackURL:'https://evil.test'}));
+  assert.ok(wrong.status>=400);assert.equal(sent,1);
+  await auth.handler(request('/sign-out',{},cookie));
+  await assert.rejects(requireLogin(auth,request('/get-session',undefined,cookie),env));
+  await auth.handler(request('/sign-in/magic-link',{email:'person@company.example',callbackURL:'/'}));
+  await DB.prepare('UPDATE verification SET expiresAt=?').bind(new Date(0).toISOString()).run();
+  assert.ok(!(await auth.handler(new Request(link))).headers.get('set-cookie')?.includes('session_token'));
+  const attempts=[];for(let i=0;i<6;i++) attempts.push((await auth.handler(request('/sign-in/magic-link',{email:'person@company.example',callbackURL:'/'}))).status);
+  assert.ok(attempts.includes(429),'HTTP handler enforces persisted rate limiting');
+ } finally {await mf.dispose();}
+});
