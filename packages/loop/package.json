@@ -13,7 +13,8 @@
     "build": "tsc",
     "typecheck": "tsc --project tsconfig.test.json",
     "test": "tsx --test test/*.test.ts",
-    "test:e2e": "tsx test/e2e.ts"
+    "test:e2e": "tsx test/e2e.ts",
+    "test:daytona": "tsx test/daytona.ts"
   },
   "dependencies": {
     "@daytona/sdk": "0.220.0"
