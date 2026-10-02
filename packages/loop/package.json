@@ -7,10 +7,17 @@
   "engines": {
     "node": ">=24"
   },
-  "description": "A controller for managing AI loops.",
+  "description": "One-shot local improvement draft CLI.",
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
   }
 }
