@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
-import { runDaytonaSmoke } from '../src/daytona.js';
+import { DaytonaSmokeError, daytonaErrorMessage, runDaytonaSmoke } from '../src/daytona.js';
 
 function fixture() {
   const events: string[] = [];
@@ -110,4 +110,24 @@ test('preserves both execution and cleanup failures without printing SDK error d
     return true;
   });
   assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+test('withholds unexpected constructor and disposal errors at the CLI boundary', () => {
+  for (const error of [
+    new Error('private constructor request detail'),
+    new AggregateError([new Error('private cause')], 'private disposal detail'),
+    'private non-Error detail',
+  ]) {
+    assert.equal(daytonaErrorMessage(error), 'Daytona smoke failed; SDK error details were withheld.');
+  }
+});
+
+test('keeps authored missing-key and lifecycle messages without exposing their causes', () => {
+  for (const message of [
+    'Set DAYTONA_API_KEY in the host environment before running test:daytona.',
+    'Deletion unconfirmed for sandbox smoke-sandbox; check Daytona before retrying',
+  ]) {
+    const error = new DaytonaSmokeError([new Error('private SDK detail')], message);
+    assert.equal(daytonaErrorMessage(error), message);
+  }
 });

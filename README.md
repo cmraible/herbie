@@ -98,5 +98,5 @@ A create timeout can leave a sandbox without returning its handle: cleanup is th
 before retrying. Client timeouts do not cancel remote operations, and process termination
 can prevent cleanup; the TTL is a fallback, not confirmation of immediate deletion.
 Capture console output if you need a record. This command is excluded from default
-tests and CI, but typechecked. `pnpm test` runs its eight mocked lifecycle tests without
+tests and CI, but typechecked. `pnpm test` runs its mocked lifecycle and error-output tests without
 credentials, provisioning, or charges.

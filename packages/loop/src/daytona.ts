@@ -12,6 +12,13 @@ interface SmokeSandbox {
 
 type CreateSandbox = (params: CreateSandboxFromImageParams, options: { timeout: number }) => Promise<SmokeSandbox>;
 
+// Only messages authored by this smoke test are safe to print at the CLI boundary.
+export class DaytonaSmokeError extends AggregateError {}
+
+export function daytonaErrorMessage(error: unknown): string {
+  return error instanceof DaytonaSmokeError ? error.message : 'Daytona smoke failed; SDK error details were withheld.';
+}
+
 export async function runDaytonaSmoke(create: CreateSandbox, report: (message: string) => void): Promise<void> {
   const name = `herbie-smoke-${randomUUID()}`;
   report(`Creating sandbox ${name}`);
@@ -25,7 +32,7 @@ export async function runDaytonaSmoke(create: CreateSandbox, report: (message: s
       ttlMinutes: 5,
     }, { timeout: 120 });
   } catch (cause) {
-    throw new Error(`Creation failed for ${name}; cleanup is unconfirmed. Check Daytona by name.`, { cause });
+    throw new DaytonaSmokeError([cause], `Creation failed for ${name}; cleanup is unconfirmed. Check Daytona by name.`, { cause });
   }
 
   const failures: Error[] = [];
@@ -45,5 +52,5 @@ export async function runDaytonaSmoke(create: CreateSandbox, report: (message: s
       failures.push(new Error(`Deletion unconfirmed for sandbox ${sandbox.id}; check Daytona before retrying`, { cause }));
     }
   }
-  if (failures.length > 0) throw new AggregateError(failures, failures.map(error => error.message).join('; '));
+  if (failures.length > 0) throw new DaytonaSmokeError(failures, failures.map(error => error.message).join('; '));
 }
