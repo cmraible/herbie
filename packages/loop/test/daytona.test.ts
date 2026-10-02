@@ -50,3 +50,64 @@ test('reports ambiguous creation without retrying or claiming deletion', async (
   assert.equal(sandbox.delete.mock.callCount(), 0);
   assert.equal(events.length, 1);
 });
+
+for (const scenario of [
+  { name: 'command rejection', run: async () => { throw new Error('request rejected'); } },
+  { name: 'command timeout', run: async () => { throw new Error('execution timed out'); } },
+  { name: 'nonzero exit', run: async () => ({ exitCode: 1, result: 'herbie-daytona-ok\n' }) },
+  { name: 'unexpected output', run: async () => ({ exitCode: 0, result: 'wrong\n' }) },
+]) {
+  test(`waits for deletion after ${scenario.name}`, async () => {
+    const { sandbox, create, report, events } = fixture();
+    sandbox.process.executeCommand.mock.mockImplementation(scenario.run);
+    await assert.rejects(runDaytonaSmoke(create, report), error => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.errors.length, 1);
+      assert.equal(error.message, 'Command failed in sandbox smoke-sandbox');
+      return true;
+    });
+    assert.equal(create.mock.callCount(), 1);
+    assert.equal(sandbox.process.executeCommand.mock.callCount(), 1);
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+    assert.deepEqual(sandbox.delete.mock.calls[0].arguments, [60, true]);
+    assert.equal(events.at(-1), 'Deletion confirmed for sandbox smoke-sandbox');
+  });
+}
+
+test('fails when deletion is unconfirmed even if the command passed', async () => {
+  const { sandbox, create, report, events } = fixture();
+  const failure = new Error('delete request timed out');
+  sandbox.delete.mock.mockImplementation(async () => { throw failure; });
+  await assert.rejects(runDaytonaSmoke(create, report), error => {
+    assert.ok(error instanceof AggregateError);
+    const errors: unknown[] = error.errors;
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0] instanceof Error);
+    assert.equal(errors[0].cause, failure);
+    assert.match(error.message, /Deletion unconfirmed for sandbox smoke-sandbox/);
+    return true;
+  });
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+  assert.equal(events.some(event => event.startsWith('Deletion confirmed')), false);
+});
+
+test('preserves both execution and cleanup failures without printing SDK error details', async () => {
+  const { sandbox, create, report } = fixture();
+  const commandFailure = new Error('private command request detail');
+  const deleteFailure = new Error('private delete request detail');
+  sandbox.process.executeCommand.mock.mockImplementation(async () => { throw commandFailure; });
+  sandbox.delete.mock.mockImplementation(async () => { throw deleteFailure; });
+  await assert.rejects(runDaytonaSmoke(create, report), error => {
+    assert.ok(error instanceof AggregateError);
+    const errors: unknown[] = error.errors;
+    assert.equal(errors.length, 2);
+    assert.ok(errors[0] instanceof Error);
+    assert.ok(errors[1] instanceof Error);
+    assert.equal(errors[0].cause, commandFailure);
+    assert.equal(errors[1].cause, deleteFailure);
+    assert.match(error.message, /Command failed.*Deletion unconfirmed/);
+    assert.doesNotMatch(error.message, /private/);
+    return true;
+  });
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
