@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -10,7 +10,7 @@ import { createInterface } from 'node:readline';
 
 const entrypoint = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 
-function runCli(args: string[], env: NodeJS.ProcessEnv = process.env) {
+function runCli(args: string[], env: NodeJS.ProcessEnv = { ...process.env, PATH: '' }) {
   return spawnSync(process.execPath, ['--import', 'tsx', entrypoint, ...args], {
     encoding: 'utf8',
     timeout: 10_000,
@@ -29,16 +29,18 @@ async function fakeCodex(t: TestContext) {
 }
 
 test('runs one Codex attempt with the repository and goal, exposing both output streams', async t => {
-  const { env, record } = await fakeCodex(t);
-  const result = runCli(['--repo', '/tmp/my project', '--goal', 'Improve error messages'], env);
+  const { env, record, directory } = await fakeCodex(t);
+  const repo = join(directory, 'my project');
+  await mkdir(repo);
+  const result = runCli(['--repo', repo, '--goal', 'Improve error messages'], env);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Repository: \/tmp\/my project/);
+  assert.ok(result.stdout.includes(`Repository: ${repo}`));
   assert.match(result.stdout, /Goal: Improve error messages/);
   assert.match(result.stdout, /Codex test output/);
   assert.match(result.stderr, /Codex test diagnostics/);
   const args: unknown = JSON.parse(await readFile(record, 'utf8'));
   assert.deepEqual(args, [
-    'exec', '--cd', '/tmp/my project', '--sandbox', 'workspace-write',
+    'exec', '--cd', repo, '--sandbox', 'workspace-write',
     [
       'Make one small improvement aligned with the goal below.',
       'Read the repository instructions, implement the change, and run proportionate tests.',
@@ -48,6 +50,42 @@ test('runs one Codex attempt with the repository and goal, exposing both output 
       'Goal: Improve error messages',
     ].join('\n'),
   ]);
+});
+
+test('preserves a failed Codex exit status', async t => {
+  const { env, directory } = await fakeCodex(t);
+  const result = runCli(['--repo', directory, '--goal', 'Improve errors'], {
+    ...env, CODEX_TEST_EXIT: '7',
+  });
+  assert.equal(result.status, 7);
+  assert.match(result.stderr, /Codex test diagnostics/);
+});
+
+test('reports a child terminated by a signal as failure', async t => {
+  const { env, directory } = await fakeCodex(t);
+  const result = runCli(['--repo', directory, '--goal', 'Improve errors'], {
+    ...env, CODEX_TEST_SIGNAL: '1',
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Codex stopped by SIGTERM/);
+});
+
+test('reports a missing Codex executable', async t => {
+  const { env, directory } = await fakeCodex(t);
+  await rm(join(directory, 'codex'));
+  const result = runCli(['--repo', directory, '--goal', 'Improve errors'], env);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Could not start Codex/);
+});
+
+test('rejects a missing repository or a file before starting Codex', async t => {
+  const { env, directory, record } = await fakeCodex(t);
+  for (const repo of [join(directory, 'missing'), entrypoint]) {
+    const result = runCli(['--repo', repo, '--goal', 'Improve errors'], env);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /ENOENT|must point to a directory/);
+    await assert.rejects(readFile(record), { code: 'ENOENT' });
+  }
 });
 
 test('help explains the required inputs', () => {
