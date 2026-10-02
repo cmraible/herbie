@@ -114,6 +114,7 @@ function verify(repo: string, directory: string, head: string, testBytes: Buffer
   assert.equal(git(repo, 'remote'), '', 'A remote was added');
   assert.equal(git(repo, 'status', '--porcelain=v1', '--untracked-files=all', '--ignored'), ' M add.mjs\n');
   assert.equal(git(repo, 'diff', '--numstat'), '1\t1\tadd.mjs\n');
+  assert.equal(git(repo, 'diff', '--summary'), '', 'File modes or paths changed');
 }
 
 async function main(): Promise<void> {

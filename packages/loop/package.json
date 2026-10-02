@@ -12,6 +12,7 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --project tsconfig.test.json",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "test:e2e": "tsx test/e2e.ts"
   }
 }
