@@ -67,3 +67,36 @@ After building:
 node packages/loop/dist/index.js --repo /path/to/checkout --goal "Improve error messages"
 node packages/demo/dist/index.js
 ```
+
+### Opt-in Daytona lifecycle smoke
+
+`pnpm test:daytona` creates a real, billable Daytona sandbox, runs a fixed `printf`
+probe, and waits for deletion. Run it only after approving the spend and configuring
+`DAYTONA_API_KEY` in the host environment with sandbox create/execute/delete access.
+The SDK also honors its standard `DAYTONA_API_URL` and `DAYTONA_TARGET` settings.
+No host environment or secrets are passed into the sandbox; no OpenAI key is needed.
+This does not clone a repository or run Codex.
+
+The pinned `@daytona/sdk` 0.220.0 supports the options used here. We request
+`ubuntu:22.04` with the documented minimum 1 vCPU, 1 GiB RAM, and 1 GiB disk,
+block sandbox network access, and set a five-minute server-side TTL. Explicit
+resource sizing uses image-based creation; Daytona may build/cache an image snapshot.
+This smoke deletes its sandbox, not provider-managed image caches. Capacity, image
+availability, and fit within the minimum disk remain subject to a live check.
+See the [resource limits](https://www.daytona.io/docs/en/sandboxes/#resources) and
+[SDK lifecycle options](https://www.daytona.io/docs/en/typescript-sdk/daytona/).
+
+Creation has a 120-second timeout; the command has a 10-second server-side timeout;
+deletion waits up to 60 seconds for destruction. Other HTTP requests have a 30-second
+client timeout. After obtaining a sandbox, cleanup runs even when the command fails.
+Command and cleanup errors are both preserved; deletion failure makes the smoke fail.
+The console prints the unique name before creation, then the sandbox ID and safe
+phase results. It does not dump SDK errors or credentials.
+
+A create timeout can leave a sandbox without returning its handle: cleanup is then
+**unconfirmed**. There are no automatic retries. Check the printed name/ID in Daytona
+before retrying. Client timeouts do not cancel remote operations, and process termination
+can prevent cleanup; the TTL is a fallback, not confirmation of immediate deletion.
+Capture console output if you need a record. This command is excluded from default
+tests and CI, but typechecked. `pnpm test` runs its mocked lifecycle and error-output tests without
+credentials, provisioning, or charges.
