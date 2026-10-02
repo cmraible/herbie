@@ -1,28 +1,81 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { test } from 'node:test';
+import { spawn, spawnSync } from 'node:child_process';
+import { test, type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 
 const entrypoint = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 
-function runCli(args: string[]) {
+function runCli(args: string[], env: NodeJS.ProcessEnv = process.env) {
   return spawnSync(process.execPath, ['--import', 'tsx', entrypoint, ...args], {
     encoding: 'utf8',
     timeout: 10_000,
+    env,
   });
 }
 
-test('accepts a repository and a goal containing spaces', () => {
-  const result = runCli(['--repo', '/tmp/my project', '--goal', 'Improve error messages']);
+async function fakeCodex(t: TestContext) {
+  const directory = await mkdtemp(join(tmpdir(), 'herbie-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fixture = fileURLToPath(new URL('fixtures/codex.ts', import.meta.url));
+  await symlink(fixture, join(directory, 'codex'));
+  await symlink(process.execPath, join(directory, 'node'));
+  const record = join(directory, 'invocation.json');
+  return { directory, record, env: { ...process.env, PATH: directory, CODEX_TEST_RECORD: record } };
+}
+
+test('runs one Codex attempt with the repository and goal, exposing both output streams', async t => {
+  const { env, record } = await fakeCodex(t);
+  const result = runCli(['--repo', '/tmp/my project', '--goal', 'Improve error messages'], env);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Repository: \/tmp\/my project/);
   assert.match(result.stdout, /Goal: Improve error messages/);
+  assert.match(result.stdout, /Codex test output/);
+  assert.match(result.stderr, /Codex test diagnostics/);
+  const args: unknown = JSON.parse(await readFile(record, 'utf8'));
+  assert.deepEqual(args, [
+    'exec', '--cd', '/tmp/my project', '--sandbox', 'workspace-write',
+    [
+      'Make one small improvement aligned with the goal below.',
+      'Read the repository instructions, implement the change, and run proportionate tests.',
+      'Keep the code minimal and readable. Summarize the change and verification.',
+      'Leave changes local. Do not commit, push, create a pull request, or merge.',
+      '',
+      'Goal: Improve error messages',
+    ].join('\n'),
+  ]);
 });
 
 test('help explains the required inputs', () => {
   const result = runCli(['--help']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--repo <path> --goal <goal>/);
+});
+
+test('streams output before Codex finishes and inherits stdin', { timeout: 10_000 }, async t => {
+  const { env, directory } = await fakeCodex(t);
+  const child = spawn(process.execPath, [
+    '--import', 'tsx', entrypoint, '--repo', directory, '--goal', 'Improve errors',
+  ], { env: { ...env, CODEX_TEST_WAIT: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+  t.after(() => child.kill());
+  const closed = once(child, 'close');
+  const lines = createInterface({ input: child.stdout });
+  t.after(() => lines.close());
+  let sawOutput = false;
+  for await (const line of lines) {
+    if (line === 'Codex test output') {
+      sawOutput = true;
+      child.stdin.end('finish\n');
+      break;
+    }
+  }
+  assert.equal(sawOutput, true);
+  const [code] = await closed;
+  assert.equal(code, 0);
 });
 
 test('rejects missing, blank, and unknown inputs', () => {
