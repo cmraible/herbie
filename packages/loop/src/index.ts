@@ -1,8 +1,33 @@
-const fiveMinutesMs = 5 * 60 * 1000;
+import { parseArgs } from 'node:util';
 
-function logHelloWorld(): void {
-  console.log("Hello, world!");
+const usage = 'Usage: pnpm start --repo <path> --goal <goal>';
+
+function main(): void {
+  const { values } = parseArgs({
+    options: {
+      repo: { type: 'string' },
+      goal: { type: 'string' },
+      help: { type: 'boolean' },
+    },
+  });
+
+  if (values.help) {
+    console.log(usage);
+    return;
+  }
+
+  if (!values.repo?.trim() || !values.goal?.trim()) {
+    throw new Error('Both --repo and --goal must be nonempty.');
+  }
+
+  console.log(`Repository: ${values.repo}`);
+  console.log(`Goal: ${values.goal}`);
 }
 
-logHelloWorld();
-setInterval(logHelloWorld, fiveMinutesMs);
+try {
+  main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  console.error(usage);
+  process.exitCode = 1;
+}
