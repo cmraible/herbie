@@ -43,7 +43,7 @@ export function createArithmeticFixture(repo: string): string {
   git(repo, 'init', '--template=', '-b', 'main');
   git(repo, 'add', 'add.mjs', 'add.test.mjs');
   git(repo, '-c', 'user.name=Herbie Smoke Test', '-c', 'user.email=smoke@example.invalid',
-    '-c', 'commit.gpgsign=false',
+    '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null',
     'commit', '-m', 'Baseline failing addition');
   assert.equal(git(repo, 'remote'), '');
   assert.equal(git(repo, 'status', '--porcelain'), '');
