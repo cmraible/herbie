@@ -34,7 +34,30 @@ pnpm build
 
 These commands run across the workspace. To target one package, use `pnpm --filter @herbie/demo test` or `pnpm --filter @herbie/loop build`.
 
-The internal app-server helpers are not wired into the CLI. `runCodexTurn` accepts
+The internal app-server helpers are not wired into the CLI. After building, one
+complete attempt can be called with:
+
+```js
+import { runCodexAttempt } from './packages/loop/dist/codex-process.js';
+
+const controller = new AbortController();
+await runCodexAttempt('codex', ['app-server'], {
+  cwd: '/path/to/checkout',
+  goal: 'Fix the failing addition test',
+  signal: controller.signal, // optional AbortController owned by the caller
+});
+```
+
+This starts Codex in the checkout, initializes it, creates one ephemeral thread,
+runs the goal, waits for terminal completion, and cleans up its process group.
+It resolves only after successful completion and cleanup; either failure rejects.
+`timeoutMs` bounds each initialization/thread-start phase (default ten seconds),
+`turnTimeoutMs` bounds the turn (default sixty seconds), and `interruptTimeoutMs`
+bounds cancellation confirmation (default five seconds). Abort during a turn uses
+the interrupt handshake before process cleanup. This does not run repository tests,
+publish changes, or provision a sandbox; launching real Codex consumes quota.
+
+`runCodexTurn` accepts
 `{ timeoutMs, signal, interruptTimeoutMs }` as its fifth argument. Timeout or abort
 requests `turn/interrupt` once the start response supplies a turn ID, then waits up
 to `interruptTimeoutMs` (default five seconds) for the matching terminal event.
@@ -53,8 +76,8 @@ Descendants remaining in that group are covered; descendants that call `setsid`
 or change groups, remote work, and termination of Herbie itself are not. Unreaped
 zombies can keep group cleanup unconfirmed. Windows is rejected before spawning.
 The eventual disposable Daytona sandbox needs confirmed deletion as the stronger
-boundary for escaped descendants. This remains an initialization probe, not a live
-goal runner or sandbox lifecycle implementation.
+boundary for escaped descendants. `initializeCodexProcess` remains an initialization
+probe; `runCodexAttempt` adds the thread and goal using the same process owner.
 
 ### Opt-in real Codex smoke test
 

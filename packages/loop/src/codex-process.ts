@@ -1,19 +1,38 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { resolve } from 'node:path';
 import { initializeCodex } from './codex-initialize.js';
+import { startCodexThread } from './codex-thread.js';
+import { runCodexTurn } from './codex-turn.js';
 
-// Initialization probe only. Owns a fresh POSIX group, not escaped descendants or remote turns.
-export async function initializeCodexProcess(
+type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number };
+type AttemptOptions = ProcessOptions & {
+  cwd: string; goal: string; turnTimeoutMs?: number; interruptTimeoutMs?: number;
+};
+
+export function initializeCodexProcess(command: string, args: readonly string[], options: ProcessOptions = {}): Promise<void> {
+  const { signal, timeoutMs, shutdownMs } = options;
+  return runCodexProcess(command, args, { signal, timeoutMs, shutdownMs });
+}
+
+// One initialized thread and goal, followed by owned-group cleanup on every outcome.
+export function runCodexAttempt(command: string, args: readonly string[], options: AttemptOptions): Promise<void> {
+  return runCodexProcess(command, args, { ...options, cwd: resolve(options.cwd) });
+}
+
+// Owns a fresh POSIX group, not escaped descendants or remote turns.
+async function runCodexProcess(
   command: string, args: readonly string[],
-  { signal, timeoutMs = 10_000, shutdownMs = 1_000 }: {
-    signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number;
-  } = {},
+  options: ProcessOptions | AttemptOptions,
 ): Promise<void> {
+  const { signal, timeoutMs = 10_000, shutdownMs = 1_000 } = options;
   if (signal?.aborted) throw new Error('Codex process cancelled');
   if (process.platform === 'win32') throw new Error('Codex process groups require POSIX');
   if (!Number.isFinite(shutdownMs) || shutdownMs < 0) throw new Error('Invalid Codex shutdown deadline');
-  const child = spawn(command, args, { stdio: 'pipe', detached: true });
+  const child = spawn(command, args, {
+    stdio: 'pipe', detached: true, cwd: 'cwd' in options ? options.cwd : undefined,
+  });
   const groupId = child.pid;
   let groupGone = groupId === undefined;
   const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
@@ -31,10 +50,11 @@ export async function initializeCodexProcess(
   const failure = Promise.withResolvers<never>();
   const failures: unknown[] = [];
   let stopping = false;
+  let runningTurn = false;
   let closed = false;
   child.once('close', () => { closed = true; });
   child.once('exit', () => {
-    if (!stopping) failure.reject(new Error('Codex process exited before initialization completed'));
+    if (!stopping) failure.reject(new Error('Codex process exited before work completed'));
   });
   const transportError = new Error('Codex process transport failed');
   const cancellation = new Error('Codex process cancelled');
@@ -43,7 +63,12 @@ export async function initializeCodexProcess(
     failure.reject(error);
   };
   const onError = () => fail(transportError);
-  const onAbort = () => fail(cancellation);
+  const onAbort = () => {
+    // Let runCodexTurn request interruption and await its bounded terminal confirmation.
+    if (runningTurn) {
+      if (!failures.includes(cancellation)) failures.push(cancellation);
+    } else fail(cancellation);
+  };
   child.on('error', onError);
   child.stdin.on('error', onError);
   child.stdout.on('error', onError);
@@ -52,15 +77,24 @@ export async function initializeCodexProcess(
   child.stderr.resume(); // Drain diagnostics without logging potentially sensitive content.
   signal?.addEventListener('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
+  const send = (message: unknown) => {
+    if (!child.stdin.writable) throw new Error('Codex stdin is closed');
+    child.stdin.write(JSON.stringify(message) + '\n', error => { if (error) onError(); });
+  };
   try {
     if (signal?.aborted) await failure.promise;
-    await Promise.race([
-      failure.promise,
-      initializeCodex(lines, message => {
-        if (!child.stdin.writable) throw new Error('Codex stdin is closed');
-        child.stdin.write(JSON.stringify(message) + '\n', error => { if (error) onError(); });
-      }, timeoutMs),
-    ]);
+    await Promise.race([failure.promise, initializeCodex(lines, send, timeoutMs)]);
+    if ('goal' in options) {
+      if (signal?.aborted) throw cancellation;
+      const threadId = await Promise.race([failure.promise, startCodexThread(lines, send, options.cwd, timeoutMs)]);
+      if (signal?.aborted) throw cancellation;
+      runningTurn = true;
+      try {
+        await Promise.race([failure.promise, runCodexTurn(lines, send, threadId, options.goal, {
+          signal, timeoutMs: options.turnTimeoutMs, interruptTimeoutMs: options.interruptTimeoutMs,
+        })]);
+      } finally { runningTurn = false; }
+    }
   } catch (error) {
     if (!failures.includes(error)) failures.push(error);
   } finally {
@@ -102,5 +136,5 @@ export async function initializeCodexProcess(
     child.stdout.off('error', onError);
     child.stderr.off('error', onError);
   }
-  if (failures.length) throw new AggregateError(failures, 'Codex process initialization or shutdown failed');
+  if (failures.length) throw new AggregateError(failures, 'Codex process execution or shutdown failed');
 }
