@@ -6,26 +6,58 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-// One turn per initialized connection, after startCodexThread. Request ID 2 is reserved.
-// The caller owns transport/cancellation; send enqueues synchronously or throws.
-// Transport failures must close/error lines. A local timeout does not cancel remote work.
+// One turn per initialized connection, after startCodexThread. Request IDs 2 and 3 are reserved.
+// The caller owns transport/process cleanup; send enqueues synchronously or throws.
+// Transport failures must close/error lines. A terminal event does not confirm descendant exit.
 export function runCodexTurn(
-  lines: Interface, send: (message: unknown) => void, threadId: string, goal: string, timeoutMs = 60_000,
+  lines: Interface, send: (message: unknown) => void, threadId: string, goal: string,
+  { timeoutMs = 60_000, signal, interruptTimeoutMs = 5_000 }: {
+    timeoutMs?: number; signal?: AbortSignal; interruptTimeoutMs?: number;
+  } = {},
 ): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error('Codex turn cancelled'));
   return new Promise((resolve, reject) => {
     let turnId: string | undefined;
+    let cancellation: Error | undefined;
+    let interruptSent = false;
+    let settled = false;
+    let interruptTimer: ReturnType<typeof setTimeout> | undefined;
     // A completion notification may precede the turn/start response that identifies our turn.
     const completions = new Map<string, TerminalStatus>();
-    const timer = setTimeout(() => finish(new Error('Codex turn timed out')), timeoutMs);
-    const finish = (error?: Error) => {
+    const timer = setTimeout(() => cancel(new Error('Codex turn timed out')), timeoutMs);
+    const finish = (error?: Error, terminal = false) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      clearTimeout(interruptTimer);
+      signal?.removeEventListener('abort', onAbort);
       lines.off('line', onLine);
       lines.off('close', onClose);
       lines.off('error', onError);
       completions.clear();
-      if (error) reject(error);
+      if (cancellation && !terminal) reject(new AggregateError(
+        error ? [cancellation, error] : [cancellation],
+        `${cancellation.message}; Codex turn termination unconfirmed`,
+      ));
+      else if (cancellation || error) reject(cancellation ?? error);
       else resolve();
     };
+    const interrupt = () => {
+      if (settled || !cancellation || turnId === undefined || interruptSent) return;
+      interruptSent = true;
+      try {
+        send({ id: 3, method: 'turn/interrupt', params: { threadId, turnId } });
+      } catch { onError(); }
+    };
+    const cancel = (error: Error) => {
+      if (settled || cancellation) return;
+      cancellation = error;
+      clearTimeout(timer);
+      // Includes time waiting for a late turn/start response; never guess the active turn ID.
+      interruptTimer = setTimeout(() => finish(new Error('Codex interrupt timed out')), interruptTimeoutMs);
+      interrupt();
+    };
+    const onAbort = () => cancel(new Error('Codex turn cancelled'));
     const onClose = () => finish(new Error('Codex turn failed: connection closed'));
     const onError = () => finish(new Error('Codex turn failed: transport error'));
     const onLine = (line: string) => {
@@ -37,6 +69,9 @@ export function runCodexTurn(
           const id = message.result.turn.id;
           if (typeof id !== 'string' || id.trim() === '') throw new Error();
           turnId = id;
+        } else if (message.id === 3 && interruptSent) {
+          if ('error' in message || !isObject(message.result)) throw new Error();
+          // Acknowledgement alone does not confirm that the turn has stopped.
         } else if (message.method === 'turn/completed') {
           if (!isObject(message.params)) throw new Error();
           if (message.params.threadId !== threadId) return;
@@ -48,7 +83,8 @@ export function runCodexTurn(
           completions.set(turn.id, status);
         }
         const status = turnId === undefined ? undefined : completions.get(turnId);
-        if (status !== undefined) finish(status === 'completed' ? undefined : new Error(`Codex turn ${status}`));
+        if (status !== undefined) finish(status === 'completed' ? undefined : new Error(`Codex turn ${status}`), true);
+        else interrupt();
       } catch {
         finish(new Error('Codex turn failed: invalid or rejected response'));
       }
@@ -56,6 +92,7 @@ export function runCodexTurn(
     lines.on('line', onLine);
     lines.once('close', onClose);
     lines.once('error', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
       send({ id: 2, method: 'turn/start', params: { threadId, input: [{ type: 'text', text: goal }] } });
     } catch {
