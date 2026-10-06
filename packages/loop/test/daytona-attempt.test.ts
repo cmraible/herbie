@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { test, mock, type TestContext } from 'node:test';
 import { DaytonaAttemptError, runDaytonaAttempt } from '../src/daytona-attempt.js';
+import { createArithmeticFixture } from './fixtures/arithmetic.js';
 
 type Create = Parameters<typeof runDaytonaAttempt>[0];
 type Sandbox = Awaited<ReturnType<Create>>;
@@ -18,6 +19,8 @@ const request = {
   goal: 'Fix addition; $(do-not-execute) `nor-this` \'quoted\'\nsecond line',
 };
 const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner'];
+const changes = { baseCommit: 'a'.repeat(40), patch: Buffer.from('diff --git a/file.txt b/file.txt\n') };
+const artifact = Buffer.from(JSON.stringify({ baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64') }));
 const runtime = await Promise.all(runtimeNames.map(async name => ({
   name: `${name}.js`,
   code: stripTypeScriptTypes(await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')),
@@ -32,6 +35,7 @@ async function fixture(t: TestContext) {
     fs: {
       createFolder: mock.fn<Sandbox['fs']['createFolder']>(async () => {}),
       uploadFile: mock.fn<Sandbox['fs']['uploadFile']>(async () => {}),
+      downloadFile: mock.fn<Sandbox['fs']['downloadFile']>(async () => artifact),
     },
     git: { clone: mock.fn<Sandbox['git']['clone']>(async () => {}) },
     process: { executeCommand: mock.fn<Sandbox['process']['executeCommand']>(async () => ({ exitCode: 0, result: 'herbie-attempt-completed\n' })) },
@@ -53,7 +57,7 @@ test('prepares runtime and repo, invokes the attempt, and waits for deletion usi
   while (!sandbox.delete.mock.callCount()) await new Promise(resolve => setImmediate(resolve));
   assert.equal(reports.some(message => message.startsWith('Deletion confirmed')), false);
   release();
-  await done;
+  assert.deepEqual(await done, changes);
   const [params, options] = create.mock.calls[0].arguments;
   assert.deepEqual(params, {
     name: params.name, snapshot: request.snapshot, domainAllowList: request.domainAllowList,
@@ -70,13 +74,14 @@ test('prepares runtime and repo, invokes the attempt, and waits for deletion usi
   const input = uploads.at(-1);
   assert.ok(input);
   assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, goal: request.goal });
-  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`node ${root}/daytona-runner.js`, root, undefined, 360]);
+  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`node ${root}/daytona-runner.js`, root, undefined, 480]);
   assert.equal(sandbox.process.executeCommand.mock.calls[0].arguments[3], 30);
+  assert.deepEqual(sandbox.fs.downloadFile.mock.calls[0].arguments, [`${root}/changes.json`, 30]);
   assert.deepEqual(sandbox.delete.mock.calls[0].arguments, [60, true]);
   assert.equal(reports.at(-1), 'Deletion confirmed for sandbox attempt-sandbox');
 });
 
-for (const phase of ['preflight', 'upload', 'clone', 'execute', 'nonzero', 'wrong-output', 'delete', 'execute-and-delete']) {
+for (const phase of ['preflight', 'upload', 'clone', 'execute', 'nonzero', 'wrong-output', 'download', 'invalid-json', 'invalid-artifact', 'invalid-base64', 'delete', 'execute-and-delete', 'download-and-delete']) {
   test(`reports ${phase} failure and cleans up after acquiring the sandbox`, async t => {
     const { sandbox, reports, run } = await fixture(t);
     const fail = async () => { throw new Error('private SDK detail'); };
@@ -87,19 +92,37 @@ for (const phase of ['preflight', 'upload', 'clone', 'execute', 'nonzero', 'wron
     if (phase === 'nonzero' || phase === 'wrong-output') {
       sandbox.process.executeCommand.mock.mockImplementationOnce(async () => ({ exitCode: phase === 'nonzero' ? 1 : 0, result: 'private output' }), 1);
     }
-    if (phase === 'delete' || phase === 'execute-and-delete') sandbox.delete.mock.mockImplementation(fail);
+    if (phase === 'download' || phase === 'download-and-delete') sandbox.fs.downloadFile.mock.mockImplementation(fail);
+    if (phase === 'invalid-json') sandbox.fs.downloadFile.mock.mockImplementation(async () => Buffer.from('invalid JSON'));
+    if (phase === 'invalid-artifact') sandbox.fs.downloadFile.mock.mockImplementation(async () => Buffer.from('{"baseCommit":"unknown","patch":null}'));
+    if (phase === 'invalid-base64') sandbox.fs.downloadFile.mock.mockImplementation(async () => Buffer.from(JSON.stringify({ baseCommit: changes.baseCommit, patchBase64: 'not base64!' })));
+    if (phase === 'delete' || phase.endsWith('-and-delete')) sandbox.delete.mock.mockImplementation(fail);
     await assert.rejects(run(), error => {
       assert.ok(error instanceof DaytonaAttemptError);
-      assert.equal(error.errors.length, phase === 'execute-and-delete' ? 2 : 1);
+      assert.equal(error.errors.length, phase.endsWith('-and-delete') ? 2 : 1);
+      assert.deepEqual(error.changes, phase === 'delete' ? changes : undefined);
       assert.doesNotMatch(error.message, /private/);
       return true;
     });
     assert.equal(sandbox.delete.mock.callCount(), 1);
-    if (phase === 'delete' || phase === 'execute-and-delete') assert.equal(reports.some(message => message.startsWith('Deletion confirmed')), false);
+    if (phase === 'delete' || phase.endsWith('-and-delete')) assert.equal(reports.some(message => message.startsWith('Deletion confirmed')), false);
     if (phase === 'preflight' || phase === 'upload') assert.equal(sandbox.git.clone.mock.callCount(), 0);
     if (phase === 'clone') assert.equal(sandbox.process.executeCommand.mock.callCount(), 1);
   });
 }
+
+test('waits for change retrieval before starting sandbox deletion', async t => {
+  const { sandbox, run, reports } = await fixture(t);
+  const download = Promise.withResolvers<Buffer>();
+  sandbox.fs.downloadFile.mock.mockImplementation(() => download.promise);
+  const done = run();
+  while (!sandbox.fs.downloadFile.mock.callCount()) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sandbox.delete.mock.callCount(), 0);
+  download.resolve(artifact);
+  assert.deepEqual(await done, changes);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+  assert.ok(reports.every(message => !message.includes(changes.patch.toString())));
+});
 
 test('creation failure remains unconfirmed without retries or fake deletion', async t => {
   const { create, sandbox, run } = await fixture(t);
@@ -117,19 +140,24 @@ test('missing runtime and credential-bearing repo URLs fail before provisioning'
   assert.equal(create.mock.callCount(), 0);
 });
 
-test('uploaded runner executes the connected attempt with a local fake Codex, without a provider', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+async function localFixture(t: TestContext, edits = '') {
   const { directory, sandbox, run } = await fixture(t);
   const bin = join(directory, 'bin');
   await mkdir(bin);
   const record = join(directory, 'protocol');
   const protocolFixture = fileURLToPath(new URL('./fixtures/goal-attempt.ts', import.meta.url));
-  await writeFile(join(bin, 'codex'), `#!/usr/bin/env node\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`, { mode: 0o700 });
+  await writeFile(join(bin, 'codex'), `#!/usr/bin/env node\n${edits}\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`, { mode: 0o700 });
   sandbox.fs.createFolder.mock.mockImplementation(async path => {
     await mkdir(path);
     t.after(() => rm(path, { recursive: true, force: true }));
   });
   sandbox.fs.uploadFile.mock.mockImplementation(async (contents, path) => { await writeFile(path, contents); });
-  sandbox.git.clone.mock.mockImplementation(async (_url, path) => { await mkdir(path); });
+  sandbox.fs.downloadFile.mock.mockImplementation(async (path: string) => readFile(path));
+  const baseRepo = join(directory, 'base');
+  const baseCommit = createArithmeticFixture(baseRepo).trim();
+  sandbox.git.clone.mock.mockImplementation(async (_url, path) => {
+    await promisify(execFile)('git', ['clone', '--no-hardlinks', baseRepo, path]);
+  });
   sandbox.process.executeCommand.mock.mockImplementationOnce(async (command, cwd) => {
     assert.ok(cwd);
     assert.equal(command, `node ${cwd}/daytona-runner.js`);
@@ -138,10 +166,75 @@ test('uploaded runner executes the connected attempt with a local fake Codex, wi
     });
     return { exitCode: 0, result: stdout };
   }, 1);
-  await run();
+  sandbox.delete.mock.mockImplementation(async () => {
+    const root = sandbox.fs.createFolder.mock.calls[0].arguments[0];
+    await rm(root, { recursive: true });
+  });
+  return { directory, sandbox, run, record, baseRepo, baseCommit };
+}
+
+test('uploaded runner executes the connected attempt with a local fake Codex and preserves an empty patch', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+  const { sandbox, run, record, baseCommit } = await localFixture(t);
+  assert.deepEqual(await run(), { baseCommit, patch: Buffer.alloc(0) });
   const events: unknown[] = (await readFile(record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   assert.ok(events.some(event => typeof event === 'object' && event !== null && 'params' in event
     && JSON.stringify(event.params).includes('do-not-execute')));
   assert.deepEqual(events.slice(-2), [{ completed: 'completed' }, { eof: true }]);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+for (const commitDuringAttempt of [false, true]) {
+  test(`retrieved patch reproduces tracked, staged, new, binary and non-UTF-8 files after deletion (Codex commits: ${commitDuringAttempt})`, { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+    const { directory, sandbox, run, baseRepo, baseCommit } = await localFixture(t, `
+      import { writeFileSync, rmSync, chmodSync } from 'node:fs';
+      import { execFileSync } from 'node:child_process';
+      if (${commitDuringAttempt}) {
+        writeFileSync('committed.txt', 'committed during the attempt\\n');
+        execFileSync('git', ['add', 'committed.txt']);
+        execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+          '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Codex change']);
+      }
+      writeFileSync('add.mjs', Buffer.from('// café\\nexport const add = (a, b) => a + b;\\n', 'latin1'));
+      chmodSync('add.mjs', 0o755);
+      rmSync('add.test.mjs');
+      writeFileSync('staged.txt', 'staged change\\n');
+      execFileSync('git', ['add', 'staged.txt']);
+      writeFileSync('new file.txt', 'new untracked file\\n');
+      writeFileSync('empty.txt', '');
+      writeFileSync('binary.dat', Buffer.from([0, 255, 1, 254]));
+      writeFileSync('.gitignore', 'ignored.txt\\n');
+      writeFileSync('ignored.txt', 'excluded build output');
+    `);
+    const result = await run();
+    assert.equal(result.baseCommit, baseCommit);
+    const root = sandbox.fs.createFolder.mock.calls[0].arguments[0];
+    await assert.rejects(readFile(join(root, 'changes.json')), { code: 'ENOENT' });
+    const patch = join(directory, 'retrieved.patch');
+    await writeFile(patch, result.patch);
+    await promisify(execFile)('git', ['-C', baseRepo, 'apply', '--index', patch]);
+    assert.deepEqual(await readFile(join(baseRepo, 'add.mjs')), Buffer.from('// café\nexport const add = (a, b) => a + b;\n', 'latin1'));
+    await assert.rejects(readFile(join(baseRepo, 'add.test.mjs')), { code: 'ENOENT' });
+    assert.equal(await readFile(join(baseRepo, 'staged.txt'), 'utf8'), 'staged change\n');
+    assert.equal(await readFile(join(baseRepo, 'new file.txt'), 'utf8'), 'new untracked file\n');
+    assert.equal(await readFile(join(baseRepo, 'empty.txt'), 'utf8'), '');
+    assert.deepEqual(await readFile(join(baseRepo, 'binary.dat')), Buffer.from([0, 255, 1, 254]));
+    await assert.rejects(readFile(join(baseRepo, 'ignored.txt')), { code: 'ENOENT' });
+    const { stdout: mode } = await promisify(execFile)('git', ['-C', baseRepo, 'ls-files', '--stage', 'add.mjs']);
+    assert.match(mode, /^100755 /);
+    if (commitDuringAttempt) assert.equal(await readFile(join(baseRepo, 'committed.txt'), 'utf8'), 'committed during the attempt\n');
+  });
+}
+
+test('runner patch extraction failure rejects and still deletes the sandbox', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+  const { sandbox, run } = await localFixture(t, `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('.git/index.lock', 'prevent extraction from staging changes');
+  `);
+  await assert.rejects(run(), error => {
+    assert.ok(error instanceof DaytonaAttemptError);
+    assert.equal(error.changes, undefined);
+    return true;
+  });
+  assert.equal(sandbox.fs.downloadFile.mock.callCount(), 0);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });

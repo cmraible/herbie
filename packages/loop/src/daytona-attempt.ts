@@ -7,6 +7,7 @@ type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
   fs: {
     createFolder: Sandbox['fs']['createFolder'];
     uploadFile(file: Buffer, path: string, timeout: number): Promise<void>;
+    downloadFile(path: string, timeout: number): Promise<Buffer>;
   };
   process: Pick<Sandbox['process'], 'executeCommand'>;
 };
@@ -15,14 +16,22 @@ type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyU
   snapshot: string; domainAllowList: string; repoUrl: string; commit?: string; goal: string;
 };
 
-export class DaytonaAttemptError extends AggregateError {}
+export interface DaytonaAttemptChanges {
+  baseCommit: string;
+  patch: Buffer;
+}
+
+export class DaytonaAttemptError extends AggregateError {
+  // Keep retrieved changes available even if subsequent sandbox deletion fails.
+  changes?: DaytonaAttemptChanges;
+}
 
 // Use the built adapter (or provide a directory containing the built runtime files).
 // Secret values stay outside Herbie; secrets contains existing Daytona Secret names only.
 export async function runDaytonaAttempt(
   create: CreateSandbox, request: Request, report: (message: string) => void,
   runtimeDirectory = new URL('.', import.meta.url),
-): Promise<void> {
+): Promise<DaytonaAttemptChanges> {
   const repo = new URL(request.repoUrl);
   if (repo.protocol !== 'https:' || repo.username || repo.password || repo.search || repo.hash) {
     throw new Error('Use a public HTTPS repository URL without credentials, query, or fragment');
@@ -47,6 +56,7 @@ export async function runDaytonaAttempt(
     throw new DaytonaAttemptError([cause], `Creation failed for ${name}; cleanup is unconfirmed. Check Daytona by name.`, { cause });
   }
   const failures: Error[] = [];
+  let changes: DaytonaAttemptChanges | undefined;
   try {
     report(`Created sandbox ${sandbox.id}`);
     const preflight = await sandbox.process.executeCommand(
@@ -61,9 +71,17 @@ export async function runDaytonaAttempt(
     await sandbox.git.clone(repo.href, cwd, undefined, request.commit);
     report(`Running goal in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
-    const result = await sandbox.process.executeCommand(`node ${directory}/daytona-runner.js`, directory, undefined, 360);
+    const result = await sandbox.process.executeCommand(`node ${directory}/daytona-runner.js`, directory, undefined, 480);
     if (result.exitCode !== 0 || result.result !== 'herbie-attempt-completed\n') throw new Error('Sandbox goal attempt failed');
     report(`Goal completed in sandbox ${sandbox.id}`);
+    const artifact: unknown = JSON.parse((await sandbox.fs.downloadFile(`${directory}/changes.json`, 30)).toString('utf8'));
+    if (typeof artifact !== 'object' || artifact === null
+      || !('baseCommit' in artifact) || typeof artifact.baseCommit !== 'string' || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(artifact.baseCommit)
+      || !('patchBase64' in artifact) || typeof artifact.patchBase64 !== 'string') throw new Error('Invalid repository changes artifact');
+    const patch = Buffer.from(artifact.patchBase64, 'base64');
+    if (patch.toString('base64') !== artifact.patchBase64) throw new Error('Invalid repository patch encoding');
+    changes = { baseCommit: artifact.baseCommit, patch };
+    report(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
     failures.push(new Error(`Attempt failed in sandbox ${sandbox.id}`, { cause }));
   } finally {
@@ -74,5 +92,8 @@ export async function runDaytonaAttempt(
       failures.push(new Error(`Deletion unconfirmed for sandbox ${sandbox.id}; check Daytona before retrying`, { cause }));
     }
   }
-  if (failures.length) throw new DaytonaAttemptError(failures, failures.map(error => error.message).join('; '));
+  if (!failures.length && changes) return changes;
+  const error = new DaytonaAttemptError(failures, failures.map(error => error.message).join('; '));
+  error.changes = changes;
+  throw error;
 }

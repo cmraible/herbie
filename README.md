@@ -155,7 +155,7 @@ After `pnpm build`, `runDaytonaAttempt` in
 import { runDaytonaAttempt } from './packages/loop/dist/daytona-attempt.js';
 
 // daytona is an already configured SDK client with requestTimeoutMs: 30_000.
-await runDaytonaAttempt((params, options) => daytona.create(params, options), {
+const changes = await runDaytonaAttempt((params, options) => daytona.create(params, options), {
   snapshot: 'approved-codex-runtime',
   repoUrl: 'https://github.com/your-org/test-repo.git',
   // commit: 'full commit SHA', // optional; otherwise clones the default branch
@@ -164,13 +164,16 @@ await runDaytonaAttempt((params, options) => daytona.create(params, options), {
   secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
   // outboundProxyUrl: 'http://approved-proxy:8080',
 }, console.log);
+// changes.baseCommit is the cloned HEAD; changes.patch is a Buffer to apply there.
+// Persist this returned artifact in the caller for later testing and PR publication.
 ```
 
 This slice uses an **existing approved snapshot** with Node 24+, Git, and Codex on
 PATH, and Codex's provider/auth and ordinary sandbox policy already configured.
 It checks those executables, uploads the five built runner modules and JSON input,
-clones a public HTTPS repo through the SDK, executes one connected attempt, and
-awaits sandbox deletion. It neither builds snapshots nor installs repo dependencies.
+clones a public HTTPS repo through the SDK, executes one connected attempt, retrieves
+its repository changes, and awaits sandbox deletion. It neither builds snapshots nor
+installs repo dependencies.
 Keys must not be baked into the snapshot or runner. The pinned SDK's
 [`secrets` and `outboundProxyUrl` fields](https://www.daytona.io/docs/en/typescript-sdk/daytona/)
 reference existing organization Secrets and the approved external proxy setup;
@@ -179,17 +182,30 @@ provider must support that setup. Proxy environment routing alone is not a secur
 boundary; supply the approved domain allowlist. There are no sandbox-bypass flags.
 
 Creation is bounded at 120 seconds; each upload at 30 seconds; runtime preflight at
-30 seconds; the turn at five minutes; the sandbox execution at six minutes; and
-confirmed deletion at 60 seconds. Other SDK requests, including clone, use the
+30 seconds; the turn at five minutes; each patch-extraction Git command and artifact
+download at 30 seconds; the sandbox execution at eight minutes; and confirmed
+deletion at 60 seconds. Other SDK requests, including clone, use the
 caller's client timeout. A 15-minute sandbox TTL is a fallback. As in the lifecycle
 smoke, ambiguous creation is reported by its unique name without retries; a handle
 is required for explicit deletion. Failed deletion rejects even after a successful
 goal. Reported phase messages omit command output and SDK details; inspect error
 causes privately rather than dumping them into logs.
 
-**Changes are currently discarded when the sandbox is deleted.** Repo-test
-verification, change extraction, and PR publication are later slices. No live
-sandbox/model call has been made to validate this path. One live smoke needs an
+On success, the adapter returns `{ baseCommit, patch }` after confirmed deletion.
+The runner records HEAD before Codex runs, then stages the final checkout and creates
+a binary-capable Git patch against that original commit. This includes Codex commits,
+tracked edits/deletions, file modes, and new non-ignored files; no changes yields an
+empty patch. `patch` is a Buffer: base64 transport preserves binary and non-UTF-8 patch
+bytes. The artifact is downloaded into host memory before deletion. If deletion
+fails, the adapter still rejects and exposes the retrieved artifact on
+`DaytonaAttemptError.changes`. The caller owns durable storage of returned/recovered
+artifacts. Goal, extraction, download, or malformed-artifact failures reject and still
+attempt deletion; they do not provide a partial patch.
+
+This preserves the final repository file state, not commit history or ignored files;
+submodule working-tree contents are not bundled. Repo-test verification and PR
+publication remain later slices. No live sandbox/model call has been made to validate
+this path. One live smoke needs an
 approved snapshot/provider configuration, existing scoped Secret/proxy references,
 an approved public repo/commit and goal, and explicit authorization for sandbox and
 model spend. Creating/configuring those prerequisites needs separate authorization;
