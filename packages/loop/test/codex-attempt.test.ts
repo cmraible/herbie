@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test, type TestContext } from 'node:test';
 import { getEventListeners } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
-import { runCodexAttempt } from '../src/codex-process.js';
+import { initializeCodexProcess, runCodexAttempt } from '../src/codex-process.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/goal-attempt.ts', import.meta.url));
 const posix = { skip: process.platform === 'win32', timeout: 10_000 };
@@ -55,6 +55,19 @@ async function setup(t: TestContext) {
   };
   return { cwd, record, events, gone };
 }
+
+test('initialization probe ignores extra attempt fields in a reused options object', posix, async t => {
+  const { cwd, record, events, gone } = await setup(t);
+  const options = { cwd, goal, shutdownMs: 100 };
+  await initializeCodexProcess(process.execPath, [fixture, 'success', record], options);
+  const logged = await events();
+  assert.deepEqual(logged.filter(object).filter(event => 'method' in event).map(event => event.method),
+    ['initialize', 'initialized']);
+  const first = logged[0];
+  assert.ok(object(first));
+  assert.equal(first.cwd, process.cwd());
+  await gone();
+});
 
 test('runs initialize → thread → goal → completion and cleans up its process group', posix, async t => {
   const { cwd, record, events, gone } = await setup(t);

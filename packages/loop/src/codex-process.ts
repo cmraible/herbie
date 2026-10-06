@@ -12,7 +12,8 @@ type AttemptOptions = ProcessOptions & {
 };
 
 export function initializeCodexProcess(command: string, args: readonly string[], options: ProcessOptions = {}): Promise<void> {
-  return runCodexProcess(command, args, options);
+  const { signal, timeoutMs, shutdownMs } = options;
+  return runCodexProcess(command, args, { signal, timeoutMs, shutdownMs });
 }
 
 // One initialized thread and goal, followed by owned-group cleanup on every outcome.
