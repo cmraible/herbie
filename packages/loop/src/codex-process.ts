@@ -53,6 +53,7 @@ export async function initializeCodexProcess(
   } finally {
     stopping = true;
     lines.close(); // Also rejects any outstanding protocol wait after cancellation.
+    child.stdout.resume(); // readline.close() pauses stdout; drain the child's shutdown output.
     for (const stop of [
       () => child.stdin.end(),
       () => child.kill('SIGTERM'),

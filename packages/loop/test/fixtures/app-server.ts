@@ -14,5 +14,6 @@ lines.on('line', line => {
   }
 });
 lines.on('close', () => {
+  if (mode === 'flush') process.stdout.write('x'.repeat(2 * 1024 * 1024));
   if (mode === 'ignore-term') setInterval(() => {}, 1000);
 });

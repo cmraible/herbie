@@ -128,3 +128,12 @@ test('cancellation during shutdown still rejects after confirmed exit', async ()
     assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   } finally { child.kill('SIGKILL'); }
 });
+
+test('drains shutdown output beyond pipe capacity so the child exits cleanly', async () => {
+  const child = spawn(process.execPath, [fixture, 'flush'], { stdio: 'pipe' });
+  try {
+    await initializeCodexProcess(() => child);
+    assert.equal(child.exitCode, 0);
+    assert.equal(child.signalCode, null);
+  } finally { child.kill('SIGKILL'); }
+});
