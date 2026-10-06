@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -60,8 +61,52 @@ async function tree(t: TestContext) {
 }
 
 for (const mode of ['normal', 'flush']) {
-  test(`initializes and drains ${mode} shutdown output`, posix, async () => {
-    await initializeCodexProcess(process.execPath, [fixture, mode]);
+  test(`initializes and drains ${mode} shutdown output`, posix, async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'herbie-exit-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const exitRecord = join(directory, 'exit');
+    await initializeCodexProcess(process.execPath, [fixture, mode, exitRecord]);
+    // SIGTERM/SIGKILL cannot run the fixture's exit handler.
+    assert.equal(await readFile(exitRecord, 'utf8'), '0');
+  });
+}
+
+for (const stream of ['stdin', 'stdout', 'stderr']) {
+  test(`rejects ${stream} errors and confirms owned group cleanup`, posix, async t => {
+    const originalSpawn = childProcess.spawn;
+    let child: ChildProcessWithoutNullStreams | undefined;
+    // Inject a stream fault at the OS boundary while preserving the real isolated spawn.
+    const mocked = t.mock.method(childProcess, 'spawn', (
+      command: string, args: readonly string[], options: { stdio: 'pipe'; detached: true },
+    ) => {
+      const spawned = originalSpawn(command, args, options);
+      child = spawned;
+      spawned.once('spawn', () => {
+        if (stream === 'stdin') spawned.stdin.destroy(new Error('Fixture stdin failure'));
+        if (stream === 'stdout') spawned.stdout.destroy(new Error('Fixture stdout failure'));
+        if (stream === 'stderr') spawned.stderr.destroy(new Error('Fixture stderr failure'));
+      });
+      return spawned;
+    });
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(initializeCodexProcess(process.execPath, [fixture, 'silent'], { shutdownMs: 200 }),
+        error => {
+          assert.ok(error instanceof AggregateError);
+          const causes: unknown[] = error.errors;
+          assert.ok(causes.some(cause => cause instanceof Error && cause.message === 'Codex process transport failed'));
+          return true;
+        });
+      assert.ok(child?.pid !== undefined);
+      assert.equal(exists(-child.pid), false);
+      for (const emitter of [child, child.stdin, child.stdout, child.stderr]) {
+        assert.equal(emitter.listenerCount('error'), 0);
+      }
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+      if (child?.pid !== undefined && exists(-child.pid)) process.kill(-child.pid, 'SIGKILL');
+    }
   });
 }
 
