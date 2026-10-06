@@ -145,3 +145,52 @@ can prevent cleanup; the TTL is a fallback, not confirmation of immediate deleti
 Capture console output if you need a record. This command is excluded from default
 tests and CI, but typechecked. `pnpm test` runs its mocked lifecycle and error-output tests without
 credentials, provisioning, or charges.
+
+### Callable Daytona goal attempt (not run by default tests)
+
+After `pnpm build`, `runDaytonaAttempt` in
+`packages/loop/dist/daytona-attempt.js` connects the repo and goal flow to Daytona:
+
+```js
+import { runDaytonaAttempt } from './packages/loop/dist/daytona-attempt.js';
+
+// daytona is an already configured SDK client with requestTimeoutMs: 30_000.
+await runDaytonaAttempt((params, options) => daytona.create(params, options), {
+  snapshot: 'approved-codex-runtime',
+  repoUrl: 'https://github.com/your-org/test-repo.git',
+  // commit: 'full commit SHA', // optional; otherwise clones the default branch
+  goal: 'Fix the failing addition test',
+  domainAllowList: 'github.com,api.openai.com', // use the approved endpoints for your setup
+  secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
+  // outboundProxyUrl: 'http://approved-proxy:8080',
+}, console.log);
+```
+
+This slice uses an **existing approved snapshot** with Node 24+, Git, and Codex on
+PATH, and Codex's provider/auth and ordinary sandbox policy already configured.
+It checks those executables, uploads the five built runner modules and JSON input,
+clones a public HTTPS repo through the SDK, executes one connected attempt, and
+awaits sandbox deletion. It neither builds snapshots nor installs repo dependencies.
+Keys must not be baked into the snapshot or runner. The pinned SDK's
+[`secrets` and `outboundProxyUrl` fields](https://www.daytona.io/docs/en/typescript-sdk/daytona/)
+reference existing organization Secrets and the approved external proxy setup;
+Herbie never reads their values or forwards the host environment. The snapshot's
+provider must support that setup. Proxy environment routing alone is not a security
+boundary; supply the approved domain allowlist. There are no sandbox-bypass flags.
+
+Creation is bounded at 120 seconds; each upload at 30 seconds; runtime preflight at
+30 seconds; the turn at five minutes; the sandbox execution at six minutes; and
+confirmed deletion at 60 seconds. Other SDK requests, including clone, use the
+caller's client timeout. A 15-minute sandbox TTL is a fallback. As in the lifecycle
+smoke, ambiguous creation is reported by its unique name without retries; a handle
+is required for explicit deletion. Failed deletion rejects even after a successful
+goal. Reported phase messages omit command output and SDK details; inspect error
+causes privately rather than dumping them into logs.
+
+**Changes are currently discarded when the sandbox is deleted.** Repo-test
+verification, change extraction, and PR publication are later slices. No live
+sandbox/model call has been made to validate this path. One live smoke needs an
+approved snapshot/provider configuration, existing scoped Secret/proxy references,
+an approved public repo/commit and goal, and explicit authorization for sandbox and
+model spend. Creating/configuring those prerequisites needs separate authorization;
+the adapter does not provision secrets or change account settings.
