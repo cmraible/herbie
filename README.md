@@ -160,17 +160,20 @@ const changes = await runDaytonaAttempt((params, options) => daytona.create(para
   repoUrl: 'https://github.com/your-org/test-repo.git',
   // commit: 'full commit SHA', // optional; otherwise clones the default branch
   goal: 'Fix the failing addition test',
+  testCommand: ['node', '--test'], // optional; choose the repository's test command
+  // testTimeoutMs: 60_000, // optional; 1–60,000 ms, defaults to 60 seconds
   domainAllowList: 'github.com,api.openai.com', // use the approved endpoints for your setup
   secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
   // outboundProxyUrl: 'http://approved-proxy:8080',
 }, console.log);
 // changes.baseCommit is the cloned HEAD; changes.patch is a Buffer to apply there.
+// changes.testResult contains exitCode/stdout/stderr when tests were requested.
 // Persist this returned artifact in the caller for later testing and PR publication.
 ```
 
 This slice uses an **existing approved snapshot** with Node 24+, Git, and Codex on
 PATH, and Codex's provider/auth and ordinary sandbox policy already configured.
-It checks those executables, uploads the five built runner modules and JSON input,
+It checks those executables, uploads the six built runner modules and JSON input,
 clones a public HTTPS repo through the SDK, executes one connected attempt, retrieves
 its repository changes, and awaits sandbox deletion. It neither builds snapshots nor
 installs repo dependencies.
@@ -199,12 +202,32 @@ empty patch. `patch` is a Buffer: base64 transport preserves binary and non-UTF-
 bytes. The artifact is downloaded into host memory before deletion. If deletion
 fails, the adapter still rejects and exposes the retrieved artifact on
 `DaytonaAttemptError.changes`. The caller owns durable storage of returned/recovered
-artifacts. Goal, extraction, download, or malformed-artifact failures reject and still
-attempt deletion; they do not provide a partial patch.
+artifacts. Goal, extraction, change-artifact download, or malformed-artifact failures
+reject and still attempt deletion; they do not provide a partial patch.
+
+With `testCommand`, the adapter uploads the recovered patch bytes back into the same
+sandbox. A separate runner creates a clean, detached Git worktree at `baseCommit`,
+applies the patch, and runs the supplied executable and literal arguments there,
+without an implicit shell. An empty patch tests the unchanged base. Repository code
+runs only in the disposable sandbox; Herbie does not apply or execute it on the host.
+The caller must choose the test command and ensure its dependencies are available;
+there is no automatic dependency installation or test discovery.
+
+Successful verification returns `testResult: { exitCode: 0, stdout, stderr }` alongside
+the changes. Omitting `testCommand` omits `testResult` and does not claim tests passed.
+A nonzero test exit rejects with the changes and completed result on
+`DaytonaAttemptError.changes`. Apply errors, missing executables, timeouts, and
+result-retrieval failures also reject while retaining the recovered changes. Test
+output is returned, not printed in phase reports. Each output stream has Node's
+default 1 MiB buffer limit; exceeding it fails verification. The command deadline
+defaults to 60 seconds (configurable from 1–60,000 ms); the verifier has a 150-second
+sandbox execution deadline covering checkout, apply, and tests. Sandbox deletion
+still runs on every outcome and must be confirmed. Test-generated changes are not
+recaptured into the patch.
 
 This preserves the final repository file state, not commit history or ignored files;
-submodule working-tree contents are not bundled. Repo-test verification and PR
-publication remain later slices. No live sandbox/model call has been made to validate
+submodule working-tree contents are not bundled. PR publication remains a later
+slice. No live sandbox/model call has been made to validate
 this path. One live smoke needs an
 approved snapshot/provider configuration, existing scoped Secret/proxy references,
 an approved public repo/commit and goal, and explicit authorization for sandbox and
