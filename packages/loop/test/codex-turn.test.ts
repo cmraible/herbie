@@ -1,8 +1,32 @@
 import assert from 'node:assert/strict';
+import { getEventListeners, once } from 'node:events';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { test, type TestContext } from 'node:test';
 import { runCodexTurn } from '../src/codex-turn.js';
+
+test('interrupts a turn over real subprocess pipes', { timeout: 3_000 }, async () => {
+  const fixture = fileURLToPath(new URL('./fixtures/app-server.ts', import.meta.url));
+  const child = spawn(process.execPath, [fixture, 'turn-interrupt'], { stdio: 'pipe' });
+  const closed = once(child, 'close');
+  const lines = createInterface({ input: child.stdout });
+  const controller = new AbortController();
+  child.stderr.resume();
+  try {
+    const rejected = assert.rejects(runCodexTurn(lines, message => {
+      child.stdin.write(JSON.stringify(message) + '\n');
+    }, 'thread-1', 'Fixture only', { signal: controller.signal }), { message: 'Codex turn cancelled' });
+    lines.once('line', () => controller.abort());
+    await rejected;
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  } finally {
+    lines.close();
+    child.kill('SIGKILL');
+    await closed;
+  }
+});
 
 function connection(t: TestContext) {
   const stdout = new PassThrough();
@@ -24,6 +48,103 @@ function connection(t: TestContext) {
 const started = { id: 2, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } };
 function completed(threadId = 'thread-1', turnId = 'turn-1', status = 'completed') {
   return { method: 'turn/completed', params: { threadId, turn: { id: turnId, status, items: [] } } };
+}
+
+test('cancellation requests interruption and waits for matching terminal completion', async t => {
+  const { lines, sent, send, receive } = connection(t);
+  const controller = new AbortController();
+  let settled = false;
+  const rejected = assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+    signal: controller.signal,
+  }), /Codex turn cancelled/).then(() => { settled = true; });
+  receive(started);
+  controller.abort();
+  assert.deepEqual(sent[1], {
+    id: 3, method: 'turn/interrupt', params: { threadId: 'thread-1', turnId: 'turn-1' },
+  });
+  receive({ id: 3, result: {} });
+  receive(completed('other-thread', 'turn-1', 'interrupted'));
+  receive(completed('thread-1', 'other-turn', 'interrupted'));
+  await Promise.resolve();
+  assert.equal(settled, false);
+  receive(completed('thread-1', 'turn-1', 'interrupted'));
+  await rejected;
+  assert.equal(sent.length, 2);
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+});
+
+test('already cancelled does not send a turn', async t => {
+  const { lines, sent, send } = connection(t);
+  await assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+    signal: AbortSignal.abort(),
+  }), /cancelled/);
+  assert.deepEqual(sent, []);
+});
+
+for (const earlyCompletion of [false, true]) {
+  test(`cancellation before start response handles ${earlyCompletion ? 'completed' : 'active'} turn`, async t => {
+    const { lines, sent, send, receive } = connection(t);
+    const controller = new AbortController();
+    const rejected = assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+      signal: controller.signal,
+    }), { message: 'Codex turn cancelled' });
+    controller.abort();
+    assert.equal(sent.length, 1);
+    if (earlyCompletion) receive(completed());
+    receive(started);
+    if (!earlyCompletion) receive(completed('thread-1', 'turn-1', 'interrupted'));
+    await rejected;
+    assert.equal(sent.length, earlyCompletion ? 1 : 2);
+  });
+}
+
+for (const status of ['completed', 'failed', 'interrupted']) {
+  test(`timeout remains a failure when cancellation races with ${status}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { lines, sent, send, receive } = connection(t);
+    const controller = new AbortController();
+    const rejected = assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+      timeoutMs: 20, signal: controller.signal,
+    }), { message: 'Codex turn timed out' });
+    receive(started);
+    t.mock.timers.tick(20);
+    controller.abort(); // The first reason wins; interruption is sent only once.
+    receive(completed('thread-1', 'turn-1', status));
+    await rejected;
+    assert.equal(sent.length, 2);
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  });
+}
+
+for (const failure of ['deadline', 'missing-start', 'rejected', 'bad-json', 'send', 'close', 'error']) {
+  test(`reports unconfirmed termination after cancellation: ${failure}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { stdout, lines, send, receive } = connection(t);
+    const controller = new AbortController();
+    const rejected = assert.rejects(runCodexTurn(lines, message => {
+      if (failure === 'send' && controller.signal.aborted) throw new Error('private detail');
+      send(message);
+    }, 'thread-1', 'Fix addition', { signal: controller.signal, interruptTimeoutMs: 20 }), error => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /cancelled; Codex turn termination unconfirmed/);
+      const causes: unknown[] = error.errors;
+      assert.equal(causes.length, 2);
+      assert.ok(causes[0] instanceof Error);
+      assert.equal(causes[0].message, 'Codex turn cancelled');
+      assert.doesNotMatch(String(error) + causes.map(String).join(), /private detail/);
+      return true;
+    });
+    if (failure !== 'missing-start') receive(started);
+    controller.abort();
+    if (failure === 'rejected') receive({ id: 3, error: { message: 'private detail' } });
+    if (failure === 'bad-json') stdout.write('invalid\n');
+    if (failure === 'close') stdout.end();
+    if (failure === 'error') stdout.destroy(new Error('private detail'));
+    if (failure === 'deadline') receive({ id: 3, result: {} });
+    if (failure === 'deadline' || failure === 'missing-start') t.mock.timers.tick(20);
+    await rejected;
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  });
 }
 
 for (const early of [false, true]) {
@@ -93,7 +214,9 @@ for (const failure of ['close', 'error', 'send', 'timeout', 'timeout-after-start
     const expected = failure.startsWith('timeout') ? /Codex turn timed out/
       : failure === 'bad-json' ? /invalid or rejected response/
       : failure === 'close' ? /connection closed/ : /transport error/;
-    const rejected = assert.rejects(runCodexTurn(lines, transportSend, 'thread-1', 'Fix addition', 20), expected);
+    const rejected = assert.rejects(runCodexTurn(lines, transportSend, 'thread-1', 'Fix addition', {
+      timeoutMs: 20, interruptTimeoutMs: 20,
+    }), expected);
     if (failure === 'close') stdout.end();
     if (failure === 'error') stdout.destroy(new Error('private detail'));
     if (failure === 'timeout-after-start') receive(started);

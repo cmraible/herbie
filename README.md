@@ -34,6 +34,17 @@ pnpm build
 
 These commands run across the workspace. To target one package, use `pnpm --filter @herbie/demo test` or `pnpm --filter @herbie/loop build`.
 
+The internal app-server helpers are not wired into the CLI. `runCodexTurn` accepts
+`{ timeoutMs, signal, interruptTimeoutMs }` as its fifth argument. Timeout or abort
+requests `turn/interrupt` once the start response supplies a turn ID, then waits up
+to `interruptTimeoutMs` (default five seconds) for the matching terminal event.
+An interrupt acknowledgement alone is insufficient. Cancellation always rejects;
+failure to observe termination also reports `Codex turn termination unconfirmed`.
+Transport/protocol failures still require owner cleanup. A terminal turn event
+does not prove descendant processes have exited, and `initializeCodexProcess`
+still owns only its direct child. Descendant cleanup is a prerequisite to composing
+these helpers into a live goal-running attempt.
+
 ### Opt-in real Codex smoke test
 
 On Linux or macOS, with dependencies installed and `git`, `pnpm`, and an authenticated
