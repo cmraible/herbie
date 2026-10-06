@@ -1,27 +1,40 @@
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { setTimeout as delay } from 'node:timers/promises';
 import { initializeCodex } from './codex-initialize.js';
 
-// start must create one fresh process. Initialization probe only: direct-child shutdown does not cancel descendants or remote turns.
+// Initialization probe only. Owns a fresh POSIX group, not escaped descendants or remote turns.
 export async function initializeCodexProcess(
-  start: () => ChildProcessWithoutNullStreams,
+  command: string, args: readonly string[],
   { signal, timeoutMs = 10_000, shutdownMs = 1_000 }: {
     signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number;
   } = {},
 ): Promise<void> {
   if (signal?.aborted) throw new Error('Codex process cancelled');
-  const child = start();
+  if (process.platform === 'win32') throw new Error('Codex process groups require POSIX');
+  if (!Number.isFinite(shutdownMs) || shutdownMs < 0) throw new Error('Invalid Codex shutdown deadline');
+  const child = spawn(command, args, { stdio: 'pipe', detached: true });
+  const groupId = child.pid;
+  let groupGone = groupId === undefined;
+  const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+    if (groupGone || groupId === undefined) return false;
+    try { process.kill(-groupId, signal); return true; }
+    catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
+        groupGone = true; // Never signal this numeric ID again after observing its disappearance.
+        return false;
+      }
+      throw error;
+    }
+  };
   const lines = createInterface({ input: child.stdout });
   const failure = Promise.withResolvers<never>();
   const failures: unknown[] = [];
   let stopping = false;
   let closed = false;
-  const exited = new Promise<void>(resolve => {
-    child.once('close', () => {
-      closed = true;
-      resolve();
-      if (!stopping) failure.reject(new Error('Codex process exited before initialization completed'));
-    });
+  child.once('close', () => { closed = true; });
+  child.once('exit', () => {
+    if (!stopping) failure.reject(new Error('Codex process exited before initialization completed'));
   });
   const transportError = new Error('Codex process transport failed');
   const cancellation = new Error('Codex process cancelled');
@@ -56,16 +69,26 @@ export async function initializeCodexProcess(
     child.stdout.resume(); // readline.close() pauses stdout; drain the child's shutdown output.
     for (const stop of [
       () => child.stdin.end(),
-      () => child.kill('SIGTERM'),
-      () => child.kill('SIGKILL'),
+      () => signalGroup('SIGTERM'),
+      () => signalGroup('SIGKILL'),
     ]) {
-      if (closed) break;
-      try { stop(); } catch (error) { failures.push(error); }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([exited, new Promise<void>(resolve => { timer = setTimeout(resolve, shutdownMs); })]);
-      clearTimeout(timer);
+      try {
+        if (!signalGroup(0) && closed) break;
+        stop();
+        const deadline = performance.now() + shutdownMs;
+        while (signalGroup(0) || !closed) {
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) break;
+          await delay(Math.min(20, remaining));
+        }
+      } catch (error) { failures.push(error); }
     }
     if (!closed) failures.push(new Error('Codex process exit unconfirmed after shutdown deadline'));
+    try {
+      if (signalGroup(0)) failures.push(new Error('Codex process group exit unconfirmed after shutdown deadline'));
+    } catch (error) {
+      failures.push(new Error('Codex process group exit unconfirmed after shutdown deadline', { cause: error }));
+    }
     if (closed && child.exitCode !== null && child.exitCode !== 0) {
       failures.push(new Error('Codex process exited unsuccessfully'));
     }

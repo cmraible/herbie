@@ -41,9 +41,20 @@ to `interruptTimeoutMs` (default five seconds) for the matching terminal event.
 An interrupt acknowledgement alone is insufficient. Cancellation always rejects;
 failure to observe termination also reports `Codex turn termination unconfirmed`.
 Transport/protocol failures still require owner cleanup. A terminal turn event
-does not prove descendant processes have exited, and `initializeCodexProcess`
-still owns only its direct child. Descendant cleanup is a prerequisite to composing
-these helpers into a live goal-running attempt.
+does not prove descendant processes have exited.
+
+`initializeCodexProcess(command, args, options)` owns its spawn on Linux/macOS:
+it creates a [new process group](https://nodejs.org/api/child_process.html#optionsdetached)
+without a shell, closes stdin, then escalates to group `SIGTERM` and `SIGKILL`.
+Each shutdown stage waits up to `shutdownMs` (default one second). Success requires
+both the direct child's streams to close and the group to disappear, even if the
+parent exits first. A failed probe or deadline reports unconfirmed cleanup.
+Descendants remaining in that group are covered; descendants that call `setsid`
+or change groups, remote work, and termination of Herbie itself are not. Unreaped
+zombies can keep group cleanup unconfirmed. Windows is rejected before spawning.
+The eventual disposable Daytona sandbox needs confirmed deletion as the stronger
+boundary for escaped descendants. This remains an initialization probe, not a live
+goal runner or sandbox lifecycle implementation.
 
 ### Opt-in real Codex smoke test
 

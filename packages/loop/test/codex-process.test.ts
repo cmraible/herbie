@@ -1,139 +1,217 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test, mock } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { once, getEventListeners } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { initializeCodexProcess } from '../src/codex-process.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/app-server.ts', import.meta.url));
+const treeFixture = fileURLToPath(new URL('./fixtures/process-tree.ts', import.meta.url));
+const posix = { skip: process.platform === 'win32', timeout: 10_000 };
 
-test('initializes a subprocess and waits for clean exit', async () => {
-  const child = spawn(process.execPath, [fixture, 'normal'], { stdio: 'pipe' });
-  const controller = new AbortController();
-  let starts = 0;
-  try {
-    await initializeCodexProcess(() => { starts++; return child; }, { signal: controller.signal });
-    assert.equal(starts, 1);
-    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
-    for (const emitter of [child, child.stdin, child.stdout, child.stderr]) {
-      assert.equal(emitter.listenerCount('error'), 0);
-    }
-    assert.equal(child.exitCode, 0);
-    assert.equal(child.stdout.destroyed, true);
-  } finally { child.kill('SIGKILL'); }
-});
-
-for (const mode of ['exit', 'bad-json', 'silent']) {
-  test(`rejects ${mode} and confirms child exit`, async () => {
-    const child = spawn(process.execPath, [fixture, mode], { stdio: 'pipe' });
-    let closed = false;
-    child.once('close', () => { closed = true; });
-    try {
-      await assert.rejects(initializeCodexProcess(() => child, { timeoutMs: mode === 'silent' ? 20 : 1_000, shutdownMs: 100 }), AggregateError);
-      assert.equal(closed, true);
-    } finally { child.kill('SIGKILL'); }
-  });
+function exists(pid: number) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
+    throw error;
+  }
 }
 
-test('escalates shutdown to SIGKILL when the initialized child ignores SIGTERM', { skip: process.platform === 'win32' }, async () => {
-  const child = spawn(process.execPath, [fixture, 'ignore-term'], { stdio: 'pipe' });
-  let closed = false;
-  child.once('close', () => { closed = true; });
-  try {
-    await initializeCodexProcess(() => child, { shutdownMs: 100 });
-    assert.equal(closed, true);
-    assert.equal(child.signalCode, 'SIGKILL');
-  } finally { child.kill('SIGKILL'); }
-});
+async function tree(t: TestContext) {
+  const directory = await mkdtemp(join(tmpdir(), 'herbie-process-'));
+  const record = join(directory, 'pids');
+  const contents = () => readFile(record, 'utf8').catch(error => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return '';
+    throw error;
+  });
+  const pids = async () => (await contents()).trim().split('\n').filter(line => /^\d+$/.test(line)).map(Number);
+  t.after(async () => {
+    const [leader] = await pids();
+    if (leader !== undefined && exists(-leader)) {
+      process.kill(-leader, 'SIGKILL');
+      const deadline = performance.now() + 1_000;
+      while (exists(-leader)) {
+        if (performance.now() > deadline) throw new Error('Fixture group cleanup unconfirmed');
+        await delay(10);
+      }
+    }
+    await rm(directory, { recursive: true, force: true });
+  });
+  const ready = async (marker = 'ready') => {
+    const deadline = performance.now() + 3_000;
+    while (!(await contents()).includes(`${marker}\n`)) {
+      if (performance.now() > deadline) throw new Error('Fixture readiness timed out');
+      await delay(10);
+    }
+  };
+  const assertGone = async () => {
+    const ids = await pids();
+    assert.equal(ids.length, 3);
+    for (const pid of ids) assert.equal(exists(pid), false, `fixture PID ${pid} survived`);
+    const [leader] = ids;
+    assert.ok(leader !== undefined);
+    assert.equal(exists(-leader), false);
+  };
+  return { record, ready, pids, assertGone };
+}
 
-test('does not start a process when already cancelled', async () => {
-  let starts = 0;
-  await assert.rejects(initializeCodexProcess(() => {
-    starts++;
-    throw new Error('must not start');
-  }, { signal: AbortSignal.abort() }), /cancelled/);
-  assert.equal(starts, 0);
-});
-
-test('cancellation during initialization waits for child exit', async () => {
-  const controller = new AbortController();
-  const child = spawn(process.execPath, [fixture, 'silent'], { stdio: 'pipe' });
-  let closed = false;
-  child.once('close', () => { closed = true; });
-  child.once('spawn', () => controller.abort());
-  try {
-    await assert.rejects(initializeCodexProcess(() => child, { signal: controller.signal, shutdownMs: 100 }),
-      error => {
-        assert.ok(error instanceof AggregateError);
-        const causes: unknown[] = error.errors;
-        assert.ok(causes.some(cause => cause instanceof Error && cause.message === 'Codex process cancelled'));
-        return true;
-      });
-    assert.equal(closed, true);
-  } finally { child.kill('SIGKILL'); }
-});
-
-test('handles a missing executable without an unhandled error', async () => {
-  await assert.rejects(initializeCodexProcess(
-    () => spawn('/herbie-missing-executable', [], { stdio: 'pipe' }),
-  ), AggregateError);
-});
+for (const mode of ['normal', 'flush']) {
+  test(`initializes and drains ${mode} shutdown output`, posix, async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'herbie-exit-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const exitRecord = join(directory, 'exit');
+    await initializeCodexProcess(process.execPath, [fixture, mode, exitRecord]);
+    // SIGTERM/SIGKILL cannot run the fixture's exit handler.
+    assert.equal(await readFile(exitRecord, 'utf8'), '0');
+  });
+}
 
 for (const stream of ['stdin', 'stdout', 'stderr']) {
-  test(`handles ${stream} failure and confirms exit`, async () => {
-    const child = spawn(process.execPath, [fixture, 'silent'], { stdio: 'pipe' });
-    let closed = false;
-    child.once('close', () => { closed = true; });
-    child.once('spawn', () => {
-      if (stream === 'stdin') child.stdin.destroy(new Error('fixture write failure'));
-      if (stream === 'stdout') child.stdout.destroy(new Error('fixture read failure'));
-      if (stream === 'stderr') child.stderr.destroy(new Error('fixture diagnostics failure'));
+  test(`rejects ${stream} errors and confirms owned group cleanup`, posix, async t => {
+    const originalSpawn = childProcess.spawn;
+    let child: ChildProcessWithoutNullStreams | undefined;
+    // Inject a stream fault at the OS boundary while preserving the real isolated spawn.
+    const mocked = t.mock.method(childProcess, 'spawn', (
+      command: string, args: readonly string[], options: { stdio: 'pipe'; detached: true },
+    ) => {
+      const spawned = originalSpawn(command, args, options);
+      child = spawned;
+      spawned.once('spawn', () => {
+        if (stream === 'stdin') spawned.stdin.destroy(new Error('Fixture stdin failure'));
+        if (stream === 'stdout') spawned.stdout.destroy(new Error('Fixture stdout failure'));
+        if (stream === 'stderr') spawned.stderr.destroy(new Error('Fixture stderr failure'));
+      });
+      return spawned;
     });
+    syncBuiltinESMExports();
     try {
-      await assert.rejects(initializeCodexProcess(() => child, { shutdownMs: 100 }), AggregateError);
-      assert.equal(closed, true);
-    } finally { child.kill('SIGKILL'); }
+      await assert.rejects(initializeCodexProcess(process.execPath, [fixture, 'silent'], { shutdownMs: 200 }),
+        error => {
+          assert.ok(error instanceof AggregateError);
+          const causes: unknown[] = error.errors;
+          assert.ok(causes.some(cause => cause instanceof Error && cause.message === 'Codex process transport failed'));
+          return true;
+        });
+      assert.ok(child?.pid !== undefined);
+      assert.equal(exists(-child.pid), false);
+      for (const emitter of [child, child.stdin, child.stdout, child.stderr]) {
+        assert.equal(emitter.listenerCount('error'), 0);
+      }
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+      if (child?.pid !== undefined && exists(-child.pid)) process.kill(-child.pid, 'SIGKILL');
+    }
   });
 }
 
-test('reports unconfirmed exit when termination fails instead of claiming success', async () => {
-  const child = spawn(process.execPath, [fixture, 'ignore-term'], { stdio: 'pipe' });
-  const kill = mock.method(child, 'kill', () => false);
-  try {
-    await assert.rejects(initializeCodexProcess(() => child, { shutdownMs: 20 }), error => {
-      assert.ok(error instanceof AggregateError);
-      const causes: unknown[] = error.errors;
-      assert.ok(causes.some(cause => cause instanceof Error && /exit unconfirmed/.test(cause.message)));
-      return true;
+for (const mode of ['parent-exits', 'ignore-term', 'bad-json', 'early-exit', 'silent']) {
+  test(`cleans up child and grandchild when ${mode}`, posix, async t => {
+    const { record, assertGone } = await tree(t);
+    const done = initializeCodexProcess(process.execPath, [treeFixture, mode, record], {
+      timeoutMs: 1_000, shutdownMs: 200,
     });
-    assert.equal(child.exitCode, null);
-    assert.equal(child.signalCode, null);
+    if (['bad-json', 'early-exit', 'silent'].includes(mode)) await assert.rejects(done, AggregateError);
+    else await done;
+    await assertGone();
+  });
+}
+
+test('cancellation waits for the owned group, leaving a separate child alive', posix, async t => {
+  const { record, ready, assertGone } = await tree(t);
+  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const bystanderClosed = once(bystander, 'close');
+  const controller = new AbortController();
+  const done = assert.rejects(initializeCodexProcess(process.execPath, [treeFixture, 'silent', record], {
+    signal: controller.signal, shutdownMs: 200,
+  }), error => {
+    assert.ok(error instanceof AggregateError);
+    const causes: unknown[] = error.errors;
+    assert.ok(causes.some(cause => cause instanceof Error && cause.message === 'Codex process cancelled'));
+    return true;
+  });
+  try {
+    await ready();
+    controller.abort();
+    await done;
+    await assertGone();
+    assert.ok(bystander.pid !== undefined);
+    assert.equal(exists(bystander.pid), true);
+    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   } finally {
-    kill.mock.restore();
-    const closed = once(child, 'close');
-    child.kill('SIGKILL');
-    await closed;
+    controller.abort();
+    await done;
+    bystander.kill('SIGKILL');
+    await bystanderClosed;
   }
 });
 
-test('cancellation during shutdown still rejects after confirmed exit', async () => {
-  const controller = new AbortController();
-  const child = spawn(process.execPath, [fixture, 'normal'], { stdio: 'pipe' });
-  let closed = false;
-  child.once('close', () => { closed = true; });
-  child.stdin.once('finish', () => controller.abort());
-  try {
-    await assert.rejects(initializeCodexProcess(() => child, { signal: controller.signal }), AggregateError);
-    assert.equal(closed, true);
-    assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
-  } finally { child.kill('SIGKILL'); }
+test('does not spawn when already cancelled', async () => {
+  await assert.rejects(initializeCodexProcess('/herbie-missing-executable', [], {
+    signal: AbortSignal.abort(),
+  }), { message: 'Codex process cancelled' });
 });
 
-test('drains shutdown output beyond pipe capacity so the child exits cleanly', async () => {
-  const child = spawn(process.execPath, [fixture, 'flush'], { stdio: 'pipe' });
-  try {
-    await initializeCodexProcess(() => child);
-    assert.equal(child.exitCode, 0);
-    assert.equal(child.signalCode, null);
-  } finally { child.kill('SIGKILL'); }
+test('cancellation during shutdown still waits for group cleanup and rejects', posix, async t => {
+  const { record, ready, assertGone } = await tree(t);
+  const controller = new AbortController();
+  const rejected = assert.rejects(initializeCodexProcess(process.execPath, [treeFixture, 'ignore-term', record], {
+    signal: controller.signal, shutdownMs: 200,
+  }), AggregateError);
+  await ready('shutdown');
+  controller.abort();
+  await rejected;
+  await assertGone();
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+});
+
+for (const failure of ['ineffective-signal', 'permission-error']) {
+  test(`preserves cancellation and reports unconfirmed group exit after ${failure}`, posix, async t => {
+    const { record, ready, pids } = await tree(t);
+    const controller = new AbortController();
+    const rejected = assert.rejects(initializeCodexProcess(process.execPath, [treeFixture, 'silent', record], {
+      signal: controller.signal, shutdownMs: 50,
+    }), error => {
+      assert.ok(error instanceof AggregateError);
+      const causes: unknown[] = error.errors;
+      assert.ok(causes.some(cause => cause instanceof Error && cause.message === 'Codex process cancelled'));
+      assert.ok(causes.some(cause => cause instanceof Error && /group exit unconfirmed/.test(cause.message)));
+      return true;
+    });
+    await ready();
+    const [leader] = await pids();
+    assert.ok(leader !== undefined);
+    const kill = process.kill;
+    const signals: (number | NodeJS.Signals | undefined)[] = [];
+    const mocked = t.mock.method(process, 'kill', (pid: number, signal?: number | NodeJS.Signals) => {
+      if (pid !== -leader) return kill(pid, signal);
+      if (failure === 'permission-error') throw Object.assign(new Error('Fixture permission error'), { code: 'EPERM' });
+      if (signal === 0) return kill(pid, signal);
+      signals.push(signal);
+      return true; // Simulate accepted signals that do not terminate the owned group.
+    });
+    try {
+      controller.abort();
+      await rejected;
+      if (failure === 'ineffective-signal') assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+      assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+    } finally { mocked.mock.restore(); }
+  });
+}
+
+test('handles a missing executable without an unhandled error', posix, async () => {
+  await assert.rejects(initializeCodexProcess('/herbie-missing-executable', []), AggregateError);
+});
+
+test('rejects invalid shutdown deadlines before spawning', posix, async () => {
+  for (const shutdownMs of [NaN, Infinity, -1]) {
+    await assert.rejects(initializeCodexProcess('/herbie-missing-executable', [], { shutdownMs }), {
+      message: 'Invalid Codex shutdown deadline',
+    });
+  }
 });

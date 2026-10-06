@@ -1,6 +1,9 @@
 import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
 
 const mode = process.argv[2];
+const exitRecord = process.argv[3];
+if (exitRecord) process.on('exit', code => writeFileSync(exitRecord, String(code)));
 if (mode === 'exit') process.exit(7);
 if (mode === 'ignore-term') process.on('SIGTERM', () => {});
 const lines = createInterface({ input: process.stdin });
