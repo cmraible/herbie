@@ -54,7 +54,11 @@ test('tests the recovered patch inside the sandbox before deletion and returns t
   sandbox.process.executeCommand.mock.mockImplementationOnce(async () => ({ exitCode: 0, result: 'herbie-tests-completed\n' }), 2);
   sandbox.fs.downloadFile.mock.mockImplementationOnce(async () => Buffer.from(JSON.stringify(testResult)), 1);
   const result = await run({ testCommand: ['node', '--test', 'a test.mjs'] });
-  assert.deepEqual(result, { ...changes, testResult });
+  assert.deepEqual(result, { ...changes, testResult, verification: {
+    repoUrl: request.repoUrl, baseCommit: changes.baseCommit,
+    patchSha256: 'fb6f3d476ca7ea43d75e41b36690c464b706e56179dacf4f1a72208ea895d6b4',
+    testCommand: ['node', '--test', 'a test.mjs'], goalCompleted: true, sandboxDeleted: true,
+  } });
   const root = sandbox.fs.createFolder.mock.calls[0].arguments[0];
   const uploads = sandbox.fs.uploadFile.mock.calls.map(call => call.arguments);
   assert.deepEqual(uploads.at(-2), [changes.patch, `${root}/recovered.patch`, 30]);
@@ -86,6 +90,7 @@ for (const phase of ['test-upload', 'test-execute', 'test-nonzero', 'test-downlo
       assert.equal(error.changes?.baseCommit, changes.baseCommit);
       assert.deepEqual(error.changes?.patch, changes.patch);
       assert.deepEqual(error.changes?.testResult, phase.endsWith('-and-delete') ? testResult : undefined);
+      assert.equal(error.changes?.verification, undefined);
       assert.doesNotMatch(error.message, /private/);
       return true;
     });
