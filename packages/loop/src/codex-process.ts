@@ -9,6 +9,8 @@ import { runCodexTurn } from './codex-turn.js';
 type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number };
 type AttemptOptions = ProcessOptions & {
   cwd: string; goal: string; turnTimeoutMs?: number; interruptTimeoutMs?: number;
+  // Only the runner inside an externally isolated, disposable Daytona sandbox enables this.
+  disposableDaytona?: boolean;
 };
 
 export function initializeCodexProcess(command: string, args: readonly string[], options: ProcessOptions = {}): Promise<void> {
@@ -30,8 +32,17 @@ async function runCodexProcess(
   if (signal?.aborted) throw new Error('Codex process cancelled');
   if (process.platform === 'win32') throw new Error('Codex process groups require POSIX');
   if (!Number.isFinite(shutdownMs) || shutdownMs < 0) throw new Error('Invalid Codex shutdown deadline');
+  const disposableDaytona = 'disposableDaytona' in options && options.disposableDaytona;
+  // Preserve Daytona's opaque API placeholder and proxy/CA routing, never host auth/config.
+  const daytonaEnvironment = new Set([
+    'HOME', 'PATH', 'TMPDIR', 'OPENAI_API_KEY',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+    'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS',
+  ]);
   const child = spawn(command, args, {
     stdio: 'pipe', detached: true, cwd: 'cwd' in options ? options.cwd : undefined,
+    env: disposableDaytona ? Object.fromEntries(Object.entries(process.env).filter(([key]) => daytonaEnvironment.has(key))) : undefined,
   });
   const groupId = child.pid;
   let groupGone = groupId === undefined;
@@ -83,15 +94,16 @@ async function runCodexProcess(
   };
   try {
     if (signal?.aborted) await failure.promise;
-    await Promise.race([failure.promise, initializeCodex(lines, send, timeoutMs)]);
+    await Promise.race([failure.promise, initializeCodex(lines, send, timeoutMs, 'disposableDaytona' in options && options.disposableDaytona)]);
     if ('goal' in options) {
       if (signal?.aborted) throw cancellation;
-      const threadId = await Promise.race([failure.promise, startCodexThread(lines, send, options.cwd, timeoutMs)]);
+      const threadId = await Promise.race([failure.promise, startCodexThread(lines, send, options.cwd, timeoutMs, options.disposableDaytona)]);
       if (signal?.aborted) throw cancellation;
       runningTurn = true;
       try {
         await Promise.race([failure.promise, runCodexTurn(lines, send, threadId, options.goal, {
           signal, timeoutMs: options.turnTimeoutMs, interruptTimeoutMs: options.interruptTimeoutMs,
+          disposableDaytona: options.disposableDaytona,
         })]);
       } finally { runningTurn = false; }
     }

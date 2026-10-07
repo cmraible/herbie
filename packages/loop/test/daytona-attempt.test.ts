@@ -67,7 +67,7 @@ test('tests the recovered patch inside the sandbox before deletion and returns t
     command: ['node', '--test', 'a test.mjs'], timeoutMs: 60_000,
   });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[2].arguments,
-    [`node ${root}/daytona-test-runner.js`, root, undefined, 150]);
+    [`chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${root}/daytona-test-runner.js`, root, undefined, 150]);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
 
@@ -136,7 +136,7 @@ test('prepares runtime and repo, invokes the attempt, and waits for deletion usi
   const input = uploads.at(-1);
   assert.ok(input);
   assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, goal: request.goal });
-  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`node ${root}/daytona-runner.js`, root, undefined, 480]);
+  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${root}/daytona-runner.js`, root, undefined, 240]);
   assert.equal(sandbox.process.executeCommand.mock.calls[0].arguments[3], 30);
   assert.deepEqual(sandbox.fs.downloadFile.mock.calls[0].arguments, [`${root}/changes.json`, 30]);
   assert.deepEqual(sandbox.delete.mock.calls[0].arguments, [60, true]);
@@ -222,8 +222,10 @@ async function localFixture(t: TestContext, edits = '') {
   });
   sandbox.process.executeCommand.mock.mockImplementation(async (command, cwd) => {
     if (!cwd) return { exitCode: 0, result: 'fixture preflight' };
-    const runner = command.slice('node '.length);
-    assert.ok(['daytona-runner.js', 'daytona-test-runner.js'].some(name => command === `node ${cwd}/${name}`));
+    // The SDK boundary is mocked: never run setup, chown, runuser, or real Codex on the host.
+    const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node `;
+    const runner = command.slice(prefix.length);
+    assert.ok(['daytona-runner.js', 'daytona-test-runner.js'].some(name => command === `${prefix}${cwd}/${name}`));
     const { stdout } = await promisify(execFile)(process.execPath, [runner], {
       cwd, env: { PATH: `${bin}:${process.env.PATH}` }, timeout: 8_000,
     });
@@ -242,6 +244,19 @@ test('uploaded runner executes the connected attempt with a local fake Codex and
   const events: unknown[] = (await readFile(record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   assert.ok(events.some(event => typeof event === 'object' && event !== null && 'params' in event
     && JSON.stringify(event.params).includes('do-not-execute')));
+  const paramsFor = (method: string) => {
+    const event = events.find(event => typeof event === 'object' && event !== null && 'method' in event && event.method === method);
+    assert.ok(typeof event === 'object' && event !== null && 'params' in event);
+    return event.params;
+  };
+  assert.deepEqual(paramsFor('initialize'), {
+    clientInfo: { name: 'herbie', version: '0.1.0' }, capabilities: { experimentalApi: true },
+  });
+  assert.deepEqual(paramsFor('thread/start'), {
+    cwd: sandbox.git.clone.mock.calls[0].arguments[1], ephemeral: true,
+    model: 'gpt-6-luna', modelProvider: 'daytona_openai',
+  });
+  assert.ok(JSON.stringify(paramsFor('turn/start')).includes('externalSandbox'));
   assert.deepEqual(events.slice(-2), [{ completed: 'completed' }, { eof: true }]);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
@@ -364,3 +379,33 @@ for (const mode of ['apply', 'spawn', 'timeout']) {
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
+
+test('provisions a bounded Ubuntu runtime with default networking when no snapshot is supplied', async t => {
+  const { create, sandbox, run } = await fixture(t);
+  await run({ snapshot: undefined, domainAllowList: undefined });
+  const [params] = create.mock.calls[0].arguments;
+  assert.deepEqual(params, {
+    name: params.name, image: 'ubuntu:22.04', resources: { cpu: 1, memory: 1, disk: 3 },
+    secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 15,
+  });
+  const [setup, cwd, , timeout] = sandbox.process.executeCommand.mock.calls[0].arguments;
+  assert.equal(cwd, undefined);
+  assert.equal(timeout, 240);
+  assert.match(setup, /node-v24\.19\.0-linux-x64/);
+  assert.match(setup, /codex-0\.159\.2-linux-x64/);
+  assert.match(setup, /sha256sum -c/);
+  assert.match(setup, /createHash\('sha512'\)/);
+  assert.match(setup, /env_key = "OPENAI_API_KEY"/);
+  assert.match(setup, /request_max_retries = 0/);
+  assert.match(setup, /supports_websockets = false/);
+  assert.doesNotMatch(setup, /existing-codex-secret|http:\/\/proxy\.example/);
+});
+
+test('fresh runtime setup failure deletes the sandbox before cloning or starting Codex', async t => {
+  const { sandbox, run } = await fixture(t);
+  sandbox.process.executeCommand.mock.mockImplementation(async () => ({ exitCode: 1, result: 'setup failure' }));
+  await assert.rejects(run({ snapshot: undefined, domainAllowList: undefined }), /Attempt failed/);
+  assert.equal(sandbox.git.clone.mock.callCount(), 0);
+  assert.equal(sandbox.fs.uploadFile.mock.callCount(), 0);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});

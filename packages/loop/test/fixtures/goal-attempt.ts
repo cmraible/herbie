@@ -37,6 +37,10 @@ lines.on('line', line => {
     worker.stdout.once('data', () => {
       send({ id: 2, result: { turn: { id: 'turn-1' } } });
       log({ active: true });
+      if (mode === 'budget' || mode === 'budget-unconfirmed') send({
+        method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'turn-1',
+          tokenUsage: { total: { inputTokens: 40_000, outputTokens: 0 } } },
+      });
       if (mode === 'turn-exit') process.exit(7);
       if (mode === 'success' || mode === 'turn-fail' || mode === 'cleanup-fail') {
         setImmediate(() => {
@@ -50,7 +54,7 @@ lines.on('line', line => {
     assert.ok('params' in message);
     assert.deepEqual(message.params, { threadId: 'thread-1', turnId: 'turn-1' });
     send({ id: 3, result: {} });
-    if (mode !== 'interrupt-unconfirmed') setImmediate(() => complete('interrupted'));
+    if (mode !== 'interrupt-unconfirmed' && mode !== 'budget-unconfirmed') setImmediate(() => complete('interrupted'));
   } else throw new Error('Unexpected fixture request');
 });
 lines.on('close', () => { log({ eof: true }); process.exit(0); });
