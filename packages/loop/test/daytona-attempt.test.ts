@@ -18,7 +18,7 @@ const request = {
   repoUrl: 'https://github.com/example/repo.git', commit: '0123456789abcdef',
   goal: 'Fix addition; $(do-not-execute) `nor-this` \'quoted\'\nsecond line',
 };
-const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner'];
+const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner'];
 const changes = { baseCommit: 'a'.repeat(40), patch: Buffer.from('diff --git a/file.txt b/file.txt\n') };
 const artifact = Buffer.from(JSON.stringify({ baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64') }));
 const runtime = await Promise.all(runtimeNames.map(async name => ({
@@ -44,9 +44,66 @@ async function fixture(t: TestContext) {
   const create = mock.fn<Create>(async () => sandbox);
   const reports: string[] = [];
   const report = (message: string) => { reports.push(message); };
-  const run = () => runDaytonaAttempt(create, request, report, pathToFileURL(directory + '/'));
+  const run = (options: Partial<Parameters<typeof runDaytonaAttempt>[1]> = {}) => runDaytonaAttempt(create, { ...request, ...options }, report, pathToFileURL(directory + '/'));
   return { directory, sandbox, create, reports, run };
 }
+
+test('tests the recovered patch inside the sandbox before deletion and returns the result', async t => {
+  const { sandbox, run } = await fixture(t);
+  const testResult = { exitCode: 0, stdout: '2 tests passed\n', stderr: '' };
+  sandbox.process.executeCommand.mock.mockImplementationOnce(async () => ({ exitCode: 0, result: 'herbie-tests-completed\n' }), 2);
+  sandbox.fs.downloadFile.mock.mockImplementationOnce(async () => Buffer.from(JSON.stringify(testResult)), 1);
+  const result = await run({ testCommand: ['node', '--test', 'a test.mjs'] });
+  assert.deepEqual(result, { ...changes, testResult });
+  const root = sandbox.fs.createFolder.mock.calls[0].arguments[0];
+  const uploads = sandbox.fs.uploadFile.mock.calls.map(call => call.arguments);
+  assert.deepEqual(uploads.at(-2), [changes.patch, `${root}/recovered.patch`, 30]);
+  assert.deepEqual(JSON.parse(uploads.at(-1)![0].toString()), {
+    cwd: `${root}/repo`, baseCommit: changes.baseCommit,
+    command: ['node', '--test', 'a test.mjs'], timeoutMs: 60_000,
+  });
+  assert.deepEqual(sandbox.process.executeCommand.mock.calls[2].arguments,
+    [`node ${root}/daytona-test-runner.js`, root, undefined, 150]);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+for (const phase of ['test-upload', 'test-execute', 'test-nonzero', 'test-download', 'test-malformed', 'test-failure-and-delete', 'test-success-and-delete']) {
+  test(`preserves recovered changes and cleanup on ${phase}`, async t => {
+    const { sandbox, run, reports } = await fixture(t);
+    const fail = async () => { throw new Error('private test details'); };
+    const testResult = { exitCode: phase === 'test-failure-and-delete' ? 1 : 0, stdout: 'private output', stderr: '' };
+    sandbox.process.executeCommand.mock.mockImplementationOnce(async () => ({ exitCode: 0, result: 'herbie-tests-completed\n' }), 2);
+    sandbox.fs.downloadFile.mock.mockImplementationOnce(async () => Buffer.from(JSON.stringify(testResult)), 1);
+    if (phase === 'test-upload') sandbox.fs.uploadFile.mock.mockImplementationOnce(fail, runtimeNames.length + 2);
+    if (phase === 'test-execute') sandbox.process.executeCommand.mock.mockImplementationOnce(fail, 2);
+    if (phase === 'test-nonzero') sandbox.process.executeCommand.mock.mockImplementationOnce(async () => ({ exitCode: 1, result: '' }), 2);
+    if (phase === 'test-download') sandbox.fs.downloadFile.mock.mockImplementationOnce(fail, 1);
+    if (phase === 'test-malformed') sandbox.fs.downloadFile.mock.mockImplementationOnce(async () => Buffer.from('{"exitCode":null}'), 1);
+    if (phase.endsWith('-and-delete')) sandbox.delete.mock.mockImplementation(fail);
+    await assert.rejects(run({ testCommand: ['node', '--test'] }), error => {
+      assert.ok(error instanceof DaytonaAttemptError);
+      assert.equal(error.errors.length, phase === 'test-failure-and-delete' ? 2 : 1);
+      assert.equal(error.changes?.baseCommit, changes.baseCommit);
+      assert.deepEqual(error.changes?.patch, changes.patch);
+      assert.deepEqual(error.changes?.testResult, phase.endsWith('-and-delete') ? testResult : undefined);
+      assert.doesNotMatch(error.message, /private/);
+      return true;
+    });
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+    assert.ok(reports.every(message => !message.includes('private')));
+  });
+}
+
+test('invalid test commands and deadlines fail before sandbox creation', async t => {
+  const { run, create } = await fixture(t);
+  for (const testCommand of [[], [''], ['node', 'bad\0argument']]) {
+    await assert.rejects(run({ testCommand }), /Test command/);
+  }
+  for (const testTimeoutMs of [0, -1, 1.5, 60_001, NaN]) {
+    await assert.rejects(run({ testCommand: ['node'], testTimeoutMs }), /Test timeout/);
+  }
+  assert.equal(create.mock.callCount(), 0);
+});
 
 test('prepares runtime and repo, invokes the attempt, and waits for deletion using SDK contracts', async t => {
   const { sandbox, create, reports, run } = await fixture(t);
@@ -158,14 +215,15 @@ async function localFixture(t: TestContext, edits = '') {
   sandbox.git.clone.mock.mockImplementation(async (_url, path) => {
     await promisify(execFile)('git', ['clone', '--no-hardlinks', baseRepo, path]);
   });
-  sandbox.process.executeCommand.mock.mockImplementationOnce(async (command, cwd) => {
-    assert.ok(cwd);
-    assert.equal(command, `node ${cwd}/daytona-runner.js`);
-    const { stdout } = await promisify(execFile)(process.execPath, [join(cwd, 'daytona-runner.js')], {
+  sandbox.process.executeCommand.mock.mockImplementation(async (command, cwd) => {
+    if (!cwd) return { exitCode: 0, result: 'fixture preflight' };
+    const runner = command.slice('node '.length);
+    assert.ok(['daytona-runner.js', 'daytona-test-runner.js'].some(name => command === `node ${cwd}/${name}`));
+    const { stdout } = await promisify(execFile)(process.execPath, [runner], {
       cwd, env: { PATH: `${bin}:${process.env.PATH}` }, timeout: 8_000,
     });
     return { exitCode: 0, result: stdout };
-  }, 1);
+  });
   sandbox.delete.mock.mockImplementation(async () => {
     const root = sandbox.fs.createFolder.mock.calls[0].arguments[0];
     await rm(root, { recursive: true });
@@ -238,3 +296,66 @@ test('runner patch extraction failure rejects and still deletes the sandbox', { 
   assert.equal(sandbox.fs.downloadFile.mock.callCount(), 0);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
+
+test('runs repository tests against the recovered patch in a clean checkout, excluding test side effects', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+  const { sandbox, run } = await localFixture(t, `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('add.mjs', 'export const add = (a, b) => a + b;\\n');
+    writeFileSync('.gitignore', 'ignored.txt\\n');
+    writeFileSync('ignored.txt', 'present only in the Codex checkout');
+  `);
+  const literal = '$(do-not-run) `nor-this` "quotes"\nnew line';
+  const result = await run({ testCommand: ['node', '--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { existsSync, writeFileSync } from 'node:fs';
+    import { spawnSync } from 'node:child_process';
+    assert.equal(existsSync('ignored.txt'), false);
+    assert.equal(process.argv[1], ${JSON.stringify(literal)});
+    const tests = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'add.test.mjs'], { encoding: 'utf8' });
+    process.stdout.write(tests.stdout);
+    process.stderr.write('fixture test diagnostics');
+    writeFileSync('test-side-effect.txt', 'must not enter the returned patch');
+    process.exit(tests.status ?? 1);
+  `, literal] });
+  assert.equal(result.testResult?.exitCode, 0);
+  assert.match(result.testResult!.stdout, /^# pass 2$/m);
+  assert.equal(result.testResult?.stderr, 'fixture test diagnostics');
+  assert.doesNotMatch(result.patch.toString(), /test-side-effect/);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+test('failing repository tests reject while preserving the empty patch, exit code and output', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+  const { sandbox, run, baseCommit } = await localFixture(t);
+  await assert.rejects(run({ testCommand: ['node', '--test', '--test-reporter=tap', 'add.test.mjs'] }), error => {
+    assert.ok(error instanceof DaytonaAttemptError);
+    assert.equal(error.changes?.baseCommit, baseCommit);
+    assert.deepEqual(error.changes?.patch, Buffer.alloc(0));
+    assert.equal(error.changes?.testResult?.exitCode, 1);
+    assert.match(error.changes!.testResult!.stdout, /^# fail 2$/m);
+    return true;
+  });
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+for (const mode of ['apply', 'spawn', 'timeout']) {
+  test(`patch verification ${mode} failure retains changes and deletes the sandbox`, { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
+    const { directory, sandbox, run } = await localFixture(t);
+    const marker = join(directory, 'tests-ran');
+    let testCommand = ['node', '--input-type=module', '-e', `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'ran');`];
+    if (mode === 'apply') {
+      sandbox.fs.uploadFile.mock.mockImplementation(async (contents, path) => {
+        await writeFile(path, path.endsWith('/recovered.patch') ? 'not a Git patch' : contents);
+      });
+    }
+    if (mode === 'spawn') testCommand = ['herbie-command-that-does-not-exist'];
+    if (mode === 'timeout') testCommand = ['node', '-e', 'setInterval(() => {}, 1000)'];
+    await assert.rejects(run({ testCommand, testTimeoutMs: mode === 'timeout' ? 100 : 60_000 }), error => {
+      assert.ok(error instanceof DaytonaAttemptError);
+      assert.deepEqual(error.changes?.patch, Buffer.alloc(0));
+      assert.equal(error.changes?.testResult, undefined);
+      return true;
+    });
+    await assert.rejects(readFile(marker), { code: 'ENOENT' });
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}

@@ -14,15 +14,23 @@ type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
 type CreateSandbox = (params: CreateSandboxFromSnapshotParams, options: { timeout: number }) => Promise<AttemptSandbox>;
 type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyUrl'> & {
   snapshot: string; domainAllowList: string; repoUrl: string; commit?: string; goal: string;
+  testCommand?: string[]; testTimeoutMs?: number;
 };
+
+export interface DaytonaTestResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
 
 export interface DaytonaAttemptChanges {
   baseCommit: string;
   patch: Buffer;
+  testResult?: DaytonaTestResult;
 }
 
 export class DaytonaAttemptError extends AggregateError {
-  // Keep retrieved changes available even if subsequent sandbox deletion fails.
+  // Keep retrieved changes available even if subsequent testing or deletion fails.
   changes?: DaytonaAttemptChanges;
 }
 
@@ -39,8 +47,16 @@ export async function runDaytonaAttempt(
   if (!request.snapshot.trim() || !request.domainAllowList.trim() || !request.goal.trim()) {
     throw new Error('Snapshot, domain allowlist, and goal are required');
   }
+  const testTimeoutMs = request.testTimeoutMs ?? 60_000;
+  if (request.testCommand !== undefined && (!Array.isArray(request.testCommand) || !request.testCommand.length
+    || request.testCommand.some(arg => typeof arg !== 'string' || arg.includes('\0')) || !request.testCommand[0].trim())) {
+    throw new Error('Test command must contain an executable followed by literal arguments');
+  }
+  if (!Number.isInteger(testTimeoutMs) || testTimeoutMs < 1 || testTimeoutMs > 60_000) {
+    throw new Error('Test timeout must be an integer from 1 to 60000 milliseconds');
+  }
   const runtime = await Promise.all([
-    'codex-initialize.js', 'codex-thread.js', 'codex-turn.js', 'codex-process.js', 'daytona-runner.js',
+    'codex-initialize.js', 'codex-thread.js', 'codex-turn.js', 'codex-process.js', 'daytona-runner.js', 'daytona-test-runner.js',
   ].map(async name => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })));
   const name = `herbie-attempt-${randomUUID()}`;
   const directory = `/tmp/${name}`;
@@ -82,6 +98,23 @@ export async function runDaytonaAttempt(
     if (patch.toString('base64') !== artifact.patchBase64) throw new Error('Invalid repository patch encoding');
     changes = { baseCommit: artifact.baseCommit, patch };
     report(`Changes retrieved from sandbox ${sandbox.id}`);
+    if (request.testCommand) {
+      await sandbox.fs.uploadFile(changes.patch, `${directory}/recovered.patch`, 30);
+      await sandbox.fs.uploadFile(Buffer.from(JSON.stringify({
+        cwd, baseCommit: changes.baseCommit, command: request.testCommand, timeoutMs: testTimeoutMs,
+      })), `${directory}/test.json`, 30);
+      report(`Testing recovered changes in sandbox ${sandbox.id}`);
+      const verification = await sandbox.process.executeCommand(`node ${directory}/daytona-test-runner.js`, directory, undefined, 150);
+      if (verification.exitCode !== 0 || verification.result !== 'herbie-tests-completed\n') throw new Error('Patch verification failed to complete');
+      const outcome: unknown = JSON.parse((await sandbox.fs.downloadFile(`${directory}/test-result.json`, 30)).toString('utf8'));
+      if (typeof outcome !== 'object' || outcome === null
+        || !('exitCode' in outcome) || typeof outcome.exitCode !== 'number' || !Number.isInteger(outcome.exitCode) || outcome.exitCode < 0
+        || !('stdout' in outcome) || typeof outcome.stdout !== 'string'
+        || !('stderr' in outcome) || typeof outcome.stderr !== 'string') throw new Error('Invalid repository test result');
+      changes.testResult = { exitCode: outcome.exitCode, stdout: outcome.stdout, stderr: outcome.stderr };
+      if (outcome.exitCode !== 0) throw new Error(`Repository tests exited ${outcome.exitCode}`);
+      report(`Repository tests passed in sandbox ${sandbox.id}`);
+    }
   } catch (cause) {
     failures.push(new Error(`Attempt failed in sandbox ${sandbox.id}`, { cause }));
   } finally {
