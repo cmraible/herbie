@@ -156,13 +156,13 @@ import { runDaytonaAttempt } from './packages/loop/dist/daytona-attempt.js';
 
 // daytona is an already configured SDK client with requestTimeoutMs: 30_000.
 const changes = await runDaytonaAttempt((params, options) => daytona.create(params, options), {
-  snapshot: 'approved-codex-runtime',
+  // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
   repoUrl: 'https://github.com/your-org/test-repo.git',
   // commit: 'full commit SHA', // optional; otherwise clones the default branch
   goal: 'Fix the failing addition test',
   testCommand: ['node', '--test'], // optional; choose the repository's test command
   // testTimeoutMs: 60_000, // optional; 1–60,000 ms, defaults to 60 seconds
-  domainAllowList: 'github.com,api.openai.com', // use the approved endpoints for your setup
+  // Default organization networking is inherited; no network override is required.
   secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
   // outboundProxyUrl: 'http://approved-proxy:8080',
 }, console.log);
@@ -171,23 +171,47 @@ const changes = await runDaytonaAttempt((params, options) => daytona.create(para
 // Persist this returned artifact in the caller for later testing and PR publication.
 ```
 
-This slice uses an **existing approved snapshot** with Node 24+, Git, and Codex on
-PATH, and Codex's provider/auth and ordinary sandbox policy already configured.
-It checks those executables, uploads the six built runner modules and JSON input,
-clones a public HTTPS repo through the SDK, executes one connected attempt, retrieves
-its repository changes, and awaits sandbox deletion. It neither builds snapshots nor
-installs repo dependencies.
-Keys must not be baked into the snapshot or runner. The pinned SDK's
-[`secrets` and `outboundProxyUrl` fields](https://www.daytona.io/docs/en/typescript-sdk/daytona/)
-reference existing organization Secrets and the approved external proxy setup;
-Herbie never reads their values or forwards the host environment. The snapshot's
-provider must support that setup. Proxy environment routing alone is not a security
-boundary; supply the approved domain allowlist. There are no sandbox-bypass flags.
+Without a snapshot, the adapter creates Ubuntu 22.04 with 1 CPU, 1 GiB RAM, and
+3 GiB disk, then installs Git, Node 24.19.0 and Codex 0.159.2 inside that disposable
+sandbox. The Node/Codex archive digests are verified before extraction. This reuses
+the runtime pins from the successful compatibility probe; it does not build a custom
+reusable snapshot or install repository dependencies. An optional snapshot must be
+a root-accessible Ubuntu-compatible runtime with Node 24+, Git, Codex and `runuser`.
+The adapter configures a dedicated unprivileged `compat` user for both Codex and tests.
 
-Creation is bounded at 120 seconds; each upload at 30 seconds; runtime preflight at
-30 seconds; the turn at five minutes; each patch-extraction Git command and artifact
-download at 30 seconds; the sandbox execution at eight minutes; and confirmed
-deletion at 60 seconds. Other SDK requests, including clone, use the
+It inherits Daytona's organization network policy by default. `domainAllowList` is
+optional and should only be supplied if the organization's policy permits it. Setup
+needs the Ubuntu package repositories, nodejs.org and registry.npmjs.org; the goal
+needs the public Git repository and api.openai.com. A blocked setup fails and deletes
+the sandbox rather than changing network policy.
+
+Keys must not be baked into a snapshot or runner. The pinned SDK's
+[`secrets` and `outboundProxyUrl` fields](https://www.daytona.io/docs/en/typescript-sdk/daytona/)
+reference existing organization Secrets and the approved proxy setup. The dedicated
+`daytona_openai` provider uses `OPENAI_API_KEY` supplied by Daytona, the Responses
+API, and HTTP streaming without WebSockets or retries. Herbie sends only secret names,
+never host credentials. The sandbox child preserves the API placeholder and proxy/CA
+environment variables; it does not inherit arbitrary Codex authentication overrides.
+
+Only the disposable Daytona runner requests `externalSandbox` with restricted network
+access and no interactive approvals; Daytona supplies the isolation boundary. Normal
+host attempts retain server-owned sandbox and approval settings. The fixed model is
+`gpt-6-luna`, low effort, default service tier, with web search disabled and a 32K
+configured context window. Cumulative usage notifications trigger cancellation at
+an estimated $0.005, charging all input at $0.125/M and output at $0.50/M (the
+[standard Luna rates](https://developers.openai.com/api/docs/models/gpt-6-luna), checked
+2026-10-07). Repeated cumulative updates are not summed. Invalid matching usage also
+cancels. Cancellation waits at most five seconds for a matching terminal event, then
+the existing owned-process-group cleanup runs; unconfirmed termination remains a failure.
+This is an observed-usage guard, **not a provider-enforced spending cap**: delayed
+notifications, in-flight work, model tools, and infrastructure charges can exceed it.
+A 90-second turn deadline still applies when no usage notification arrives. There is
+no model fallback or retry.
+
+Creation is bounded at 120 seconds; each upload at 30 seconds; fresh runtime setup at
+240 seconds (snapshot configuration at 30); the turn at 90 seconds; each patch-extraction
+Git command and artifact download at 30 seconds; sandbox goal execution at 240 seconds;
+and confirmed deletion at 60 seconds. Other SDK requests, including clone, use the
 caller's client timeout. A 15-minute sandbox TTL is a fallback. As in the lifecycle
 smoke, ambiguous creation is reported by its unique name without retries; a handle
 is required for explicit deletion. Failed deletion rejects even after a successful
@@ -231,9 +255,9 @@ deletion. Untested attempts and recovered artifacts on errors lack this evidence
 This preserves the final repository file state, not commit history or ignored files;
 submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
 this path. One live smoke needs an
-approved snapshot/provider configuration, existing scoped Secret/proxy references,
+existing scoped Secret/proxy references compatible with the configured OpenAI provider,
 an approved public repo/commit and goal, and explicit authorization for sandbox and
-model spend. Creating/configuring those prerequisites needs separate authorization;
+model spend. Creating/configuring account prerequisites needs separate authorization;
 the adapter does not provision secrets or change account settings.
 
 ### Callable tested-patch publisher
@@ -285,3 +309,12 @@ flags. It binds the supplied artifact to that attempt; it is not a replacement f
 trusted artifact storage or proof that the chosen tests are comprehensive. Durable
 storage, CLI orchestration, and live end-to-end validation remain later work. Unit
 tests use only temporary Git repositories and mocked GitHub calls.
+
+Before live Git publication on a new host, the operator must supply an existing
+noninteractive Git credential helper/SSH setup authorized to push to the target repository,
+and Git author/committer identity (which may be per-process rather than global).
+The separate GitHub API callback needs permission to create draft PRs. A connected
+GitHub app alone does not configure native Git push authentication. The target public
+test repository and base branch must already exist. Herbie does not create these
+credentials, change Git settings, or create a target repository. Fixture tests cover
+publication locally; a live attempt followed by native Git push remains unvalidated.

@@ -7,7 +7,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 // Call once on a fresh connection. The caller owns the transport and its lifetime.
 // send must enqueue the message or throw; transport failures must close/error lines.
 export function initializeCodex(
-  lines: Interface, send: (message: unknown) => void, timeoutMs = 10_000,
+  lines: Interface, send: (message: unknown) => void, timeoutMs = 10_000, experimentalApi = false,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error('Codex initialization timed out')), timeoutMs);
@@ -44,7 +44,7 @@ export function initializeCodex(
     lines.once('close', onClose);
     lines.once('error', onError);
     try {
-      send({ id: 0, method: 'initialize', params: { clientInfo: { name: 'herbie', version: '0.1.0' } } });
+      send({ id: 0, method: 'initialize', params: { clientInfo: { name: 'herbie', version: '0.1.0' }, ...(experimentalApi ? { capabilities: { experimentalApi: true } } : {}) } });
     } catch {
       onError();
     }

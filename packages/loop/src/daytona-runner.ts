@@ -13,7 +13,7 @@ try {
   const cwd = input.cwd;
   const git = async (...args: string[]) => (await promisify(execFile)('git', args, { cwd, timeout: 30_000 })).stdout;
   const baseCommit = (await git('rev-parse', 'HEAD')).trim();
-  await runCodexAttempt('codex', ['app-server'], { cwd, goal: input.goal, turnTimeoutMs: 300_000 });
+  await runCodexAttempt('codex', ['app-server'], { cwd, goal: input.goal, turnTimeoutMs: 90_000, disposableDaytona: true });
   // This checkout is disposable. Stage its final state to include new, non-ignored files.
   await git('add', '--all');
   const patchFile = new URL('./changes.patch', import.meta.url);

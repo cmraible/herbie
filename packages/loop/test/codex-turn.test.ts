@@ -228,3 +228,67 @@ for (const failure of ['close', 'error', 'send', 'timeout', 'timeout-after-start
     }
   });
 }
+
+test('Daytona turns use the isolated runtime and interrupt at the cumulative spending cutoff', async t => {
+  const { lines, sent, send, receive } = connection(t);
+  const rejected = assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+    disposableDaytona: true,
+  }), /spending cutoff/);
+  assert.deepEqual(sent[0], { id: 2, method: 'turn/start', params: {
+    threadId: 'thread-1', input: [{ type: 'text', text: 'Fix addition' }],
+    model: 'gpt-6-luna', effort: 'low', serviceTierForTurn: 'default', approvalPolicy: 'never',
+    sandboxPolicy: { type: 'externalSandbox', networkAccess: 'restricted' },
+  } });
+  receive(started);
+  const usage = (inputTokens: number, outputTokens: number, threadId = 'thread-1', turnId = 'turn-1') => receive({
+    method: 'thread/tokenUsage/updated', params: { threadId, turnId, tokenUsage: { total: { inputTokens, outputTokens } } },
+  });
+  usage(40_000, 0, 'other-thread');
+  usage(40_000, 0, 'thread-1', 'other-turn');
+  usage(30_000, 0);
+  usage(30_000, 0); // Notifications contain cumulative totals, not deltas.
+  assert.equal(sent.length, 1);
+  usage(38_426, 340); // Earlier successful probe: $0.00497325, still below the guard.
+  assert.equal(sent.length, 1);
+  usage(40_000, 0); // $0.005 conservative estimate (all input charged at cache-write price).
+  assert.deepEqual(sent[1], { id: 3, method: 'turn/interrupt', params: { threadId: 'thread-1', turnId: 'turn-1' } });
+  receive(completed('thread-1', 'turn-1', 'interrupted'));
+  await rejected;
+});
+
+for (const failure of ['late-start', 'invalid-usage', 'missing-interrupt-completion']) {
+  test(`Daytona spending guard remains bounded: ${failure}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { lines, sent, send, receive } = connection(t);
+    const rejected = assert.rejects(runCodexTurn(lines, send, 'thread-1', 'Fix addition', {
+      disposableDaytona: true, interruptTimeoutMs: 20,
+    }), failure === 'missing-interrupt-completion' ? /spending cutoff.*termination unconfirmed/ : /spending cutoff/);
+    if (failure !== 'late-start') receive(started);
+    const update = (turnId: string, inputTokens: number) => receive({
+      method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId,
+        tokenUsage: { total: { inputTokens, outputTokens: 0 } } },
+    });
+    update('other-turn', 100_000);
+    update('turn-1', failure === 'invalid-usage' ? -1 : 40_000);
+    if (failure === 'late-start') {
+      assert.equal(sent.length, 1);
+      receive(started);
+    }
+    assert.equal(sent.length, 2);
+    receive({ id: 3, result: {} });
+    if (failure === 'missing-interrupt-completion') t.mock.timers.tick(20);
+    else receive(completed('thread-1', 'turn-1', 'interrupted'));
+    await rejected;
+  });
+}
+
+test('early usage for another turn does not cancel the requested Daytona turn', async t => {
+  const { lines, sent, send, receive } = connection(t);
+  const done = runCodexTurn(lines, send, 'thread-1', 'Fix addition', { disposableDaytona: true });
+  receive({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'other-turn',
+    tokenUsage: { total: { inputTokens: 100_000, outputTokens: 0 } } } });
+  receive(started);
+  receive(completed());
+  await done;
+  assert.equal(sent.length, 1);
+});

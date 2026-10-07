@@ -11,8 +11,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 // Transport failures must close/error lines. A terminal event does not confirm descendant exit.
 export function runCodexTurn(
   lines: Interface, send: (message: unknown) => void, threadId: string, goal: string,
-  { timeoutMs = 60_000, signal, interruptTimeoutMs = 5_000 }: {
-    timeoutMs?: number; signal?: AbortSignal; interruptTimeoutMs?: number;
+  { timeoutMs = 60_000, signal, interruptTimeoutMs = 5_000, disposableDaytona = false }: {
+    timeoutMs?: number; signal?: AbortSignal; interruptTimeoutMs?: number; disposableDaytona?: boolean;
   } = {},
 ): Promise<void> {
   if (signal?.aborted) return Promise.reject(new Error('Codex turn cancelled'));
@@ -24,6 +24,7 @@ export function runCodexTurn(
     let interruptTimer: ReturnType<typeof setTimeout> | undefined;
     // A completion notification may precede the turn/start response that identifies our turn.
     const completions = new Map<string, TerminalStatus>();
+    const spendingFailures = new Map<string, Error>();
     const timer = setTimeout(() => cancel(new Error('Codex turn timed out')), timeoutMs);
     const finish = (error?: Error, terminal = false) => {
       if (settled) return;
@@ -35,6 +36,7 @@ export function runCodexTurn(
       lines.off('close', onClose);
       lines.off('error', onError);
       completions.clear();
+      spendingFailures.clear();
       if (cancellation && !terminal) reject(new AggregateError(
         error ? [cancellation, error] : [cancellation],
         `${cancellation.message}; Codex turn termination unconfirmed`,
@@ -72,6 +74,22 @@ export function runCodexTurn(
         } else if (message.id === 3 && interruptSent) {
           if ('error' in message || !isObject(message.result)) throw new Error();
           // Acknowledgement alone does not confirm that the turn has stopped.
+        } else if (disposableDaytona && message.method === 'thread/tokenUsage/updated') {
+          if (!isObject(message.params)) throw new Error();
+          if (message.params.threadId !== threadId) return;
+          const usageTurnId = message.params.turnId;
+          if (typeof usageTurnId !== 'string' || !usageTurnId.trim()) throw new Error();
+          if (turnId !== undefined && usageTurnId !== turnId) return;
+          const usage = isObject(message.params.tokenUsage) ? message.params.tokenUsage.total : undefined;
+          if (!isObject(usage) || typeof usage.inputTokens !== 'number' || typeof usage.outputTokens !== 'number'
+            || !Number.isSafeInteger(usage.inputTokens) || usage.inputTokens < 0
+            || !Number.isSafeInteger(usage.outputTokens) || usage.outputTokens < 0) {
+            spendingFailures.set(usageTurnId, new Error('Codex spending cutoff: invalid usage'));
+          } else if ((usage.inputTokens * 0.125 + usage.outputTokens * 0.5) / 1_000_000 >= 0.005) {
+            // Cumulative totals: do not add successive notifications. Charge all input at
+            // the highest standard input price (cache writes), ignoring cache discounts.
+            spendingFailures.set(usageTurnId, new Error('Codex spending cutoff reached'));
+          }
         } else if (message.method === 'turn/completed') {
           if (!isObject(message.params)) throw new Error();
           if (message.params.threadId !== threadId) return;
@@ -82,6 +100,8 @@ export function runCodexTurn(
           if (status !== 'completed' && status !== 'failed' && status !== 'interrupted') throw new Error();
           completions.set(turn.id, status);
         }
+        const spendingFailure = turnId === undefined ? undefined : spendingFailures.get(turnId);
+        if (spendingFailure) cancel(spendingFailure);
         const status = turnId === undefined ? undefined : completions.get(turnId);
         if (status !== undefined) finish(status === 'completed' ? undefined : new Error(`Codex turn ${status}`), true);
         else interrupt();
@@ -94,7 +114,13 @@ export function runCodexTurn(
     lines.once('error', onError);
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      send({ id: 2, method: 'turn/start', params: { threadId, input: [{ type: 'text', text: goal }] } });
+      send({ id: 2, method: 'turn/start', params: {
+        threadId, input: [{ type: 'text', text: goal }],
+        ...(disposableDaytona ? {
+          model: 'gpt-6-luna', effort: 'low', serviceTierForTurn: 'default', approvalPolicy: 'never',
+          sandboxPolicy: { type: 'externalSandbox', networkAccess: 'restricted' },
+        } : {}),
+      } });
     } catch {
       onError();
     }

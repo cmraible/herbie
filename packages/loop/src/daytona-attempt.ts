@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import type { CreateSandboxFromSnapshotParams, Sandbox } from '@daytona/sdk';
+import type { CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, Sandbox } from '@daytona/sdk';
+
+import { installDaytonaRuntime, configureDaytonaRuntime } from './daytona-runtime.js';
 
 type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
   git: Pick<Sandbox['git'], 'clone'>;
@@ -11,9 +13,9 @@ type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
   };
   process: Pick<Sandbox['process'], 'executeCommand'>;
 };
-type CreateSandbox = (params: CreateSandboxFromSnapshotParams, options: { timeout: number }) => Promise<AttemptSandbox>;
+type CreateSandbox = (params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams, options: { timeout: number }) => Promise<AttemptSandbox>;
 type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyUrl'> & {
-  snapshot: string; domainAllowList: string; repoUrl: string; commit?: string; goal: string;
+  snapshot?: string; domainAllowList?: string; repoUrl: string; commit?: string; goal: string;
   testCommand?: string[]; testTimeoutMs?: number;
 };
 
@@ -53,8 +55,9 @@ export async function runDaytonaAttempt(
   if (repo.protocol !== 'https:' || repo.username || repo.password || repo.search || repo.hash) {
     throw new Error('Use a public HTTPS repository URL without credentials, query, or fragment');
   }
-  if (!request.snapshot.trim() || !request.domainAllowList.trim() || !request.goal.trim()) {
-    throw new Error('Snapshot, domain allowlist, and goal are required');
+  if ((request.snapshot !== undefined && !request.snapshot.trim())
+    || (request.domainAllowList !== undefined && !request.domainAllowList.trim()) || !request.goal.trim()) {
+    throw new Error('Goal and any supplied snapshot or domain allowlist must not be empty');
   }
   const testTimeoutMs = request.testTimeoutMs ?? 60_000;
   if (request.testCommand !== undefined && (!Array.isArray(request.testCommand) || !request.testCommand.length
@@ -75,7 +78,9 @@ export async function runDaytonaAttempt(
   let sandbox: AttemptSandbox;
   try {
     sandbox = await create({
-      name, snapshot: request.snapshot, domainAllowList: request.domainAllowList,
+      name, ...(request.snapshot ? { snapshot: request.snapshot }
+        : { image: 'ubuntu:22.04', resources: { cpu: 1, memory: 1, disk: 3 } }),
+      ...(request.domainAllowList ? { domainAllowList: request.domainAllowList } : {}),
       secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 15,
     }, { timeout: 120 });
   } catch (cause) {
@@ -86,10 +91,10 @@ export async function runDaytonaAttempt(
   try {
     report(`Created sandbox ${sandbox.id}`);
     const preflight = await sandbox.process.executeCommand(
-      `node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' && git --version && codex --version`,
-      undefined, undefined, 30,
+      (request.snapshot ? '' : installDaytonaRuntime) + configureDaytonaRuntime,
+      undefined, undefined, request.snapshot ? 30 : 240,
     );
-    if (preflight.exitCode !== 0) throw new Error('Snapshot requires Node 24+, Git, and Codex on PATH');
+    if (preflight.exitCode !== 0) throw new Error('Sandbox runtime preparation failed');
     await sandbox.fs.createFolder(directory, '700');
     for (const file of runtime) await sandbox.fs.uploadFile(file.contents, `${directory}/${file.name}`, 30);
     await sandbox.fs.uploadFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`, 30);
@@ -97,7 +102,7 @@ export async function runDaytonaAttempt(
     await sandbox.git.clone(repo.href, cwd, undefined, request.commit);
     report(`Running goal in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
-    const result = await sandbox.process.executeCommand(`node ${directory}/daytona-runner.js`, directory, undefined, 480);
+    const result = await sandbox.process.executeCommand(`chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`, directory, undefined, 240);
     if (result.exitCode !== 0 || result.result !== 'herbie-attempt-completed\n') throw new Error('Sandbox goal attempt failed');
     report(`Goal completed in sandbox ${sandbox.id}`);
     const artifact: unknown = JSON.parse((await sandbox.fs.downloadFile(`${directory}/changes.json`, 30)).toString('utf8'));
@@ -114,7 +119,7 @@ export async function runDaytonaAttempt(
         cwd, baseCommit: changes.baseCommit, command: testCommand, timeoutMs: testTimeoutMs,
       })), `${directory}/test.json`, 30);
       report(`Testing recovered changes in sandbox ${sandbox.id}`);
-      const verification = await sandbox.process.executeCommand(`node ${directory}/daytona-test-runner.js`, directory, undefined, 150);
+      const verification = await sandbox.process.executeCommand(`chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-test-runner.js`, directory, undefined, 150);
       if (verification.exitCode !== 0 || verification.result !== 'herbie-tests-completed\n') throw new Error('Patch verification failed to complete');
       const outcome: unknown = JSON.parse((await sandbox.fs.downloadFile(`${directory}/test-result.json`, 30)).toString('utf8'));
       if (typeof outcome !== 'object' || outcome === null

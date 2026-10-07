@@ -8,7 +8,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 // The caller owns the transport; send enqueues synchronously or throws.
 // Transport failures must close/error lines. Security settings remain server-owned.
 export function startCodexThread(
-  lines: Interface, send: (message: unknown) => void, cwd: string, timeoutMs = 10_000,
+  lines: Interface, send: (message: unknown) => void, cwd: string, timeoutMs = 10_000, disposableDaytona = false,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error('Codex thread start timed out')), timeoutMs);
@@ -41,7 +41,7 @@ export function startCodexThread(
     lines.once('close', onClose);
     lines.once('error', onError);
     try {
-      send({ id: 1, method: 'thread/start', params: { cwd, ephemeral: true } });
+      send({ id: 1, method: 'thread/start', params: { cwd, ephemeral: true, ...(disposableDaytona ? { model: 'gpt-6-luna', modelProvider: 'daytona_openai' } : {}) } });
     } catch {
       onError();
     }

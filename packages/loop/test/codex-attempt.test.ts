@@ -138,3 +138,19 @@ test('abort interrupts the active turn before closing its transport', posix, asy
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   await gone();
 });
+
+for (const mode of ['budget', 'budget-unconfirmed']) {
+  test(`Daytona spending cutoff interrupts and cleans the owned process group: ${mode}`, posix, async t => {
+    const { cwd, record, events, gone } = await setup(t);
+    // Only the fake protocol executable runs on the host; never real externally sandboxed Codex.
+    await assert.rejects(runCodexAttempt(process.execPath, [fixture, mode, record], {
+      cwd, goal, disposableDaytona: true, interruptTimeoutMs: 200, shutdownMs: 100,
+    }), error => {
+      assert.match(messages(error), /spending cutoff reached/);
+      if (mode === 'budget-unconfirmed') assert.match(messages(error), /termination unconfirmed/);
+      return true;
+    });
+    assert.equal((await events()).filter(event => object(event) && event.method === 'turn/interrupt').length, 1);
+    await gone();
+  });
+}
