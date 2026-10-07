@@ -209,7 +209,7 @@ With `testCommand`, the adapter uploads the recovered patch bytes back into the 
 sandbox. A separate runner creates a clean, detached Git worktree at `baseCommit`,
 applies the patch, and runs the supplied executable and literal arguments there,
 without an implicit shell. An empty patch tests the unchanged base. Repository code
-runs only in the disposable sandbox; Herbie does not apply or execute it on the host.
+runs only in the disposable sandbox; the attempt adapter does not execute it on the host.
 The caller must choose the test command and ensure its dependencies are available;
 there is no automatic dependency installation or test discovery.
 
@@ -223,13 +223,65 @@ default 1 MiB buffer limit; exceeding it fails verification. The command deadlin
 defaults to 60 seconds (configurable from 1–60,000 ms); the verifier has a 150-second
 sandbox execution deadline covering checkout, apply, and tests. Sandbox deletion
 still runs on every outcome and must be confirmed. Test-generated changes are not
-recaptured into the patch.
+recaptured into the patch. After the goal, tests, and deletion all succeed, the host
+also attaches `verification` evidence binding the repository URL, base commit,
+SHA-256 of the patch bytes, and test command to confirmed goal completion and sandbox
+deletion. Untested attempts and recovered artifacts on errors lack this evidence.
 
 This preserves the final repository file state, not commit history or ignored files;
-submodule working-tree contents are not bundled. PR publication remains a later
-slice. No live sandbox/model call has been made to validate
+submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
 this path. One live smoke needs an
 approved snapshot/provider configuration, existing scoped Secret/proxy references,
 an approved public repo/commit and goal, and explicit authorization for sandbox and
 model spend. Creating/configuring those prerequisites needs separate authorization;
 the adapter does not provision secrets or change account settings.
+
+### Callable tested-patch publisher
+
+After building, the host can publish a successfully verified attempt using
+`publishTestedPatch`. It is not wired into the CLI. Git authentication and the GitHub
+API client must already be configured on the host; neither is sent to the Codex
+sandbox. The caller supplies a narrow `createPullRequest` adapter for that client:
+
+```js
+import { publishTestedPatch } from './packages/loop/dist/publish-patch.js';
+
+// changes is the successful return from runDaytonaAttempt with testCommand.
+// github is an existing authenticated client; this example uses Octokit's shape.
+const published = await publishTestedPatch(async ({ repository, ...pull }) => {
+  const [owner, repo] = repository.split('/');
+  const { data } = await github.rest.pulls.create({ owner, repo, ...pull });
+  return { url: data.html_url };
+}, {
+  repository: 'your-org/test-repo', baseBranch: 'main',
+  branch: 'herbie/fix-addition-001', // caller-owned, stable, new branch name
+  title: 'Fix addition', body: 'Verified with the configured repository tests.',
+  changes,
+});
+console.log(published.url); // also returns branch and commit
+```
+
+The publisher rejects empty/unverified patches, mismatched repository/base/patch
+evidence, an existing publication branch, or a fetched base-branch tip different
+from the tested commit. It copies the verified bytes, initializes a temporary bare
+Git repository, fetches the base, applies the patch to an isolated index, and creates
+one commit with `commit-tree`. There is no checkout, repository-code execution, or
+dependency installation on the host. The existing host Git identity is used. A
+create-only push lease prevents replacing a branch, including concurrent creation;
+only a confirmed new branch proceeds to one draft-PR request. Each Git command has
+a 30-second timeout. The supplied GitHub client owns its request timeout.
+
+`PatchPublicationError.publication` records the repository, branch, available commit
+and URL, and the stage reached. `preparing` means no push was attempted; `pushing`
+means remote branch state may be uncertain; `opening-pr` means the branch was pushed
+but the PR may or may not have been created. `published` with an error means the PR
+URL was received but local cleanup failed. Temporary local files are removed on all
+paths; published branches are never deleted as rollback. There are no automatic
+retries. After a partial failure, inspect the recorded branch and its PRs before
+acting; retrying the same branch is rejected instead of creating a blind duplicate.
+
+Use the host-issued evidence from the completed attempt, not hand-built success
+flags. It binds the supplied artifact to that attempt; it is not a replacement for
+trusted artifact storage or proof that the chosen tests are comprehensive. Durable
+storage, CLI orchestration, and live end-to-end validation remain later work. Unit
+tests use only temporary Git repositories and mocked GitHub calls.

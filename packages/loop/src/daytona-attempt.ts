@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { CreateSandboxFromSnapshotParams, Sandbox } from '@daytona/sdk';
 
@@ -27,6 +27,15 @@ export interface DaytonaAttemptChanges {
   baseCommit: string;
   patch: Buffer;
   testResult?: DaytonaTestResult;
+  // Issued by the host only after the goal, tests, and sandbox deletion succeed.
+  verification?: {
+    repoUrl: string;
+    baseCommit: string;
+    patchSha256: string;
+    testCommand: string[];
+    goalCompleted: true;
+    sandboxDeleted: true;
+  };
 }
 
 export class DaytonaAttemptError extends AggregateError {
@@ -55,6 +64,7 @@ export async function runDaytonaAttempt(
   if (!Number.isInteger(testTimeoutMs) || testTimeoutMs < 1 || testTimeoutMs > 60_000) {
     throw new Error('Test timeout must be an integer from 1 to 60000 milliseconds');
   }
+  const testCommand = request.testCommand?.slice();
   const runtime = await Promise.all([
     'codex-initialize.js', 'codex-thread.js', 'codex-turn.js', 'codex-process.js', 'daytona-runner.js', 'daytona-test-runner.js',
   ].map(async name => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })));
@@ -98,10 +108,10 @@ export async function runDaytonaAttempt(
     if (patch.toString('base64') !== artifact.patchBase64) throw new Error('Invalid repository patch encoding');
     changes = { baseCommit: artifact.baseCommit, patch };
     report(`Changes retrieved from sandbox ${sandbox.id}`);
-    if (request.testCommand) {
+    if (testCommand) {
       await sandbox.fs.uploadFile(changes.patch, `${directory}/recovered.patch`, 30);
       await sandbox.fs.uploadFile(Buffer.from(JSON.stringify({
-        cwd, baseCommit: changes.baseCommit, command: request.testCommand, timeoutMs: testTimeoutMs,
+        cwd, baseCommit: changes.baseCommit, command: testCommand, timeoutMs: testTimeoutMs,
       })), `${directory}/test.json`, 30);
       report(`Testing recovered changes in sandbox ${sandbox.id}`);
       const verification = await sandbox.process.executeCommand(`node ${directory}/daytona-test-runner.js`, directory, undefined, 150);
@@ -125,7 +135,16 @@ export async function runDaytonaAttempt(
       failures.push(new Error(`Deletion unconfirmed for sandbox ${sandbox.id}; check Daytona before retrying`, { cause }));
     }
   }
-  if (!failures.length && changes) return changes;
+  if (!failures.length && changes) {
+    if (testCommand && changes.testResult?.exitCode === 0) {
+      changes.verification = {
+        repoUrl: repo.href, baseCommit: changes.baseCommit,
+        patchSha256: createHash('sha256').update(changes.patch).digest('hex'),
+        testCommand, goalCompleted: true, sandboxDeleted: true,
+      };
+    }
+    return changes;
+  }
   const error = new DaytonaAttemptError(failures, failures.map(error => error.message).join('; '));
   error.changes = changes;
   throw error;
