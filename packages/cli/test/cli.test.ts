@@ -145,3 +145,71 @@ test('logout clears local credentials during a network outage and reports unconf
     assert.match(app.errors.at(-1) ?? '', /No valid session/);
   } finally { await app.close(); }
 });
+
+test('CLI login shows its service and approval code, saving no session until browser approval', async () => {
+  const pending = Promise.withResolvers<void>();
+  let approved = false;
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/auth/start') { json(response, {url:'https://github.example/authorize?state=opaque-state',pollToken:'private-poll-token',userCode:'ABCD-EFGH'}); return; }
+    if (request.url === '/api/auth/poll?token=private-poll-token') {
+      if (approved) json(response, {status:'complete',token:'approved-session'});
+      else { json(response, {status:'pending'}); pending.resolve(); }
+      return;
+    }
+    if (request.url === '/api/session' && request.headers.authorization === 'Bearer approved-session') { json(response, {...session,mode:'live'}); return; }
+    json(response, {error:'Not found'}, 404);
+  });
+  const login = app.invoke(['login','--url',app.baseUrl]);
+  try {
+    await pending.promise;
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+    const instructions = app.errors.join('');
+    assert.ok(instructions.includes(`Service: ${app.baseUrl}`));
+    assert.match(instructions, /Approval code: ABCD-EFGH/);
+    assert.match(instructions, /Only approve if you started this login on this computer\. Enter this code in the browser\. Never approve a code sent by someone else\./);
+    assert.ok(instructions.includes('https://github.example/authorize?state=opaque-state\n'));
+    assert.ok(!instructions.includes('private-poll-token'));
+    approved = true;
+    assert.equal(await login, 0);
+    assert.match(await readFile(app.configPath,'utf8'), /approved-session/);
+    assert.equal((await stat(app.configPath)).mode & 0o777, 0o600);
+    assert.equal(JSON.parse(app.output.at(-1) ?? '').mode, 'live');
+  } finally { approved = true; await login; await app.close(); }
+});
+
+test('rejecting pending CLI authorization stops polling without saving a session', async () => {
+  const pending = Promise.withResolvers<void>();
+  let reject = false;
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/auth/start') { json(response, {url:'https://github.example/authorize?state=rejected-state',pollToken:'private-poll-token',userCode:'WXYZ-2345'}); return; }
+    if (request.url === '/api/auth/poll?token=private-poll-token') {
+      json(response, {status:reject ? 'rejected' : 'pending'});
+      pending.resolve(); return;
+    }
+    json(response, {error:'No session should be issued'}, 401);
+  });
+  const login = app.invoke(['login','--url',app.baseUrl]);
+  try {
+    await pending.promise;
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+    reject = true;
+    assert.equal(await login, 1);
+    assert.match(app.errors.at(-1) ?? '', /CLI authorization rejected; no session saved/);
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+    assert.equal(app.output.length, 0);
+  } finally { reject = true; await login; await app.close(); }
+});
+
+test('CLI authorization without a user approval code is refused before polling', async () => {
+  let polls = 0;
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/auth/start') { json(response, {url:'https://github.example/authorize?state=legacy-state',pollToken:'private-poll-token'}); return; }
+    polls++; json(response, {status:'complete',token:'unapproved-session'});
+  });
+  try {
+    assert.equal(await app.invoke(['login','--url',app.baseUrl]), 1);
+    assert.match(app.errors.at(-1) ?? '', /did not provide a CLI approval code; no session saved/);
+    assert.equal(polls, 0);
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+  } finally { await app.close(); }
+});

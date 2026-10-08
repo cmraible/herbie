@@ -52,10 +52,12 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
       }
       const auth = await client.authStart('cli');
       if (!auth.pollToken) throw new Error('Service did not provide a CLI login token');
-      io.stderr(`Open this URL to sign in with GitHub:\n${auth.url}\nWaiting for browser authorization…\n`);
+      if (!auth.userCode) throw new Error('Service did not provide a CLI approval code; no session saved');
+      io.stderr(`Service: ${baseUrl}\nApproval code: ${auth.userCode}\nOnly approve if you started this login on this computer. Enter this code in the browser. Never approve a code sent by someone else.\nOpen this URL to sign in with GitHub:\n${auth.url}\nWaiting for browser authorization…\n`);
       for (let count = 0; count < 150; count++) {
         const result = await client.authPoll(auth.pollToken);
         if (result.status === 'expired') throw new Error('Login expired; run login again');
+        if (result.status === 'rejected') throw new Error('CLI authorization rejected; no session saved');
         if (result.status === 'complete') {
           if (!result.token) throw new Error('Service did not provide a session');
           const session = await createClient({baseUrl, origin:baseUrl, token: result.token}).session();
