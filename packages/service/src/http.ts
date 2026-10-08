@@ -55,7 +55,11 @@ export function createApiServer(options:ApiOptions){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
       if(request.headers.origin!==origin)throw new HttpError(403,'Request origin is not allowed');
     }
-    if(method==='GET'&&url.pathname==='/api/health'){json(response,200,{mode:adapters.mode,executionEnabled});return;}
+    if(method==='GET'&&url.pathname==='/api/health'){
+      try{await store.pool.query('SELECT 1');}
+      catch{json(response,503,{error:'Database unavailable'});return;}
+      json(response,200,{mode:adapters.mode,executionEnabled});return;
+    }
     if(method==='POST'&&url.pathname==='/api/auth/start'){
       const {client}=clientInput.parse(await readJson(request));const flow=await auth.start(client);
       if(client==='web')response.setHeader('set-cookie',`herbie_auth=${flow.browserState}; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=600${secure}`);
