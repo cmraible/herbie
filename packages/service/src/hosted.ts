@@ -7,14 +7,14 @@ import {runWorker} from './worker.js';
 
 type Runtime = Awaited<ReturnType<typeof createRuntime>>;
 export type HostedRuntime = Pick<Runtime,'store'|'auth'|'adapters'|'github'> & {
-  config:{host:string;port:number;publicUrl:string;executionEnabled:boolean};
+  config:{host:string;port:number;publicUrl:string;executionEnabled:boolean;deploymentId?:string};
 };
 export type HostedService = {server:Server;close:()=>Promise<void>};
 
 /** The API and worker are trusted peers. Generated code still runs only in Daytona. */
 export async function startHostedService(injected?:HostedRuntime):Promise<HostedService>{
   const {config,store,auth,adapters,github}=injected??await createRuntime();
-  const server=createApiServer({store,auth,adapters,publicUrl:config.publicUrl,executionEnabled:config.executionEnabled,verifyWebhook:github?.verifyWebhook});
+  const server=createApiServer({store,auth,adapters,publicUrl:config.publicUrl,executionEnabled:config.executionEnabled,deploymentId:config.deploymentId,verifyWebhook:github?.verifyWebhook});
   try{
     await new Promise<void>((resolve,reject)=>{
       server.once('error',reject);

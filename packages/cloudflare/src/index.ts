@@ -21,7 +21,7 @@ export class HerbieContainer extends DurableObject<Env>{
     const container=this.ctx.container;
     if(!container)throw new Error('Container binding unavailable');
     if(!container.running){
-      const env=containerEnvironment(this.env.HERBIE_RUNTIME_SECRETS,this.env.HERBIE_PUBLIC_URL,executionEnabled(this.env.HERBIE_EXECUTION_ENABLED));
+      const env=containerEnvironment(this.env.HERBIE_RUNTIME_SECRETS,this.env.HERBIE_PUBLIC_URL,executionEnabled(this.env.HERBIE_EXECUTION_ENABLED),this.env.HERBIE_DEPLOYMENT_ID);
       container.start({env,enableInternet:true});
     }
     await container.setInactivityTimeout(inactivityMs);

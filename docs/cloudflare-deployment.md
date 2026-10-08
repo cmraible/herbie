@@ -99,6 +99,10 @@ separate user actions. This repository does not create any of those credentials.
 
 ## Configure and deploy after review and approvals
 
+Production deployment uses [GitHub Actions](github-actions.md). That runbook
+supersedes desktop login or manual secret-upload steps and describes the protected
+environment, scoped token, runtime inputs and initially manual release gate.
+
 Use Node 24, Docker and the pinned workspace pnpm/Wrangler versions. Build/test
 before deployment:
 
@@ -125,12 +129,9 @@ pass it in arguments, or use Docker build arguments for secrets. The image revis
 is a public rollout marker and must never contain secret material.
 
 After the exact account, resource creation, credential transfer and deployment
-are approved, use Wrangler's secret prompt/file input and deploy:
-
-```sh
-pnpm --filter @herbie/cloudflare exec wrangler secret put HERBIE_RUNTIME_SECRETS < /private/herbie-runtime.json
-pnpm --filter @herbie/cloudflare deploy
-```
+are approved, supply individual GitHub environment values and dispatch the workflow
+from `main`. Its helper constructs this bundle privately and passes a secrets file
+to Wrangler during the full deployment. No desktop authentication is required.
 
 Keep execution disabled for the first deployment. Complete GitHub App setup and
 verify login, account/repository permissions, private database access, advisor

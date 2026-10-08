@@ -1,0 +1,106 @@
+name: Verify and deploy Herbie
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: herbie-verify-${{ github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: herbie
+          POSTGRES_PASSWORD: herbie-local-only
+          POSTGRES_DB: herbie
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U herbie"
+          --health-interval 2s --health-timeout 2s --health-retries 15
+    env:
+      HERBIE_TEST_DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 10.34.6
+          run_install: false
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @herbie/web exec playwright install --with-deps chromium
+      - name: Unit, integration, CLI, browser, edge and container verification
+        run: bash scripts/ci-verify.sh
+      - name: Verification evidence (contains only local demo data)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/ci
+            packages/web/test-results
+          retention-days: 7
+
+  deploy:
+    name: Deploy disabled production service
+    needs: verify
+    if: >-
+      github.repository == 'cmraible/herbie' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (vars.HERBIE_DEPLOY_MODE == 'automatic' ||
+        (vars.HERBIE_DEPLOY_MODE == 'manual' && github.event_name == 'workflow_dispatch'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://herbie-service.cmraible1.workers.dev
+    concurrency:
+      group: herbie-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 10.34.6
+          run_install: false
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Deploy current main and verify the new container revision
+        run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
+        env:
+          HERBIE_DEPLOY_ENABLED: 'true'
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HERBIE_GITHUB_APP_ID: ${{ vars.HERBIE_GITHUB_APP_ID }}
+          HERBIE_GITHUB_CLIENT_ID: ${{ vars.HERBIE_GITHUB_CLIENT_ID }}
+          HERBIE_DATABASE_URL: ${{ secrets.HERBIE_DATABASE_URL }}
+          HERBIE_CREDENTIAL_KEY: ${{ secrets.HERBIE_CREDENTIAL_KEY }}
+          HERBIE_GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}
+          HERBIE_GITHUB_PRIVATE_KEY: ${{ secrets.HERBIE_GITHUB_PRIVATE_KEY }}
+          HERBIE_GITHUB_WEBHOOK_SECRET: ${{ secrets.HERBIE_GITHUB_WEBHOOK_SECRET }}
+          HERBIE_DATABASE_CA: ${{ secrets.HERBIE_DATABASE_CA }}

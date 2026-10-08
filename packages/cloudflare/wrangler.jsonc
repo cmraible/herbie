@@ -9,6 +9,7 @@
   "preview_urls": false,
   "vars": {
     "HERBIE_PUBLIC_URL": "https://herbie-service.cmraible1.workers.dev",
+    "HERBIE_DEPLOYMENT_ID": "local",
     "HERBIE_EXECUTION_ENABLED": "false"
   },
   "secrets": { "required": ["HERBIE_RUNTIME_SECRETS"] },
