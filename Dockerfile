@@ -28,6 +28,8 @@ RUN --mount=type=secret,id=proxy_ca \
     pnpm install --frozen-lockfile --prod --filter herbie --filter '@herbie/service...'
 
 FROM node:24.19.0-bookworm-slim AS runtime
+ARG HERBIE_RUNTIME_REVISION=1
+LABEL herbie.runtime-revision=$HERBIE_RUNTIME_REVISION
 ENV NODE_ENV=production HERBIE_HOST=0.0.0.0 HERBIE_PORT=8787
 WORKDIR /app
 # The trusted publisher uses native Git; generated code is never executed here.
