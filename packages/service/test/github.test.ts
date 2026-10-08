@@ -50,6 +50,30 @@ export async function githubFixture(t: TestContext) {
   return {github,fixture,requests,publicKey:keys.publicKey};
 }
 
+async function authFixture(t:TestContext) {
+  const {github} = await githubFixture(t);
+  const schema = `auth_test_${randomUUID().replaceAll('-','')}`;
+  const admin = new Pool({connectionString:process.env.HERBIE_TEST_DATABASE_URL});
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool = new Pool({connectionString:process.env.HERBIE_TEST_DATABASE_URL,options:`-c search_path=${schema}`});
+  t.after(async()=>{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
+  await migrateAuth(pool);
+  const config = {publicUrl:'https://herbie.example',credentialKey:Buffer.alloc(32,1).toString('base64')};
+  const restart = ()=>createAuth({...config,mode:'live'},new PgAuthStore(pool),github);
+  const auth = restart();
+  async function pendingLogin() {
+    const start=await auth.start('cli');
+    assert.ok(start.pollToken && start.userCode);
+    const state=new URL(start.url).searchParams.get('state');
+    assert.ok(state);
+    const callback=await auth.callback('code',state);
+    assert.ok(callback.client==='cli');
+    const pending=await auth.pendingCli(callback.approvalToken);
+    return {pollToken:start.pollToken,userCode:start.userCode,approvalToken:callback.approvalToken,csrfToken:pending.csrfToken};
+  }
+  return {auth,restart,pendingLogin,pool,config};
+}
+
 test('authorizes only the intersection of public user-writable and installed app-writable repositories', async t => {
   const {github,fixture,requests,publicKey} = await githubFixture(t);
   assert.deepEqual(await github.authorize('ghu_fixture','alice/project'), {repository:'alice/project',defaultBranch:'main',installationId:11});
@@ -114,15 +138,7 @@ test('live publication recovers an existing attempt PR without running Git or cr
 });
 
 test('durable OAuth binds web callbacks to the browser and CLI tokens are delivered once across restarts', {skip:!process.env.HERBIE_TEST_DATABASE_URL}, async t => {
-  const {github} = await githubFixture(t);
-  const schema = `auth_test_${randomUUID().replaceAll('-','')}`;
-  const admin = new Pool({connectionString:process.env.HERBIE_TEST_DATABASE_URL});
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  const pool = new Pool({connectionString:process.env.HERBIE_TEST_DATABASE_URL,options:`-c search_path=${schema}`});
-  t.after(async()=>{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
-  await migrateAuth(pool);
-  const config = {mode:'live',publicUrl:'https://herbie.example',credentialKey:Buffer.alloc(32,1).toString('base64')};
-  const auth = createAuth({...config,mode:'live'},new PgAuthStore(pool),github);
+  const {auth,restart,pool,config}=await authFixture(t);
   const web = await auth.start('web');
   const state = new URL(web.url).searchParams.get('state');
   assert.ok(state);
@@ -130,13 +146,23 @@ test('durable OAuth binds web callbacks to the browser and CLI tokens are delive
   await assert.rejects(auth.callback('code',state,web.browserState), /expired|invalid/i);
   const cli = await auth.start('cli');
   assert.ok(cli.pollToken);
+  assert.match(cli.userCode??'',/^[A-Z2-7]{4}-[A-Z2-7]{4}$/);
+  assert.ok(!cli.url.includes(cli.userCode??'missing-code'));
   const cliState = new URL(cli.url).searchParams.get('state');
   assert.ok(cliState);
   assert.deepEqual(await auth.poll(cli.pollToken),{status:'pending'});
-  const restarted = createAuth({...config,mode:'live'},new PgAuthStore(pool),github);
+  const restarted = restart();
   const callback = await restarted.callback('code',cliState);
   assert.equal(callback.client,'cli');
-  assert.equal(callback.token,undefined);
+  assert.equal('token' in callback,false);
+  assert.equal('session' in callback,false);
+  assert.deepEqual(await auth.poll(cli.pollToken),{status:'pending'},'A GitHub callback alone must not authorize a CLI');
+  await migrateAuth(pool);
+  await assert.rejects(auth.userToken('7'),error=>error instanceof AuthError && error.status===401);
+  assert.ok(callback.client==='cli');
+  const pending = await auth.pendingCli(callback.approvalToken);
+  assert.equal(pending.login,'alice');
+  assert.deepEqual(await restarted.decideCli(callback.approvalToken,pending.csrfToken,'approve',cli.userCode),{status:'approved'});
   const poll = await restarted.poll(cli.pollToken);
   assert.equal(poll.status,'complete');
   assert.ok(poll.token);
@@ -148,4 +174,55 @@ test('durable OAuth binds web callbacks to the browser and CLI tokens are delive
   const demo = createAuth({...config,mode:'demo',publicUrl:'http://127.0.0.1:3000'},new PgAuthStore(pool));
   const demoSession = await demo.demoLogin();
   assert.equal(await auth.session(demoSession.token),null,'A demo session must never become a live session when using the same database');
+});
+
+for (const decision of ['reject','wrong-code']) {
+  test(`CLI ${decision} consumes approval without saving GitHub credentials or issuing a session`,{skip:!process.env.HERBIE_TEST_DATABASE_URL},async t=>{
+    const {auth,restart,pendingLogin}=await authFixture(t);
+    const login=await pendingLogin();
+    assert.deepEqual(await auth.poll(login.pollToken),{status:'pending'});
+    const code=decision==='wrong-code' ? 'AAAA-1111' : undefined;
+    assert.deepEqual(await auth.decideCli(login.approvalToken,login.csrfToken,decision==='reject'?'reject':'approve',code),{status:'rejected'});
+    assert.deepEqual(await restart().poll(login.pollToken),{status:'rejected'});
+    await assert.rejects(auth.userToken('7'),error=>error instanceof AuthError&&error.status===401);
+    await assert.rejects(auth.pendingCli(login.approvalToken),error=>error instanceof AuthError&&error.status===400);
+    await assert.rejects(auth.decideCli(login.approvalToken,login.csrfToken,'approve',login.userCode),error=>error instanceof AuthError&&error.status===400);
+  });
+}
+
+test('CLI approval requires its browser token and CSRF proof; cross-flow codes invalidate the request',{skip:!process.env.HERBIE_TEST_DATABASE_URL},async t=>{
+  const {auth,pendingLogin}=await authFixture(t);
+  const login=await pendingLogin();
+  await assert.rejects(auth.pendingCli('not-the-browser-token'),error=>error instanceof AuthError&&error.status===400);
+  await assert.rejects(auth.decideCli('not-the-browser-token',login.csrfToken,'approve',login.userCode),error=>error instanceof AuthError&&error.status===400);
+  await assert.rejects(auth.decideCli(login.approvalToken,'wrong-csrf','approve',login.userCode),error=>error instanceof AuthError&&error.status===400);
+  assert.deepEqual(await auth.poll(login.pollToken),{status:'pending'});
+  const other=await pendingLogin();
+  assert.deepEqual(await auth.decideCli(login.approvalToken,login.csrfToken,'approve',other.userCode),{status:'rejected'});
+  await assert.rejects(auth.userToken('7'),error=>error instanceof AuthError&&error.status===401);
+});
+
+test('concurrent CLI approvals commit one grant and deliver one bearer across service instances',{skip:!process.env.HERBIE_TEST_DATABASE_URL},async t=>{
+  const {auth,restart,pendingLogin}=await authFixture(t);
+  const login=await pendingLogin();
+  const outcomes=await Promise.allSettled([
+    auth.decideCli(login.approvalToken,login.csrfToken,'approve',login.userCode),
+    restart().decideCli(login.approvalToken,login.csrfToken,'approve',login.userCode),
+  ]);
+  assert.equal(outcomes.filter(outcome=>outcome.status==='fulfilled'&&outcome.value.status==='approved').length,1);
+  assert.equal(outcomes.filter(outcome=>outcome.status==='rejected').length,1);
+  const poll=await auth.poll(login.pollToken);
+  assert.equal(poll.status,'complete');assert.ok(poll.token);
+  assert.deepEqual(await restart().session(poll.token),{mode:'live',user:{id:'7',login:'alice'}});
+  assert.deepEqual(await restart().poll(login.pollToken),{status:'expired'});
+});
+
+test('expired CLI browser approval cannot issue credentials even with the matching code',{skip:!process.env.HERBIE_TEST_DATABASE_URL},async t=>{
+  const {auth,pendingLogin}=await authFixture(t);
+  const login=await pendingLogin();
+  t.mock.timers.enable({apis:['Date'],now:Date.now()+600_001});
+  await assert.rejects(auth.pendingCli(login.approvalToken),error=>error instanceof AuthError&&error.status===400);
+  await assert.rejects(auth.decideCli(login.approvalToken,login.csrfToken,'approve',login.userCode),error=>error instanceof AuthError&&error.status===400);
+  assert.deepEqual(await auth.poll(login.pollToken),{status:'expired'});
+  await assert.rejects(auth.userToken('7'),error=>error instanceof AuthError&&error.status===401);
 });
