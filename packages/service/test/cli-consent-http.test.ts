@@ -18,7 +18,7 @@ test('CLI callback shows an explicit consent form without releasing a bearer and
   assert.match(html,/Approve a CLI sign-in/);assert.match(html,/alice/);assert.match(html,/name="userCode"/);assert.match(html,/Reject request/);
   assert.doesNotMatch(html,/login complete|ghu_local_fixture_only/);
   assert.deepEqual(authPollSchema.parse(await(await fetch(`${fixture.origin}/api/auth/poll?token=${flow.pollToken}`)).json()),{status:'pending'});
-  const hostile=await fetch(`${fixture.origin}/api/auth/cli`,{method:'POST',headers:{origin:'https://attacker.example',cookie:approvalCookie,'content-type':'application/x-www-form-urlencoded'},body:'decision=approve&userCode=AAAA-BBBB'});
+  const hostile=await fetch(`${fixture.origin}/api/auth/cli`,{method:'POST',headers:{origin:'https://attacker.example',authorization:'Bearer untrusted',cookie:approvalCookie,'content-type':'application/x-www-form-urlencoded'},body:'decision=approve&userCode=AAAA-BBBB'});
   assert.equal(hostile.status,403);
   const missingCsrf=await fetch(`${fixture.origin}/api/auth/cli`,{method:'POST',headers:{origin:fixture.origin,cookie:approvalCookie,'content-type':'application/x-www-form-urlencoded'},body:'decision=approve&userCode=AAAA-BBBB'});
   assert.equal(missingCsrf.status,400);

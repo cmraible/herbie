@@ -33,6 +33,9 @@ test('GitHub callback alone cannot authorize the CLI; approval needs the termina
   const flow=await start(page);
   expect(await poll(page,flow.pollToken)).toEqual({status:'pending'});
   await page.screenshot({path:'test-results/cli-consent.png',fullPage:true});
+  await page.setViewportSize({width:375,height:812});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/cli-consent-mobile.png',fullPage:true});
   const stranger=await browser.newContext();
   try{
     const denied=await stranger.request.get(`${origin()}/api/auth/cli`);
