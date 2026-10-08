@@ -9,18 +9,27 @@ async function executionFor(adapters: Adapters, job: Job, readOnly = false): Pro
 }
 
 // One claim per tick. Leases fence database writes; uncertain external effects never retry.
-export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: string): Promise<boolean> {
+export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: string, timing = {leaseMs:30_000,heartbeatMs:5_000}): Promise<boolean> {
+  const {leaseMs,heartbeatMs} = timing;
   await store.recoverExpired();
-  const job = await store.claim(workerId,30_000,adapters.mode);
+  const job = await store.claim(workerId,leaseMs,adapters.mode);
   if (!job) return false;
   let leaseLost = false;
   let renewing = false;
   const heartbeat = setInterval(() => {
     if (renewing) return;
     renewing = true;
-    void store.heartbeat(job.id,workerId,30_000).then(owned => { if (!owned) leaseLost = true; })
+    void store.heartbeat(job.id,workerId,leaseMs).then(owned => { if (!owned) leaseLost = true; })
       .catch(() => { leaseLost = true; }).finally(() => { renewing = false; });
-  },5_000);
+  },heartbeatMs);
+  const requireLease = async (): Promise<void> => {
+    if (leaseLost) throw new StoreError(409,'Worker lease lost');
+    const owned = await store.heartbeat(job.id,workerId,leaseMs);
+    if (!owned || leaseLost) {
+      leaseLost = true;
+      throw new StoreError(409,'Worker lease lost');
+    }
+  };
   let publishing = job.stage === 'publishing';
   try {
     const execution = await executionFor(adapters,job,publishing);
@@ -36,6 +45,8 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     }
     let changes = job.artifact;
     if (!changes) {
+      // Authorization can outlive the lease; fence the paid operation after that read.
+      await requireLease();
       changes = await adapters.attempt(execution, async message => {
         await store.appendEvent(job.goal.id,'attempt',message.slice(0,2000));
       });
@@ -46,6 +57,8 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     if (!await store.beginPublication(job.id,workerId)) return true;
     publishing = true;
     const existing = await adapters.reconcile(execution);
+    // Reconciliation can outlive the lease too; do not begin a new write from stale work.
+    if (!existing) await requireLease();
     const result = existing ?? await adapters.publish(execution,changes);
     await store.completePublication(job.id,workerId,result);
     if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);

@@ -131,3 +131,63 @@ test('a stale publisher cannot overwrite a replacement worker that already recov
   assert.equal(recovered.attemptCount, 1);
   assert.equal((await store.events(goal.id)).filter(event => event.type === 'pull_request_opened').length, 1);
 });
+
+for (const heartbeatMs of [5000, 400]) {
+  const observed = heartbeatMs === 400 ? 'after a heartbeat reports lease loss' : 'before the first scheduled heartbeat';
+  test(`authorization finishing ${observed} cannot start a paid attempt`, async t => {
+    const store = await database(t);
+    if (!store) return;
+    const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const effects: string[] = [];
+    const demo = createDemoAdapters();
+    const adapters: Adapters = {
+      ...demo,
+      async authorize(userId, repository) {
+        entered.resolve();
+        await release.promise;
+        return demo.authorize(userId, repository);
+      },
+      async attempt() { effects.push('paid attempt'); return artifact; },
+      async publish(execution, changes) { effects.push('publication'); return demo.publish(execution, changes); },
+    };
+    const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
+    await entered.promise;
+    await delay(600);
+    const recovered = await store.recoverExpired();
+    release.resolve();
+    await running;
+    assert.equal(recovered, 1);
+    assert.deepEqual(effects, []);
+    assert.equal((await store.getGoal(goal.id))?.state, 'needs_attention');
+    assert.equal(await runWorkerOnce(store, adapters, 'replacement'), false);
+  });
+
+  test(`reconciliation finishing ${observed} cannot publish`, async t => {
+    const store = await database(t);
+    if (!store) return;
+    const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const effects: string[] = [];
+    const demo = createDemoAdapters();
+    const adapters: Adapters = {
+      ...demo,
+      async attempt() { return artifact; },
+      async reconcile() { entered.resolve(); await release.promise; return null; },
+      async publish(execution, changes) { effects.push('publication'); return demo.publish(execution, changes); },
+    };
+    const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
+    await entered.promise;
+    await delay(600);
+    const recovered = await store.recoverExpired();
+    release.resolve();
+    await running;
+    assert.equal(recovered, 1);
+    assert.deepEqual(effects, []);
+    const interrupted = await store.getGoal(goal.id);
+    assert.equal(interrupted?.state, 'needs_attention');
+    assert.equal(interrupted.pullRequest, null);
+  });
+}
