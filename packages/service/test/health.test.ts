@@ -13,12 +13,13 @@ test('readiness reports a database failure without exposing connection details',
   const store=new Store(pool);
   let closed=false;t.after(async()=>{if(!closed)await store.close();});
   const auth=createAuth({mode:'demo',publicUrl:'http://127.0.0.1',credentialKey:Buffer.alloc(32,7).toString('base64')},new PgAuthStore(pool));
-  const server=createApiServer({store,auth,adapters:createDemoAdapters(),publicUrl:'http://127.0.0.1',executionEnabled:false});
+  const server=createApiServer({store,auth,adapters:createDemoAdapters(),publicUrl:'http://127.0.0.1',executionEnabled:false,deploymentId:'release-under-test'});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())));
   const address=server.address();assert.ok(address&&typeof address!=='string');
   const url=`http://127.0.0.1:${address.port}/api/health`;
-  assert.equal((await fetch(url)).status,200);
+  const ready=await fetch(url);assert.equal(ready.status,200);
+  assert.deepEqual(await ready.json(),{mode:'demo',executionEnabled:false,deploymentId:'release-under-test'});
   await store.close();closed=true;
   const unhealthy=await fetch(url);
   assert.equal(unhealthy.status,503);

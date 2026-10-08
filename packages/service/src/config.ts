@@ -23,5 +23,6 @@ export async function readConfig(environment:NodeJS.ProcessEnv=process.env){
       privateKey,callbackUrl:`${origin.origin}/api/auth/callback`,webhookSecret:required('GITHUB_WEBHOOK_SECRET')};
   }
   return {mode,host,port,publicUrl:origin.origin,databaseUrl,credentialKey,github,executionEnabled,
+    deploymentId:z.string().regex(/^[a-zA-Z0-9-]{1,128}$/).optional().parse(environment.HERBIE_DEPLOYMENT_ID),
     databaseCa:environment.HERBIE_DATABASE_CA,databaseCaFile:environment.HERBIE_DATABASE_CA_FILE};
 }

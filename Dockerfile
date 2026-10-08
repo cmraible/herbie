@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1
-FROM node:24.19.0-bookworm-slim AS package-manager
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS package-manager
 WORKDIR /app
 # Optional public proxy CA is mounted only during networked build steps.
 RUN --mount=type=secret,id=proxy_ca \
@@ -27,7 +27,7 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     pnpm install --frozen-lockfile --prod --filter herbie --filter '@herbie/service...'
 
-FROM node:24.19.0-bookworm-slim AS runtime
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS runtime
 ARG HERBIE_RUNTIME_REVISION=1
 LABEL herbie.runtime-revision=$HERBIE_RUNTIME_REVISION
 ENV NODE_ENV=production HERBIE_HOST=0.0.0.0 HERBIE_PORT=8787

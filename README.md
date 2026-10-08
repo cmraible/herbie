@@ -48,6 +48,8 @@ No live execution or public deployment is enabled by the demo configuration.
 
 The [Cloudflare and Supabase deployment runbook](docs/cloudflare-deployment.md)
 describes the hosted container, private database and required operator setup.
+Production releases use [GitHub Actions](docs/github-actions.md), with verification,
+environment approval and disabled execution until separately approved.
 
 ## Earlier local experiments
 

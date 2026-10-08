@@ -4,10 +4,11 @@ import {containerEnvironment,executionEnabled,blocksExecution} from '../src/conf
 
 const credentials={DATABASE_URL:'postgresql://fixture',HERBIE_CREDENTIAL_KEY:'fixture',GITHUB_APP_ID:'fixture',GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture',GITHUB_PRIVATE_KEY:'fixture',GITHUB_WEBHOOK_SECRET:'fixture'};
 test('disabled deployment passes only allowlisted server configuration and needs no paid execution secrets',()=>{
-  const environment=containerEnvironment(JSON.stringify(credentials),'https://herbie.example',false);
+  const environment=containerEnvironment(JSON.stringify(credentials),'https://herbie.example',false,'release-123');
   assert.equal(environment.HERBIE_EXECUTION_ENABLED,'false');
   assert.equal(environment.HERBIE_MODE,'live');
   assert.equal(environment.HERBIE_HOST,'0.0.0.0');
+  assert.equal(environment.HERBIE_DEPLOYMENT_ID,'release-123');
   assert.equal(environment.DAYTONA_API_KEY,undefined);
   assert.throws(()=>containerEnvironment(JSON.stringify({...credentials,OPENAI_API_KEY:'unexpected'}),'https://herbie.example',false));
 });
