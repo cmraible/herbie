@@ -18,7 +18,8 @@ The API and worker run independently. Start one or more worker processes against
 the same database. Transactional claims use row locks, ownership leases and fenced
 writes. The worker renews ownership during work and checks it again immediately
 before starting an attempt or publication, after awaited authorization/reconciliation
-reads. Known lease loss prevents new external calls and stale database writes;
+reads, and again before Git push and GitHub PR creation. Known lease loss
+prevents new external calls and stale database writes;
 it cannot undo an external call already in flight.
 
 - Queued jobs survive client, API and worker restarts.
