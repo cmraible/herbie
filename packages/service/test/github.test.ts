@@ -131,7 +131,7 @@ test('live publication recovers an existing attempt PR without running Git or cr
   const live = createLiveAdapters({apiKey:'daytona-fixture-never-used',openaiSecretName:'existing-secret-name'},github,{userToken:async()=> 'ghu_fixture'});
   const goal = goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',testCommand:['node','--test'],maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
   const execution = {goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/attempt-1'};
-  const pr = await live.publish(execution,{baseCommit:'0'.repeat(40),patch:Buffer.alloc(0)});
+  const pr = await live.publish(execution,{baseCommit:'0'.repeat(40),patch:Buffer.alloc(0)},async()=>{});
   assert.deepEqual(pr,{url:'https://github.com/alice/project/pull/8',number:8,branch:'herbie/attempt-1'});
   assert.equal(requests.filter(request=>request.path==='/repos/alice/project/pulls').length,0);
   assert.equal((await live.reconcile(execution))?.state,'open');

@@ -25,6 +25,7 @@ export interface Adapters {
   reconciliationRepository(repository: string): Promise<RepositoryAccess>;
   repositories(userId: string): Promise<Repository[]>;
   attempt(execution: Execution, report: (message: string) => Promise<void>): Promise<DaytonaAttemptChanges>;
-  publish(execution: Execution, changes: DaytonaAttemptChanges): Promise<Omit<PullRequest, 'state'>>;
+  // Recheck ownership after awaited preparation and immediately before each remote write.
+  publish(execution: Execution, changes: DaytonaAttemptChanges, requireLease: () => Promise<void>): Promise<Omit<PullRequest, 'state'>>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
 }

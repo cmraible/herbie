@@ -37,14 +37,16 @@ export function createLiveAdapters(config:LiveConfig,github:Github,auth:Pick<Aut
       if (reportError) throw new Error('Attempt events could not be persisted');
       return changes;
     },
-    async publish(execution,changes) {
+    async publish(execution,changes,requireLease) {
       // Authorize again at publication; a removed user permission must stop new writes.
       const access = await github.authorize(await auth.userToken(execution.goal.ownerId),execution.repository.repository);
       const token = await github.installationToken(access.installationId,access.repository);
       const existing = await github.findPullRequest(token,access.repository,execution.branch);
       if (existing) return {url:existing.url,number:existing.number,branch:existing.branch};
+      await requireLease();
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
-      const published = await publishTestedPatch(request=>github.openPullRequest(token,request), {
+      const published = await publishTestedPatch(request=>github.openPullRequest(token,request,requireLease), {
+        beforeWrite:requireLease,
         repository:access.repository,baseBranch:access.defaultBranch,branch:execution.branch,title,
         body:`Goal: ${execution.goal.prompt}\n\nAttempt: ${execution.attemptId}\n\nVerified in a disposable Daytona sandbox with ${JSON.stringify(execution.goal.testCommand)}. Review the patch and test evidence before merging.`,changes,
         gitEnvironment:{

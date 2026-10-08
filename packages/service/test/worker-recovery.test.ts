@@ -150,7 +150,7 @@ for (const heartbeatMs of [5000, 400]) {
         return demo.authorize(userId, repository);
       },
       async attempt() { effects.push('paid attempt'); return artifact; },
-      async publish(execution, changes) { effects.push('publication'); return demo.publish(execution, changes); },
+      async publish(execution, changes, requireLease) { effects.push('publication'); return demo.publish(execution, changes, requireLease); },
     };
     const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
     await entered.promise;
@@ -176,7 +176,7 @@ for (const heartbeatMs of [5000, 400]) {
       ...demo,
       async attempt() { return artifact; },
       async reconcile() { entered.resolve(); await release.promise; return null; },
-      async publish(execution, changes) { effects.push('publication'); return demo.publish(execution, changes); },
+      async publish(execution, changes, requireLease) { effects.push('publication'); return demo.publish(execution, changes, requireLease); },
     };
     const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
     await entered.promise;

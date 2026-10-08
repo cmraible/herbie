@@ -22,7 +22,8 @@ export function createDemoAdapters(): Adapters {
       await report('DEMO: simulated tests passed.');
       return {baseCommit:'0'.repeat(40),patch,testResult:{exitCode:0,stdout:'DEMO: simulated test result',stderr:''}};
     },
-    async publish(execution) {
+    async publish(execution,_changes,requireLease) {
+      await requireLease();
       const number = Number.parseInt(createHash('sha256').update(execution.attemptId).digest('hex').slice(0,7),16);
       return {url:`https://demo.invalid/herbie/pull/${number}`,number,branch:execution.branch};
     },

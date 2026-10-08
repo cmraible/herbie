@@ -103,9 +103,10 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
       // Bound even non-expiring upstream tokens; reauthorization refreshes this first slice.
       return {user:{id:String(user.id),login:user.login},token:token.access_token,expiresAt:new Date(Date.now()+Math.min(token.expires_in ?? 28800,28800)*1000)};
     },
-    async openPullRequest(token:string, input:{repository:string;base:string;head:string;title:string;body:string;draft:true}) {
+    async openPullRequest(token:string, input:{repository:string;base:string;head:string;title:string;body:string;draft:true},beforeWrite?:()=>Promise<void>) {
       const existing = await findPullRequest(token,input.repository,input.head);
       if (existing) return existing;
+      await beforeWrite?.();
       try {
         const pr = pullSchema.parse(await request(`/repos/${input.repository}/pulls`,token,{base:input.base,head:input.head,title:input.title,body:input.body,draft:true}));
         return {url:pr.html_url,number:pr.number,branch:input.head,state:pr.merged_at ? 'merged' : pr.state};

@@ -59,7 +59,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
     if (!existing) await requireLease();
-    const result = existing ?? await adapters.publish(execution,changes);
+    const result = existing ?? await adapters.publish(execution,changes,requireLease);
     await store.completePublication(job.id,workerId,result);
     if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);
   } catch (error) {

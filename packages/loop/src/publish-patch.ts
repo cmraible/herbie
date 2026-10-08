@@ -12,6 +12,8 @@ type CreatePullRequest = (request: {
 type Request = {
   repository: string; baseBranch: string; branch: string; title: string; body: string;
   changes: DaytonaAttemptChanges;
+  // Durable callers must confirm current lease ownership immediately before remote writes.
+  beforeWrite?: () => Promise<void>;
   // Trusted caller-owned, per-process auth/identity. Never persist credentials in Git config.
   gitEnvironment?: Readonly<Record<string, string>>;
 };
@@ -75,10 +77,12 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     if (tree === await git('rev-parse', `${baseCommit}^{tree}`)) throw new Error('Patch has no repository changes');
     const commit = await git('commit-tree', tree, '-p', baseCommit, '-m', title);
     state.commit = commit;
+    await request.beforeWrite?.();
     state.stage = 'pushing';
     // An empty expected value makes branch creation atomic: never replace an existing ref.
     const pushed = await git('push', '--porcelain', `--force-with-lease=${headRef}:`, 'origin', `${commit}:${headRef}`);
     if (!pushed.split('\n').some(line => line.startsWith('*\t'))) throw new Error('Push did not create a new branch');
+    await request.beforeWrite?.();
     state.stage = 'opening-pr';
     const { url } = await createPullRequest({ repository, base: baseBranch, head: branch, title, body, draft: true });
     state.url = url;
