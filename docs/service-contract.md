@@ -7,8 +7,9 @@ HTTP JSON on the same origin as web. Contracts in @herbie/contracts (Zod, source
 - POST /api/goals (GoalInput, Idempotency-Key header UUID) -> Goal, 201 or 200 on replay
 - GET /api/goals/:id -> Goal; GET /api/goals/:id/events?after=0 -> GoalEvent[]
 - POST /api/goals/:id/:action (pause/resume/cancel) -> Goal. Repeat safe; incompatible transition 409.
-- POST /api/auth/start {client:'web'|'cli'} -> {url,pollToken?}; web navigate URL. CLI print URL, poll GET /api/auth/poll?token= -> {status,token?}; store received bearer 0600. Web uses cookie.
-- GET /api/auth/callback?code=&state= handles server exchange + cookie or browser confirmation for CLI.
+- POST /api/auth/start {client:'web'|'cli'} -> {url,pollToken?,userCode?}; web navigate URL. CLI prints URL and terminal code, then polls GET /api/auth/poll?token= -> {status:'pending'|'complete'|'expired'|'rejected',token?}; bearer appears only after explicit approval and is delivered once. Store received bearer 0600. Web uses cookie.
+- GET /api/auth/callback?code=&state= handles server exchange + web session cookie, or a pending browser-bound CLI approval cookie and redirect to /api/auth/cli. CLI callback alone creates no usable session or active GitHub credential.
+- GET /api/auth/cli -> server-rendered approval form with account/service/expiry context. POST /api/auth/cli requires exact Origin, approval cookie, CSRF token and form decision approve/reject; approval also requires the matching terminal code. Wrong code consumes and rejects the request. Reject/expiry release no bearer. Codes are not included in the OAuth URL or displayed by the form.
 - POST /api/auth/logout -> {ok:true}
 - POST /api/webhooks/github validates signature then reconciles stored PRs; no credentials/user input trusted from payload.
 - POST /api/demo/login -> Session + web cookie (loopback demo only). CLI sends {client:'cli'} returns {token,session}.

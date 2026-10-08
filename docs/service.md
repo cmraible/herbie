@@ -16,8 +16,10 @@ that the entire open-ended prompt is solved: the limit is an explicit work budge
 
 The API and worker run independently. Start one or more worker processes against
 the same database. Transactional claims use row locks, ownership leases and fenced
-writes. The worker renews ownership during work. A lost lease cannot authorize a
-second attempt or overwrite another worker's decision.
+writes. The worker renews ownership during work and checks it again immediately
+before starting an attempt or publication, after awaited authorization/reconciliation
+reads. Known lease loss prevents new external calls and stale database writes;
+it cannot undo an external call already in flight.
 
 - Queued jobs survive client, API and worker restarts.
 - Pause/cancel during a running attempt records a visible request. The bounded
@@ -92,6 +94,20 @@ minted per publication, limited to one repository, and kept server-side in child
 process environment only. No global Git credential helper or identity is changed.
 The coding sandbox receives no GitHub write credential.
 
+CLI login prints a service URL and a one-time terminal code. The GitHub callback
+only opens a pending approval page: it does not release a CLI bearer or activate
+the pending GitHub credential. The browser shows the account, service, expiry,
+and access being granted. Enter the code from your own terminal and choose
+**Approve this CLI**, or choose **Reject request**. Approval requires the original
+browser cookie, CSRF token, and matching terminal code; wrong codes consume and
+reject the request. Pending requests expire after ten minutes and approval/poll
+delivery are single use. Do not approve unexpected requests or codes sent by
+someone else. This intent check does not prevent a user from being socially
+engineered into approving an attacker's terminal.
+
+On upgrade, pending CLI flows created before this consent gate fail closed; start
+login again. Already-issued sessions are not automatically revoked by migration.
+
 GitHub documentation: [App user access tokens and PKCE](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app),
 [user-accessible installation repositories](https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-user-access-token).
 
@@ -104,15 +120,17 @@ HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:55432/h
 # With demo API and worker running, in a dedicated disposable demo DB:
 pnpm --filter @herbie/web exec playwright install chromium
 HERBIE_E2E_URL=http://127.0.0.1:8787 pnpm --filter @herbie/cli test:e2e
-HERBIE_E2E_URL=http://127.0.0.1:8787 pnpm test:web
+HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie HERBIE_E2E_URL=http://127.0.0.1:8787 pnpm test:web
 ```
 
 The database integration suites create isolated schemas and remove them afterward.
 Without `HERBIE_TEST_DATABASE_URL`, database tests explicitly skip; that is not a
 full verification run. Browser E2E uses a dedicated demo service, cancels active
 demo goals to isolate scenarios, and saves screenshots in the web test-results
-folder. It must not target a live or shared demo instance. These tests do not call
-paid services. The older `pnpm test:e2e` and `pnpm test:daytona` are separate opt-in
+folder. CLI consent browser scenarios additionally use an isolated Postgres schema
+and local fake GitHub endpoints; these check real HTTP/browser behavior, not a
+live OAuth grant. The suite must not target a live or shared demo instance. These
+tests do not call paid services. The older `pnpm test:e2e` and `pnpm test:daytona` are separate opt-in
 live smokes; do not run them as part of routine checks.
 
 Next increments: approved live integrated validation; operator recovery for

@@ -9,6 +9,7 @@ import {AuthError,type createAuth} from './auth.js';
 import {GithubError} from './github.js';
 import type {Adapters} from './adapters.js';
 import {reconcileReviews} from './worker.js';
+import {cliConsentPage,cliConsentResult,consentCsp} from './cli-consent-page.js';
 
 type Auth = ReturnType<typeof createAuth>;
 interface ApiOptions {store:Store;auth:Auth;adapters:Adapters;publicUrl:string;verifyWebhook?:(body:Buffer,signature:string)=>boolean;webDirectory?:string;}
@@ -38,6 +39,7 @@ export function createApiServer(options:ApiOptions){
   const {store,auth,adapters}=options;
   const origin=new URL(options.publicUrl).origin;
   const secure=new URL(origin).protocol==='https:'?'; Secure':'';
+  const approvalCookie=(token:string,maxAge=600)=>`herbie_cli_approval=${token}; HttpOnly; SameSite=Lax; Path=/api/auth/cli; Max-Age=${maxAge}${secure}`;
   const sessionCookie=(token:string)=>`herbie_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`;
   const web=options.webDirectory??fileURLToPath(new URL('../../web/dist/',import.meta.url));
   async function handle(request:IncomingMessage,response:ServerResponse):Promise<void>{
@@ -47,7 +49,7 @@ export function createApiServer(options:ApiOptions){
     const url=new URL(request.url??'/',origin);
     const method=request.method??'GET';
     const bearer=request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
-    if(method!=='GET'&&method!=='HEAD'&&url.pathname!=='/api/webhooks/github'&&!bearer){
+    if(method!=='GET'&&method!=='HEAD'&&url.pathname!=='/api/webhooks/github'&&(!bearer||url.pathname==='/api/auth/cli')){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
       if(request.headers.origin!==origin)throw new HttpError(403,'Request origin is not allowed');
     }
@@ -55,12 +57,32 @@ export function createApiServer(options:ApiOptions){
     if(method==='POST'&&url.pathname==='/api/auth/start'){
       const {client}=clientInput.parse(await readJson(request));const flow=await auth.start(client);
       if(client==='web')response.setHeader('set-cookie',`herbie_auth=${flow.browserState}; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=600${secure}`);
-      json(response,200,{url:flow.url,...(flow.pollToken?{pollToken:flow.pollToken}:{})});return;
+      json(response,200,{url:flow.url,...(flow.pollToken?{pollToken:flow.pollToken,userCode:flow.userCode}:{})});return;
     }
     if(method==='GET'&&url.pathname==='/api/auth/callback'){
       const result=await auth.callback(z.string().min(1).parse(url.searchParams.get('code')),z.string().min(1).parse(url.searchParams.get('state')),cookie(request,'herbie_auth'));
-      if(result.client==='web'&&result.token){response.setHeader('set-cookie',[sessionCookie(result.token),`herbie_auth=; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=0${secure}`]);response.writeHead(303,{location:'/'});response.end();}
-      else {response.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});response.end('Herbie CLI login complete. You can close this window.');}return;
+      response.setHeader('cache-control','no-store');
+      if(result.client==='web'){response.setHeader('set-cookie',[sessionCookie(result.token),`herbie_auth=; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=0${secure}`]);response.writeHead(303,{location:'/'});response.end();}
+      else {response.setHeader('set-cookie',approvalCookie(result.approvalToken));response.writeHead(303,{location:'/api/auth/cli'});response.end();}return;
+    }
+    if(url.pathname==='/api/auth/cli'&&(method==='GET'||method==='POST')){
+      const approvalToken=cookie(request,'herbie_cli_approval')??'';
+      let html:string;
+      if(method==='GET')html=cliConsentPage({...await auth.pendingCli(approvalToken),origin});
+      else{
+        if(!request.headers['content-type']?.startsWith('application/x-www-form-urlencoded'))throw new HttpError(415,'Use form submission');
+        const fields=new URLSearchParams((await body(request)).toString('utf8'));
+        const decision=z.enum(['approve','reject']).parse(fields.get('decision'));
+        const csrfToken=z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(fields.get('csrfToken'));
+        const userCode=z.string().max(20).optional().parse(fields.get('userCode')??undefined);
+        const result=await auth.decideCli(approvalToken,csrfToken,decision,userCode);
+        response.setHeader('set-cookie',approvalCookie('',0));
+        html=cliConsentResult(result.status==='approved');
+      }
+      response.setHeader('content-security-policy',consentCsp);
+      // Preserve Origin on same-origin form POSTs while suppressing cross-origin referrers.
+      response.setHeader('referrer-policy','same-origin');
+      response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});response.end(html);return;
     }
     if(method==='GET'&&url.pathname==='/api/auth/poll'){json(response,200,await auth.poll(z.string().min(20).max(200).parse(url.searchParams.get('token'))));return;}
     if(method==='POST'&&url.pathname==='/api/demo/login'){
