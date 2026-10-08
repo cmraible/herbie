@@ -103,6 +103,7 @@ pnpm typecheck
 HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie pnpm test
 # With demo API and worker running, in a dedicated disposable demo DB:
 pnpm --filter @herbie/web exec playwright install chromium
+HERBIE_E2E_URL=http://127.0.0.1:8787 pnpm --filter @herbie/cli test:e2e
 HERBIE_E2E_URL=http://127.0.0.1:8787 pnpm test:web
 ```
 
