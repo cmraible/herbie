@@ -26,7 +26,7 @@ Preparation revokes schema, table, sequence, and function access from `PUBLIC` a
 
 Do not add `herbie` to the project's exposed Data API schemas. Since this application uses direct PostgreSQL access only, disabling the project's Data API is appropriate. If other role memberships still grant a Data API role schema access, startup fails instead of silently accepting it. Security checks and Supabase advisors must be run against the actual project after authorized provisioning; local tests do not verify its dashboard settings.
 
-The existing migrations remain idempotent; there is no second migration framework. Run them through `prepareDatabase` when adding tables so revocations and RLS are applied before serving traffic. This setup does not move existing tables or data from `public`. Review and explicitly migrate any previous live installation before switching it to the private schema. Local demo mode retains its selected schema and existing development data.
+The existing migrations remain idempotent; there is no second migration framework. Run them through `prepareDatabase` when adding tables so revocations and RLS are applied before serving traffic. This setup does not move existing tables or data from `public`. Review and explicitly migrate any previous live installation before switching it to the private schema. Local demo mode uses `public` and retains existing development data there.
 
 ## Verification
 

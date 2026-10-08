@@ -46,6 +46,9 @@ See [service operations and live setup](docs/service.md) for recovery behavior,
 testing, security boundaries, and the precise one-time GitHub App/Daytona setup.
 No live execution or public deployment is enabled by the demo configuration.
 
+The [Cloudflare and Supabase deployment runbook](docs/cloudflare-deployment.md)
+describes the hosted container, private database and required operator setup.
+
 ## Earlier local experiments
 
 The workspace retains the original foreground experiments:
