@@ -1,0 +1,23 @@
+{
+  "name": "@herbie/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && cp src/schema.sql dist/schema.sql",
+    "typecheck": "tsc --project tsconfig.test.json",
+    "test": "tsx --test test/*.test.ts",
+    "start": "tsx src/index.ts",
+    "worker": "tsx src/worker-main.ts"
+  },
+  "dependencies": {
+    "@herbie/contracts": "workspace:*",
+    "@herbie/loop": "workspace:*",
+    "@daytona/sdk": "0.220.0",
+    "pg": "^8.16.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6"
+  }
+}

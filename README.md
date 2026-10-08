@@ -1,11 +1,59 @@
 # Herbie
 
-A pnpm workspace with two packages:
+Herbie runs bounded coding goals through a durable service. The React web UI and
+CLI use the same authenticated API; a separate worker continues after either client
+exits. Postgres owns goals, attempts, jobs, verified artifacts, PRs and events.
+
+## Service, web UI and CLI
+
+Requires Node.js 24+, pnpm 10, and Postgres 17 (Docker is convenient locally).
+
+```sh
+pnpm install
+cp .env.example .env
+docker compose up -d postgres
+pnpm build
+pnpm service   # terminal 1: API + built React UI at http://127.0.0.1:8787
+pnpm worker    # terminal 2: separate durable worker
+```
+
+Open http://127.0.0.1:8787 and choose **Enter local demo**. Demo mode is explicit,
+loopback-only, and deterministic: it calls no model, Daytona, GitHub, or host Git.
+Its simulated PRs use `demo.invalid`, and its artifacts cannot pass the live
+publisher. The UI can simulate a failure, merge, or unmerged close.
+
+Use another terminal for the same service:
+
+```sh
+pnpm cli login --url http://127.0.0.1:8787 --demo
+pnpm cli repositories
+pnpm cli start --repo demo/example --prompt "Fix addition and test the change" --test '["node","--test"]' --max-attempts 2
+pnpm cli status
+pnpm cli status GOAL_ID
+pnpm cli logs GOAL_ID
+pnpm cli pause GOAL_ID
+pnpm cli resume GOAL_ID
+pnpm cli cancel GOAL_ID
+```
+
+CLI responses are JSON. Login stores only a Herbie bearer session in a private
+0600 file (`HERBIE_CONFIG` or `~/.config/herbie/session.json`). For an interrupted
+start, repeat the same input with the request ID printed to stderr using
+`--request-id UUID`; the service returns the original goal. The browser retains
+its request ID for retries too. `pnpm cli logout` revokes the session.
+
+See [service operations and live setup](docs/service.md) for recovery behavior,
+testing, security boundaries, and the precise one-time GitHub App/Daytona setup.
+No live execution or public deployment is enabled by the demo configuration.
+
+## Earlier local experiments
+
+The workspace retains the original foreground experiments:
 
 - **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement attempt for a local repository and goal.
 - **`@herbie/demo`** (`packages/demo`): the local ChatGPT sign-in and streaming demo. See its [README](packages/demo/README.md).
 
-## Getting started
+### Foreground experiment setup
 
 Requires Node.js 24+ and pnpm.
 

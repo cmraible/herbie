@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: herbie
+      POSTGRES_PASSWORD: herbie-local-only
+      POSTGRES_DB: herbie
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - herbie-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U herbie']
+      interval: 2s
+      timeout: 2s
+      retries: 15
+volumes:
+  herbie-postgres:
