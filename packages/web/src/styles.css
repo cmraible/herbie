@@ -4,3 +4,5 @@
 
 .topbar-actions{display:flex;align-items:center;gap:10px}.mobile-signout{display:none}@media(max-width:850px){.mobile-signout{display:block;font-size:9px;padding:4px 7px;background:transparent;color:#869579;border-color:#e3e8d8}}
 @media(min-width:851px){.goal-list{max-height:740px;overflow-y:auto;padding-right:4px;scrollbar-width:thin;scrollbar-color:#d4dfc8 transparent}.goal-detail{align-self:start}}
+
+.repository-discovery{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}.repository-discovery>span{font-size:9px;color:#9ba78f}.repository-discovery button{font-size:9px;padding:4px 7px;flex-shrink:0}

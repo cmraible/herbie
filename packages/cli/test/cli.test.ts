@@ -117,3 +117,31 @@ test('an insecure session file is rejected before credentials are read', async (
     assert.match(app.errors.at(-1) ?? '', /private.*0600/i);
   } finally { await app.close(); }
 });
+
+test('logout clears a locally saved session that the service has already expired', async () => {
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/demo/login') { json(response, {token:'expired-session',session}); return; }
+    json(response, {error:'Session expired'}, 401);
+  });
+  try {
+    await app.invoke(['login','--demo','--url',app.baseUrl]);
+    assert.equal(await app.invoke(['logout']), 0);
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+    assert.deepEqual(JSON.parse(app.output.at(-1) ?? ''), {ok:true});
+  } finally { await app.close(); }
+});
+
+test('logout clears local credentials during a network outage and reports unconfirmed remote sign-out', async () => {
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/demo/login') { json(response, {token:'private-session',session}); return; }
+    request.socket.destroy();
+  });
+  try {
+    await app.invoke(['login','--demo','--url',app.baseUrl]);
+    assert.equal(await app.invoke(['logout']), 1);
+    await assert.rejects(stat(app.configPath), {code:'ENOENT'});
+    assert.match(app.errors.at(-1) ?? '', /Local session removed.*remote sign-out could not be confirmed/);
+    assert.equal(await app.invoke(['status']), 1);
+    assert.match(app.errors.at(-1) ?? '', /No valid session/);
+  } finally { await app.close(); }
+});

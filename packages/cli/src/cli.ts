@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
 import { goalInput, actionSchema } from '@herbie/contracts';
-import { createClient } from '@herbie/contracts/client';
+import { createClient, ApiError } from '@herbie/contracts/client';
 
 const savedSession = z.object({baseUrl: z.string().url(), token: z.string().min(1)}).strict();
 const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT --test '["npm","test"]' [--max-attempts 1] [--request-id UUID]\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
@@ -75,7 +75,17 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
     const baseUrl = serviceUrl(config.baseUrl);
     if (values.url && serviceUrl(values.url) !== baseUrl) throw new Error('Service URL differs from saved session; log in to that service first');
     const client = createClient({baseUrl, origin:baseUrl, token: config.token});
-    if (command === 'logout') { await client.logout(); await rm(configPath, {force:true}); print({ok:true}); return 0; }
+    if (command === 'logout') {
+      // Clear the local credential before a network attempt that could fail or hang.
+      await rm(configPath, {force:true});
+      try { await client.logout(); }
+      catch (failure) {
+        if (!(failure instanceof ApiError && failure.status === 401)) {
+          throw new Error(`Local session removed; remote sign-out could not be confirmed: ${failure instanceof Error ? failure.message : 'Unknown error'}`);
+        }
+      }
+      print({ok:true}); return 0;
+    }
     if (command === 'repositories') { print(await client.repositories()); return 0; }
     if (command === 'status') { print(id ? await client.goal(id) : await client.goals()); return 0; }
     if (command === 'start') {

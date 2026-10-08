@@ -119,3 +119,28 @@ test('retrying a lost create response returns the original goal without duplicat
   await page.getByRole('button',{name:'Sign out'}).click();
   await expect(page.getByRole('button',{name:'Enter local demo'})).toBeVisible();
 });
+
+test('repository discovery failures do not interrupt goal polling or repeat GitHub listing',async({page})=>{
+  let repositoryRequests=0;
+  await page.route('**/api/repositories',async route=>{
+    repositoryRequests++;
+    if(repositoryRequests===1){await route.continue();return;}
+    await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Repository discovery is temporarily unavailable'})});
+  });
+  await login(page);
+  await start(page,'Keep durable progress visible during repository discovery failure','2');
+  await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
+  expect(repositoryRequests).toBe(1);
+  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'Refresh repositories',exact:true}).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Repository discovery is temporarily unavailable');
+  await page.getByRole('button',{name:'Close new goal'}).click();
+  const id=z.uuid().parse(new URL(page.url()).hash.slice(1));
+  const merged=await page.request.post(`/api/demo/goals/${id}/merge`,{headers:{origin:url},data:{}});
+  expect(merged.ok()).toBeTruthy();
+  await expect(detail(page).getByText('2 / 2',{exact:true})).toBeVisible();
+  await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
+  expect(repositoryRequests).toBe(2);
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+  await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
+});
