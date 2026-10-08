@@ -1,7 +1,7 @@
 import { Daytona } from '@daytona/sdk';
 import { runDaytonaAttempt } from '@herbie/loop/daytona-attempt';
 import { publishTestedPatch } from '@herbie/loop/publish-patch';
-import type { Adapters } from './adapters.js';
+import {KnownAttemptFailure,type Adapters} from './adapters.js';
 import type { Auth } from './auth.js';
 import type { Github } from './github.js';
 
@@ -9,9 +9,9 @@ export interface LiveConfig {
   apiKey:string; apiUrl?:string; target?:string;
   openaiSecretName:string; snapshot?:string; domainAllowList?:string; outboundProxyUrl?:string;
 }
-export function createLiveAdapters(config:LiveConfig,github:Github,auth:Pick<Auth,'userToken'>):Adapters {
-  if (!config.apiKey.trim() || !config.openaiSecretName.trim()) throw new Error('Live mode requires Daytona API key and an existing OpenAI Daytona secret name');
-  if (config.apiUrl) {
+export function createLiveAdapters(config:LiveConfig|undefined,github:Github,auth:Pick<Auth,'userToken'>):Adapters {
+  if (config&&(!config.apiKey.trim() || !config.openaiSecretName.trim())) throw new Error('Live mode requires Daytona API key and an existing OpenAI Daytona secret name');
+  if (config?.apiUrl) {
     const url = new URL(config.apiUrl);
     if (url.protocol!=='https:' || url.username || url.password || url.search || url.hash) throw new Error('Daytona API URL must use HTTPS without credentials');
   }
@@ -21,6 +21,7 @@ export function createLiveAdapters(config:LiveConfig,github:Github,auth:Pick<Aut
     async authorize(userId,repository) { return github.authorize(await auth.userToken(userId),repository); },
     reconciliationRepository:repository=>github.reconciliationRepository(repository),
     async attempt(execution,report) {
+      if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
       const daytona = new Daytona({apiKey:config.apiKey,apiUrl:config.apiUrl,target:config.target,requestTimeoutMs:30_000});
       let pending = Promise.resolve();
       let reportError:unknown;
@@ -38,6 +39,7 @@ export function createLiveAdapters(config:LiveConfig,github:Github,auth:Pick<Aut
       return changes;
     },
     async publish(execution,changes,requireLease) {
+      if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
       // Authorize again at publication; a removed user permission must stop new writes.
       const access = await github.authorize(await auth.userToken(execution.goal.ownerId),execution.repository.repository);
       const token = await github.installationToken(access.installationId,access.repository);
