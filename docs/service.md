@@ -71,7 +71,8 @@ an integrated paid attempt. Before using live mode:
    `https://YOUR-HOST/api/auth/callback`, webhook
    `https://YOUR-HOST/api/webhooks/github`, and subscribe to Pull request events.
    Set `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
-   `GITHUB_PRIVATE_KEY_FILE`, and `GITHUB_WEBHOOK_SECRET` on the trusted service.
+   `GITHUB_PRIVATE_KEY_FILE` (or inline `GITHUB_PRIVATE_KEY`), and
+   `GITHUB_WEBHOOK_SECRET` on the trusted service.
 3. Install the App only on intended repositories. User sign-in separately uses
    the App's OAuth web flow (state, PKCE and browser binding). A user must have
    push permission AND access to an installation with the required permissions.
@@ -83,8 +84,15 @@ an integrated paid attempt. Before using live mode:
    existing approved Ubuntu-compatible snapshot. The Daytona adapter's runtime
    and external provider/network prerequisites are described in the root README.
 5. Set `HERBIE_MODE=live`, build, and start the API and worker under a process
-   supervisor. Sign in through the web UI or `pnpm cli login --url https://YOUR-HOST`.
-   Independently approve a small live test and its spend before starting it.
+   supervisor. Live execution defaults to disabled; login and read operations
+   remain available. Daytona configuration is only required once execution is
+   enabled. Sign in through the web UI or `pnpm cli login --url https://YOUR-HOST`.
+   Independently approve a small live test and its spend, then explicitly set
+   `HERBIE_EXECUTION_ENABLED=true` and restart the service before starting it.
+
+For the Cloudflare container and private Supabase deployment, follow
+[the deployment runbook](cloudflare-deployment.md), including draining and rollout
+instructions for changes to environment variables.
 
 GitHub OAuth access tokens are encrypted in Postgres; session tokens are hashed.
 Sessions and user authorization expire within eight hours in this slice; login
