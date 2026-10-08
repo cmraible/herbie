@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { createHmac, generateKeyPairSync, verify } from 'node:crypto';
 import { createServer } from 'node:http';
 import { test, type TestContext } from 'node:test';
-import { createGithub } from '../src/github.js';
+import { createGithub, GithubError } from '../src/github.js';
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
-import { createAuth } from '../src/auth.js';
+import { createAuth, AuthError } from '../src/auth.js';
 import { migrateAuth, PgAuthStore } from '../src/auth-store.js';
 import { createLiveAdapters } from '../src/live.js';
 import { goalSchema } from '@herbie/contracts';
@@ -62,7 +62,7 @@ test('authorizes only the intersection of public user-writable and installed app
   assert.ok(header && payload && signature);
   assert.equal(verify('RSA-SHA256',Buffer.from(`${header}.${payload}`),publicKey,Buffer.from(signature,'base64url')),true);
   fixture.push=false;
-  await assert.rejects(github.authorize('ghu_fixture','alice/project'), /permission|access/i);
+  await assert.rejects(github.authorize('ghu_fixture','alice/project'),error=>error instanceof GithubError && error.status===403);
   fixture.push=true; fixture.private=true;
   await assert.rejects(github.authorize('ghu_fixture','alice/project'), /public/i);
   fixture.private=false; fixture.contents='read';
@@ -126,7 +126,7 @@ test('durable OAuth binds web callbacks to the browser and CLI tokens are delive
   const web = await auth.start('web');
   const state = new URL(web.url).searchParams.get('state');
   assert.ok(state);
-  await assert.rejects(auth.callback('code',state,'wrong-browser'), /browser/i);
+  await assert.rejects(auth.callback('code',state,'wrong-browser'),error=>error instanceof AuthError && error.status===400 && /browser/i.test(error.message));
   await assert.rejects(auth.callback('code',state,web.browserState), /expired|invalid/i);
   const cli = await auth.start('cli');
   assert.ok(cli.pollToken);
@@ -145,4 +145,7 @@ test('durable OAuth binds web callbacks to the browser and CLI tokens are delive
   await restarted.logout(poll.token);
   assert.equal(await auth.session(poll.token),null);
   assert.equal(await auth.userToken('7'),'ghu_fixture');
+  const demo = createAuth({...config,mode:'demo',publicUrl:'http://127.0.0.1:3000'},new PgAuthStore(pool));
+  const demoSession = await demo.demoLogin();
+  assert.equal(await auth.session(demoSession.token),null,'A demo session must never become a live session when using the same database');
 });

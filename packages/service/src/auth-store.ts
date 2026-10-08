@@ -10,6 +10,7 @@ export async function migrateAuth(pool:Pool) {
     await client.query(`
       CREATE TABLE IF NOT EXISTS auth_users (id text PRIMARY KEY, login text NOT NULL, encrypted_token text NOT NULL, expires_at timestamptz NOT NULL);
       CREATE TABLE IF NOT EXISTS auth_sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES auth_users(id), expires_at timestamptz NOT NULL);
+      ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'unknown';
       CREATE TABLE IF NOT EXISTS auth_flows (state_hash text PRIMARY KEY, poll_hash text, browser_hash text, client text NOT NULL CHECK(client IN ('web','cli')), expires_at timestamptz NOT NULL, verifier text NOT NULL);
       CREATE TABLE IF NOT EXISTS auth_polls (poll_hash text PRIMARY KEY, encrypted_token text, expires_at timestamptz NOT NULL);
       CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
@@ -69,14 +70,14 @@ export class PgAuthStore implements AuthStore {
     const row = z.object({encrypted_token:z.string(),expires_at:z.date()}).parse(result.rows[0]);
     return {encryptedToken:row.encrypted_token,expiresAt:row.expires_at};
   }
-  async createSession(session:{tokenHash:string;userId:string;expiresAt:Date}) {
-    await this.pool.query('INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES($1,$2,$3)',[session.tokenHash,session.userId,session.expiresAt]);
+  async createSession(session:{tokenHash:string;userId:string;expiresAt:Date;mode:'demo'|'live'}) {
+    await this.pool.query('INSERT INTO auth_sessions(token_hash,user_id,expires_at,mode) VALUES($1,$2,$3,$4)',[session.tokenHash,session.userId,session.expiresAt,session.mode]);
   }
   async session(tokenHash:string) {
-    const result = await this.pool.query('SELECT u.id,u.login,s.expires_at FROM auth_sessions s JOIN auth_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()',[tokenHash]);
+    const result = await this.pool.query("SELECT u.id,u.login,s.expires_at,s.mode FROM auth_sessions s JOIN auth_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.mode IN ('demo','live')",[tokenHash]);
     if (!result.rows.length) return null;
-    const row = z.object({id:z.string(),login:z.string(),expires_at:z.date()}).parse(result.rows[0]);
-    return {user:{id:row.id,login:row.login},expiresAt:row.expires_at};
+    const row = z.object({id:z.string(),login:z.string(),expires_at:z.date(),mode:z.enum(['demo','live'])}).parse(result.rows[0]);
+    return {user:{id:row.id,login:row.login},expiresAt:row.expires_at,mode:row.mode};
   }
   async deleteSession(tokenHash:string) {await this.pool.query('DELETE FROM auth_sessions WHERE token_hash=$1',[tokenHash]);}
 }

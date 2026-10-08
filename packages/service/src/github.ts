@@ -7,6 +7,7 @@ export interface GithubConfig {
   appId: string; clientId: string; clientSecret: string; privateKey: string;
   callbackUrl: string; webhookSecret: string;
 }
+export class GithubError extends Error {constructor(readonly status:number,message:string){super(message);}}
 const repositorySchema = z.object({id:z.number().int(),full_name:z.string(),private:z.boolean(),default_branch:z.string(),permissions:z.object({push:z.boolean().optional()}).optional()});
 const installationSchema = z.object({id:z.number().int(),permissions:z.object({contents:z.string().optional(),pull_requests:z.string().optional()})});
 const pullSchema = z.object({number:z.number().int(),html_url:z.string().url(),state:z.enum(['open','closed']),merged_at:z.string().nullable(),head:z.object({ref:z.string()}),base:z.object({ref:z.string()})});
@@ -28,7 +29,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
       headers:{accept:'application/vnd.github+json',authorization:`Bearer ${token}`,'X-GitHub-Api-Version':'2022-11-28','content-type':'application/json'},
       ...(body === undefined ? {} : {body:JSON.stringify(body)}),
     });
-    if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
+    if (!response.ok) throw new GithubError([401,403,404].includes(response.status)?response.status:502,
+      response.status===401 ? 'GitHub authorization expired or was revoked; log in again' : `GitHub request failed (${response.status})`);
     return response.json();
   }
   function jwt() {
@@ -54,12 +56,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     throw new Error('Installation listing exceeds supported limit');
   }
   async function authorize(token:string, repository:string):Promise<RepositoryAccess> {
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400,'Invalid repository');
     const repo = repositorySchema.parse(await request(`/repos/${repository}`,token));
-    if (repo.private) throw new Error('Only public repositories are supported');
-    if (!repo.permissions?.push) throw new Error('User write permission is required');
+    if (repo.private) throw new GithubError(403,'Only public repositories are supported');
+    if (!repo.permissions?.push) throw new GithubError(403,'User write permission is required');
     const accessible = (await repositories(token)).find(item=>item.fullName.toLowerCase()===repository.toLowerCase());
-    if (!accessible) throw new Error('An installation with contents and pull request write permissions is required');
+    if (!accessible) throw new GithubError(403,'An installation with contents and pull request write permissions is required');
     return {repository:accessible.fullName,defaultBranch:accessible.defaultBranch,installationId:accessible.installationId};
   }
   async function findPullRequest(token:string, repository:string, branch:string):Promise<PullRequest|null> {
@@ -79,11 +81,11 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
   return {
     repositories, authorize, findPullRequest, installationToken,
     async reconciliationRepository(repository:string):Promise<RepositoryAccess> {
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400,'Invalid repository');
       const installation = installationSchema.parse(await request(`/repos/${repository}/installation`,jwt()));
       const token = await installationToken(installation.id,repository,'read');
       const repo = repositorySchema.parse(await request(`/repos/${repository}`,token));
-      if (repo.private) throw new Error('Only public repositories are supported');
+      if (repo.private) throw new GithubError(403,'Only public repositories are supported');
       return {repository:repo.full_name,defaultBranch:repo.default_branch,installationId:installation.id};
     },
     authorizationUrl(state:string,challenge:string) {
@@ -93,8 +95,10 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     },
     async authenticate(code:string,verifier:string) {
       const response = await fetch(`${oauth}/login/oauth/access_token`,{method:'POST',redirect:'error',signal:AbortSignal.timeout(30_000),headers:{accept:'application/json','content-type':'application/json'},body:JSON.stringify({client_id:config.clientId,client_secret:config.clientSecret,redirect_uri:config.callbackUrl,code,code_verifier:verifier})});
-      if (!response.ok) throw new Error('GitHub authorization exchange failed');
-      const token = tokenSchema.parse(await response.json());
+      if (!response.ok) throw new GithubError(400,'GitHub authorization exchange failed; start login again');
+      const parsedToken = tokenSchema.safeParse(await response.json());
+      if (!parsedToken.success) throw new GithubError(400,'GitHub authorization exchange failed; start login again');
+      const token = parsedToken.data;
       const user = z.object({id:z.number().int(),login:z.string()}).parse(await request('/user',token.access_token));
       // Bound even non-expiring upstream tokens; reauthorization refreshes this first slice.
       return {user:{id:String(user.id),login:user.login},token:token.access_token,expiresAt:new Date(Date.now()+Math.min(token.expires_in ?? 28800,28800)*1000)};

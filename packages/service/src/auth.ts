@@ -14,11 +14,12 @@ export interface AuthStore {
   takePoll(pollHash:string):Promise<{status:'pending'|'expired'}|{status:'complete';encryptedToken:string}>;
   putCredential(user:User,encryptedToken:string,expiresAt:Date):Promise<void>;
   credential(userId:string):Promise<{encryptedToken:string;expiresAt:Date}|null>;
-  createSession(session:{tokenHash:string;userId:string;expiresAt:Date}):Promise<void>;
-  session(tokenHash:string):Promise<{user:User;expiresAt:Date}|null>;
+  createSession(session:{tokenHash:string;userId:string;expiresAt:Date;mode:'demo'|'live'}):Promise<void>;
+  session(tokenHash:string):Promise<{user:User;expiresAt:Date;mode:'demo'|'live'}|null>;
   deleteSession(tokenHash:string):Promise<void>;
 }
 export interface AuthConfig {mode:'demo'|'live';publicUrl:string;credentialKey:string}
+export class AuthError extends Error {constructor(readonly status:number,message:string){super(message);}}
 
 const hash = (value:string)=>createHash('sha256').update(value).digest('hex');
 const secret = ()=>randomBytes(32).toString('base64url');
@@ -44,12 +45,12 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
   }
   async function issue(user:User,expiresAt:Date) {
     const token = secret();
-    await store.createSession({tokenHash:hash(token),userId:user.id,expiresAt});
+    await store.createSession({tokenHash:hash(token),userId:user.id,expiresAt,mode:config.mode});
     return {token,session:{user,mode:config.mode}};
   }
   return {
     async start(client:'web'|'cli') {
-      if (!github || config.mode!=='live') throw new Error('GitHub login is available only in live mode');
+      if (!github || config.mode!=='live') throw new AuthError(400,'GitHub login is available only in live mode');
       const state = secret();
       const verifier = secret();
       const pollToken = client==='cli' ? secret() : undefined;
@@ -58,10 +59,10 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
       return {url:github.authorizationUrl(state,createHash('sha256').update(verifier).digest('base64url')),pollToken,browserState};
     },
     async callback(code:string,state:string,browserState?:string):Promise<{client:'web'|'cli';token?:string;session:Session}> {
-      if (!github || config.mode!=='live' || !code || !state) throw new Error('Invalid authorization callback');
+      if (!github || config.mode!=='live' || !code || !state) throw new AuthError(400,'Invalid authorization callback');
       const flow = await store.takeFlow(hash(state));
-      if (!flow || flow.expiresAt.getTime()<=Date.now()) throw new Error('Authorization is expired or invalid; start login again');
-      if (flow.client==='web' && (!browserState || hash(browserState)!==flow.browserHash)) throw new Error('Authorization browser does not match; start login again');
+      if (!flow || flow.expiresAt.getTime()<=Date.now()) throw new AuthError(400,'Authorization is expired or invalid; start login again');
+      if (flow.client==='web' && (!browserState || hash(browserState)!==flow.browserHash)) throw new AuthError(400,'Authorization browser does not match; start login again');
       const authorized = await github.authenticate(code,flow.verifier);
       await store.putCredential(authorized.user,encrypt(authorized.token),authorized.expiresAt);
       const result = await issue(authorized.user,authorized.expiresAt);
@@ -80,20 +81,20 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
     async session(token:string):Promise<Session|null> {
       if (!/^[\w-]{43}$/.test(token)) return null;
       const session = await store.session(hash(token));
-      return session && session.expiresAt.getTime()>Date.now() ? {user:session.user,mode:config.mode} : null;
+      return session && session.mode===config.mode && session.expiresAt.getTime()>Date.now() ? {user:session.user,mode:config.mode} : null;
     },
     async logout(token:string) { await store.deleteSession(hash(token)); },
     async demoLogin() {
-      if (config.mode!=='demo') throw new Error('Demo authentication is disabled');
+      if (config.mode!=='demo') throw new AuthError(400,'Demo authentication is disabled');
       const user = {id:'demo-user',login:'demo'};
       const expiresAt = new Date(Date.now()+28_800_000);
       await store.putCredential(user,encrypt('DEMO: no GitHub credential'),expiresAt);
       return issue(user,expiresAt);
     },
     async userToken(userId:string) {
-      if (config.mode!=='live') throw new Error('Demo has no GitHub credentials');
+      if (config.mode!=='live') throw new AuthError(400,'Demo has no GitHub credentials');
       const credential = await store.credential(userId);
-      if (!credential || credential.expiresAt.getTime()<=Date.now()) throw new Error('GitHub login expired; log in again before continuing');
+      if (!credential || credential.expiresAt.getTime()<=Date.now()) throw new AuthError(401,'GitHub login expired; log in again before continuing');
       return decrypt(credential.encryptedToken);
     },
   };
