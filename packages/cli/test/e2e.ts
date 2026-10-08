@@ -18,7 +18,7 @@ const service=new URL(baseUrl);
 if(!['127.0.0.1','localhost','[::1]'].includes(service.hostname))throw new Error('CLI E2E requires a loopback demo service');
 const directory=await mkdtemp(join(tmpdir(),'herbie-cli-e2e-'));
 const configPath=join(directory,'session.json');
-const entry=fileURLToPath(new URL('../src/index.ts',import.meta.url));
+const entry=process.env.HERBIE_CLI_E2E_ENTRY??fileURLToPath(new URL('../src/index.ts',import.meta.url));
 const environment={...process.env,HERBIE_CONFIG:configPath};
 async function cli(args:string[]):Promise<unknown>{
   const result=await run(process.execPath,['--import','tsx',entry,...args],{env:environment});
