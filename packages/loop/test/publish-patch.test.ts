@@ -89,6 +89,17 @@ test('publishes a verified patch as one commit and one draft PR without changing
   assert.deepEqual(await readdir(scratch), []);
 });
 
+test('accepts Git identity and authentication configuration only for this publication', async t => {
+  const { request, remote, createPullRequest } = await fixture(t);
+  const previousName = process.env.GIT_AUTHOR_NAME;
+  const result = await publishTestedPatch(createPullRequest, { ...request, gitEnvironment: {
+    GIT_AUTHOR_NAME: 'Herbie App', GIT_AUTHOR_EMAIL: 'herbie@example.invalid',
+    GIT_COMMITTER_NAME: 'Herbie App', GIT_COMMITTER_EMAIL: 'herbie@example.invalid',
+  } });
+  assert.equal(await git(remote, 'show', '--format=%an <%ae>', '--no-patch', result.commit), 'Herbie App <herbie@example.invalid>');
+  assert.equal(process.env.GIT_AUTHOR_NAME, previousName);
+});
+
 for (const invalid of ['unverified', 'untested', 'failed tests', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
   test(`rejects ${invalid} evidence without publication`, async t => {
     const { changes, scratch, createPullRequest, publish } = await fixture(t);
@@ -202,4 +213,39 @@ test('preserves binary/non-UTF-8 files and modes without executing checkout filt
   assert.deepEqual(await blob('empty.txt'), Buffer.alloc(0));
   assert.match(await git(remote, 'ls-tree', commit, 'add.mjs'), /^100755 /);
   await assert.rejects(readFile(marker), { code: 'ENOENT' });
+});
+
+test('a lost publication lease after local Git preparation prevents the push and PR creation', async t => {
+  const { remote, request, scratch, createPullRequest } = await fixture(t);
+  await assert.rejects(publishTestedPatch(createPullRequest, {
+    ...request,
+    beforeWrite: async () => { throw new Error('Worker lease lost'); },
+  }), error => {
+    assert.ok(error instanceof PatchPublicationError);
+    assert.equal(error.publication.stage, 'preparing');
+    assert.match(error.publication.commit ?? '', /^[0-9a-f]{40}$/);
+    return true;
+  });
+  assert.equal(await git(remote, 'branch', '--list', request.branch), '');
+  assert.equal(createPullRequest.mock.callCount(), 0);
+  assert.deepEqual(await readdir(scratch), []);
+});
+
+test('a lease lost after push preserves the branch but prevents PR creation', async t => {
+  const { remote, request, scratch, createPullRequest } = await fixture(t);
+  let ownership = true;
+  await assert.rejects(publishTestedPatch(createPullRequest, {
+    ...request,
+    beforeWrite: async () => {
+      if (!ownership) throw new Error('Worker lease lost');
+      ownership = false;
+    },
+  }), error => {
+    assert.ok(error instanceof PatchPublicationError);
+    assert.equal(error.publication.stage, 'pushing');
+    return true;
+  });
+  assert.match(await git(remote, 'rev-parse', request.branch), /^[0-9a-f]{40}$/);
+  assert.equal(createPullRequest.mock.callCount(), 0);
+  assert.deepEqual(await readdir(scratch), []);
 });

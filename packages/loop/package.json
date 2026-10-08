@@ -18,5 +18,9 @@
   },
   "dependencies": {
     "@daytona/sdk": "0.220.0"
+  },
+  "exports": {
+    "./daytona-attempt": "./dist/daytona-attempt.js",
+    "./publish-patch": "./dist/publish-patch.js"
   }
 }

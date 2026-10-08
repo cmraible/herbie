@@ -1,0 +1,17 @@
+{
+  "name": "@herbie/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "tsx --test test/*.test.ts",
+    "test:e2e": "tsx test/e2e.ts"
+  },
+  "dependencies": {
+    "@herbie/contracts": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}
