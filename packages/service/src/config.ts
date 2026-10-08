@@ -24,5 +24,6 @@ export async function readConfig(environment:NodeJS.ProcessEnv=process.env){
   }
   return {mode,host,port,publicUrl:origin.origin,databaseUrl,credentialKey,github,executionEnabled,
     deploymentId:z.string().regex(/^[a-zA-Z0-9-]{1,128}$/).optional().parse(environment.HERBIE_DEPLOYMENT_ID),
+    imageRevision:z.string().regex(/^[a-zA-Z0-9-]{1,128}$/).optional().parse(environment.HERBIE_IMAGE_REVISION),
     databaseCa:environment.HERBIE_DATABASE_CA,databaseCaFile:environment.HERBIE_DATABASE_CA_FILE};
 }

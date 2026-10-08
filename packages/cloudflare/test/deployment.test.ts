@@ -21,19 +21,23 @@ test('deployment refuses PRs, forks, other branches and a disabled operator gate
   }
 });
 
-test('rollout verification waits past an old healthy instance and fails if the requested release never appears',async t=>{
-  let revision='previous',requests=0;
+test('rollout verification rejects a new configuration on an old image and waits for both revisions',async t=>{
+  let revision='expected',imageRevision='previous',requests=0;
   const server=createServer((_request,response)=>{
     response.setHeader('content-type','application/json');
-    response.end(JSON.stringify({mode:'live',executionEnabled:false,deploymentId:revision}));
-    requests++;if(requests===1)revision='expected';
+    response.end(JSON.stringify({mode:'live',executionEnabled:false,deploymentId:revision,imageRevision}));
+    requests++;
   });
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())));
   const address=server.address();assert.ok(address&&typeof address!=='string');
   const origin=`http://127.0.0.1:${address.port}`;
-  await waitForDeployment(origin,'expected',{timeoutMs:1000,intervalMs:5});
+  await assert.rejects(waitForDeployment(origin,'expected',{timeoutMs:30,intervalMs:5}),/requested revision/);
   assert.ok(requests>=2);
+  imageRevision='expected';revision='previous';
+  await assert.rejects(waitForDeployment(origin,'expected',{timeoutMs:30,intervalMs:5}),/requested revision/);
+  revision='expected';
+  await waitForDeployment(origin,'expected',{timeoutMs:1000,intervalMs:5});
   await assert.rejects(waitForDeployment(origin,'never-deployed',{timeoutMs:30,intervalMs:5}),/requested revision/);
 });
 

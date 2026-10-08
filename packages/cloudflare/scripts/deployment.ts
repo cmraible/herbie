@@ -18,7 +18,8 @@ export async function waitForDeployment(origin:string,revision:string,options:{t
       const signal=AbortSignal.any([AbortSignal.timeout(10_000),...(options.signal?[options.signal]:[])]);
       const response=await fetch(`${origin}/api/health`,{signal,redirect:'error'});
       const health:unknown=await response.json();
-      if(response.ok&&isRecord(health)&&health.mode==='live'&&health.executionEnabled===false&&health.deploymentId===revision)return;
+      if(response.ok&&isRecord(health)&&health.mode==='live'&&health.executionEnabled===false
+        &&health.deploymentId===revision&&health.imageRevision===revision)return;
     }catch{/* Responses can contain credentials or platform details; never print them. */}
     await delay(options.intervalMs??5000,undefined,{signal:options.signal}).catch(()=>undefined);
   }
