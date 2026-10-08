@@ -42,3 +42,6 @@ packages/web/src/*
 !packages/web/src/*.ts
 !packages/web/src/*.tsx
 !packages/web/src/*.css
+!packages/web/public/
+packages/web/public/*
+!packages/web/public/_headers
