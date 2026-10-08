@@ -10,8 +10,10 @@ const live = {
 };
 
 test('hosted live configuration accepts an injected private key and leaves execution disabled by default',async()=>{
-  const config=await readConfig(live);
+  const config=await readConfig({...live,HERBIE_DEPLOYMENT_ID:'config-revision',HERBIE_IMAGE_REVISION:'image-revision'});
   assert.equal(config.executionEnabled,false);
   assert.equal(config.github?.privateKey,'fixture-pem-not-used');
   assert.equal(config.host,'0.0.0.0');
+  assert.equal(config.deploymentId,'config-revision');
+  assert.equal(config.imageRevision,'image-revision');
 });

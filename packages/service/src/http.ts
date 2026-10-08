@@ -12,7 +12,7 @@ import {reconcileReviews} from './worker.js';
 import {cliConsentPage,cliConsentResult,consentCsp} from './cli-consent-page.js';
 
 type Auth = ReturnType<typeof createAuth>;
-interface ApiOptions {store:Store;auth:Auth;adapters:Adapters;publicUrl:string;executionEnabled?:boolean;deploymentId?:string;verifyWebhook?:(body:Buffer,signature:string)=>boolean;webDirectory?:string;}
+interface ApiOptions {store:Store;auth:Auth;adapters:Adapters;publicUrl:string;executionEnabled?:boolean;deploymentId?:string;imageRevision?:string;verifyWebhook?:(body:Buffer,signature:string)=>boolean;webDirectory?:string;}
 class HttpError extends Error {constructor(readonly status:number,message:string){super(message);}}
 const clientInput=z.object({client:z.enum(['web','cli']).default('web')});
 function cookie(request:IncomingMessage,name:string):string|undefined {
@@ -58,7 +58,7 @@ export function createApiServer(options:ApiOptions){
     if(method==='GET'&&url.pathname==='/api/health'){
       try{await store.pool.query('SELECT 1');}
       catch{json(response,503,{error:'Database unavailable'});return;}
-      json(response,200,{mode:adapters.mode,executionEnabled,deploymentId:options.deploymentId});return;
+      json(response,200,{mode:adapters.mode,executionEnabled,deploymentId:options.deploymentId,imageRevision:options.imageRevision});return;
     }
     if(method==='POST'&&url.pathname==='/api/auth/start'){
       const {client}=clientInput.parse(await readJson(request));const flow=await auth.start(client);

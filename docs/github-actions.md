@@ -41,8 +41,10 @@ rejects stale queued runs/reruns. Newer commits arriving during an existing
 deployment wait; they do not cancel its rollout. The job runs full `wrangler
 deploy`, including image push, assets, Worker, Durable Object and Cron setup.
 Each run/attempt gives the image a distinct public revision, including secret-only
-updates. Success requires `/api/health` to report that exact revision, working
-Postgres, live mode and **execution disabled** within ten minutes.
+updates. The image has its own baked-in revision, independent of the Worker startup
+configuration. Success requires `/api/health` to report both revisions matching the
+requested release, working Postgres, live mode and **execution disabled** within
+ten minutes. An old image restarted with new configuration cannot pass readiness.
 
 ## One-time operator setup
 

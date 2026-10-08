@@ -9,6 +9,8 @@ test('disabled deployment passes only allowlisted server configuration and needs
   assert.equal(environment.HERBIE_MODE,'live');
   assert.equal(environment.HERBIE_HOST,'0.0.0.0');
   assert.equal(environment.HERBIE_DEPLOYMENT_ID,'release-123');
+  assert.equal(environment.HERBIE_IMAGE_REVISION,undefined);
+  assert.throws(()=>containerEnvironment(JSON.stringify({...credentials,HERBIE_IMAGE_REVISION:'forged'}),'https://herbie.example',false));
   assert.equal(environment.DAYTONA_API_KEY,undefined);
   assert.throws(()=>containerEnvironment(JSON.stringify({...credentials,OPENAI_API_KEY:'unexpected'}),'https://herbie.example',false));
 });
