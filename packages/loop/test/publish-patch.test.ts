@@ -89,6 +89,17 @@ test('publishes a verified patch as one commit and one draft PR without changing
   assert.deepEqual(await readdir(scratch), []);
 });
 
+test('accepts Git identity and authentication configuration only for this publication', async t => {
+  const { request, remote, createPullRequest } = await fixture(t);
+  const previousName = process.env.GIT_AUTHOR_NAME;
+  const result = await publishTestedPatch(createPullRequest, { ...request, gitEnvironment: {
+    GIT_AUTHOR_NAME: 'Herbie App', GIT_AUTHOR_EMAIL: 'herbie@example.invalid',
+    GIT_COMMITTER_NAME: 'Herbie App', GIT_COMMITTER_EMAIL: 'herbie@example.invalid',
+  } });
+  assert.equal(await git(remote, 'show', '--format=%an <%ae>', '--no-patch', result.commit), 'Herbie App <herbie@example.invalid>');
+  assert.equal(process.env.GIT_AUTHOR_NAME, previousName);
+});
+
 for (const invalid of ['unverified', 'untested', 'failed tests', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
   test(`rejects ${invalid} evidence without publication`, async t => {
     const { changes, scratch, createPullRequest, publish } = await fixture(t);

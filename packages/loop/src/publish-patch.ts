@@ -12,6 +12,8 @@ type CreatePullRequest = (request: {
 type Request = {
   repository: string; baseBranch: string; branch: string; title: string; body: string;
   changes: DaytonaAttemptChanges;
+  // Trusted caller-owned, per-process auth/identity. Never persist credentials in Git config.
+  gitEnvironment?: Readonly<Record<string, string>>;
 };
 
 export interface PublicationState {
@@ -55,7 +57,7 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     const bare = join(directory, 'repo.git');
     const git = async (...args: string[]) => (await promisify(execFile)('git', ['--git-dir', bare, ...args], {
       cwd: directory, timeout: 30_000, killSignal: 'SIGKILL',
-      env: { ...process.env, GIT_INDEX_FILE: join(directory, 'index'), GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, ...request.gitEnvironment, GIT_INDEX_FILE: join(directory, 'index'), GIT_TERMINAL_PROMPT: '0' },
     })).stdout.trim();
     await git('init', '--bare', '--template=', bare);
     const headRef = `refs/heads/${branch}`;
