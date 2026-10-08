@@ -12,7 +12,7 @@ import {reconcileReviews} from './worker.js';
 import {cliConsentPage,cliConsentResult,consentCsp} from './cli-consent-page.js';
 
 type Auth = ReturnType<typeof createAuth>;
-interface ApiOptions {store:Store;auth:Auth;adapters:Adapters;publicUrl:string;verifyWebhook?:(body:Buffer,signature:string)=>boolean;webDirectory?:string;}
+interface ApiOptions {store:Store;auth:Auth;adapters:Adapters;publicUrl:string;executionEnabled?:boolean;verifyWebhook?:(body:Buffer,signature:string)=>boolean;webDirectory?:string;}
 class HttpError extends Error {constructor(readonly status:number,message:string){super(message);}}
 const clientInput=z.object({client:z.enum(['web','cli']).default('web')});
 function cookie(request:IncomingMessage,name:string):string|undefined {
@@ -37,6 +37,8 @@ async function readJson(request:IncomingMessage):Promise<unknown>{
 }
 export function createApiServer(options:ApiOptions){
   const {store,auth,adapters}=options;
+  const executionEnabled=options.executionEnabled??true;
+  function requireExecution(){if(!executionEnabled)throw new HttpError(503,'Live execution is disabled by the operator');}
   const origin=new URL(options.publicUrl).origin;
   const secure=new URL(origin).protocol==='https:'?'; Secure':'';
   const approvalCookie=(token:string,maxAge=600)=>`herbie_cli_approval=${token}; HttpOnly; SameSite=Lax; Path=/api/auth/cli; Max-Age=${maxAge}${secure}`;
@@ -53,7 +55,7 @@ export function createApiServer(options:ApiOptions){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
       if(request.headers.origin!==origin)throw new HttpError(403,'Request origin is not allowed');
     }
-    if(method==='GET'&&url.pathname==='/api/health'){json(response,200,{mode:adapters.mode});return;}
+    if(method==='GET'&&url.pathname==='/api/health'){json(response,200,{mode:adapters.mode,executionEnabled});return;}
     if(method==='POST'&&url.pathname==='/api/auth/start'){
       const {client}=clientInput.parse(await readJson(request));const flow=await auth.start(client);
       if(client==='web')response.setHeader('set-cookie',`herbie_auth=${flow.browserState}; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=600${secure}`);
@@ -106,6 +108,7 @@ export function createApiServer(options:ApiOptions){
       if(method==='GET'&&url.pathname==='/api/repositories'){json(response,200,await adapters.repositories(userId));return;}
       if(method==='GET'&&url.pathname==='/api/goals'){json(response,200,await store.listGoals(userId));return;}
       if(method==='POST'&&url.pathname==='/api/goals'){
+        requireExecution();
         const input=goalInput.parse(await readJson(request));
         const key=z.string().uuid().parse(request.headers['idempotency-key']);
         await adapters.authorize(userId,input.repository);
@@ -117,7 +120,10 @@ export function createApiServer(options:ApiOptions){
         if(!goal)throw new HttpError(404,'Goal not found');
         if(method==='GET'&&!goalPath[2]){json(response,200,goal);return;}
         if(method==='GET'&&goalPath[2]==='events'){const after=z.coerce.number().int().min(0).safe().parse(url.searchParams.get('after')??0);json(response,200,await store.events(id,after));return;}
-        if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){json(response,200,await store.control(id,userId,actionSchema.parse(goalPath[2])));return;}
+        if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){
+          const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();
+          json(response,200,await store.control(id,userId,action));return;
+        }
       }
       const demoPath=url.pathname.match(/^\/api\/demo\/goals\/([^/]+)\/(merge|close)$/);
       if(method==='POST'&&adapters.mode==='demo'&&demoPath){
