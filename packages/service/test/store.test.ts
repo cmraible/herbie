@@ -193,3 +193,10 @@ integration('failed work releases its repository and workers cannot claim anothe
   assert.equal(lastEvent.type, 'failed');
   assert.deepEqual(await store.events(goal.id, lastEvent.id), []);
 });
+
+integration('event logs remain numerically ordered past ten events and cursor pages preserve that order', async () => {
+  const { goal } = await store.createGoal(randomUUID(), input(), 'demo', randomUUID());
+  for (const message of ['a','b','c','d','e','f','g','h','i','j','k']) await store.appendEvent(goal.id, 'attempt', message);
+  assert.deepEqual((await store.events(goal.id)).map(event => event.id), [1,2,3,4,5,6,7,8,9,10,11,12]);
+  assert.deepEqual((await store.events(goal.id, 8)).map(event => event.id), [9,10,11,12]);
+});

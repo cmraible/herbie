@@ -110,7 +110,7 @@ export class Store {
     return result.rows.map(row => databaseGoal.parse(row));
   }
   async events(goalId: string, after = 0): Promise<GoalEvent[]> {
-    const result = await this.pool.query<Record<string, unknown>>('SELECT id::text,goal_id AS "goalId",type,message,created_at AS "createdAt" FROM goal_events WHERE goal_id=$1 AND id>$2 ORDER BY id LIMIT 1000', [goalId, after]);
+    const result = await this.pool.query<Record<string, unknown>>('SELECT id::text,goal_id AS "goalId",type,message,created_at AS "createdAt" FROM goal_events WHERE goal_id=$1 AND id>$2 ORDER BY goal_events.id LIMIT 1000', [goalId, after]);
     return result.rows.map(row => eventSchema.extend({ id: z.string().transform(Number), createdAt: z.date().transform(d => d.toISOString()) }).parse(row));
   }
   async control(id: string, ownerId: string, action: GoalAction): Promise<Goal> {
