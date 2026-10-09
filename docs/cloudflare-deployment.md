@@ -79,8 +79,9 @@ encryption key stable unless performing a separately planned data migration.
    namespace, one container application/image, and one Cron trigger. No custom
    DNS zone, Hyperdrive, D1, R2, Queue, or external VM is required for this slice.
 3. A trusted PostgreSQL owner connection using the actual Supavisor **session**
-   endpoint on port 5432, with URL-encoded password and verified TLS. Supply the
-   downloaded CA certificate if required. The runtime pool is bounded to five.
+   endpoint on port 5432, with URL-encoded password and verified TLS. Recognized
+   Supabase database hosts use the bundled public Supabase CA unless an explicit
+   CA override is supplied. The runtime pool is bounded to five.
 4. Approved GitHub App ID, client ID, client secret, private key and webhook
    secret. Callback: `<HERBIE_PUBLIC_URL>/api/auth/callback`.
    Webhook: `<HERBIE_PUBLIC_URL>/api/webhooks/github`. Replace the origin placeholder
@@ -124,8 +125,9 @@ Wrangler, Vite, TypeScript compiler or Playwright.
 
 Prepare an operator-owned JSON file outside the repository using
 [the example shape](deployment-runtime.example.json). Replace every placeholder;
-remove the CA field if system trust is sufficient. PEM newlines must be JSON
-escaped. The one Worker secret `HERBIE_RUNTIME_SECRETS` carries this bundle.
+omit the optional CA field to use automatic certificate trust (including the
+scoped Supabase CA fallback). An explicit CA replaces that selection. PEM newlines
+must be JSON escaped. The one Worker secret `HERBIE_RUNTIME_SECRETS` carries this bundle.
 Only an explicit allowlist is forwarded to the container. Never print its value,
 pass it in arguments, or use Docker build arguments for secrets. The image revision
 is a public rollout marker and must never contain secret material.
