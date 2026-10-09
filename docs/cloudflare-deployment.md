@@ -184,3 +184,21 @@ Sources checked: [Container API](https://developers.cloudflare.com/containers/ap
 [Node compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/),
 [invocation logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/),
 [trace attributes](https://developers.cloudflare.com/workers/observability/traces/spans-and-attributes/).
+
+### Deployment progress and deadline
+
+The deployment script has one 180-second monotonic deadline covering its current-main
+lookup, Wrangler build/upload/rollout, and health verification together. On timeout
+it terminates the subprocess group, with up to two additional seconds to force-stop
+children that ignore termination. The workflow step has a four-minute outer safeguard;
+setup and the full Verify job are separate and are not promised to finish in three minutes.
+
+Public output reports fixed observed build, upload, registry, and container provisioning
+stages, plus a command heartbeat every 30 seconds. Tool markers are observations, not
+proof that provisioning completed. Health polling reports its first result, then at most
+once every 30 seconds, and a final success or failure summary: elapsed time, attempt count,
+HTTP status or a fixed error category, and readiness booleans. Success still requires live
+mode, execution disabled, and both Worker and image revisions matching the requested release.
+URLs, provider identifiers, response bodies, secrets, and raw tool errors remain private;
+temporary diagnostics are removed when the script exits. A timeout does not roll back any
+provider changes already accepted, and it must not be treated as permission to retry blindly.
