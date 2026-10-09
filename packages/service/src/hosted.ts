@@ -1,3 +1,4 @@
+import {startupDiagnostic} from './startup-diagnostic.js';
 import {randomUUID} from 'node:crypto';
 import type {Server} from 'node:http';
 import {pathToFileURL} from 'node:url';
@@ -52,7 +53,8 @@ if(process.argv[1]&&pathToFileURL(process.argv[1]).href===import.meta.url){
     console.log('Herbie hosted API ready. Execution follows the configured operator gate.');
     const shutdown=()=>{void service.close().catch(()=>{console.error('Herbie shutdown failed; inspect durable state before restarting work.');process.exitCode=1;});};
     process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);
-  }catch{
+  }catch(error){
+    console.error(startupDiagnostic(error));
     // Startup errors can include connection strings, private keys, or SDK details.
     console.error('Herbie startup failed. Check configuration and database availability.');
     process.exitCode=1;

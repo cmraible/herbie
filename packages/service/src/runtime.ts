@@ -1,4 +1,5 @@
 import pg from 'pg';
+import {StartupConfigurationError} from './startup-diagnostic.js';
 import {z} from 'zod';
 import {readConfig} from './config.js';
 import {Store} from './store.js';
@@ -10,9 +11,15 @@ import {createLiveAdapters} from './live.js';
 import {createDatabasePoolConfig,prepareDatabase} from './database.js';
 
 export async function createRuntime(){
-  const config=await readConfig();
-  const github=config.github?createGithub(config.github):undefined;
-  const pool=new pg.Pool(await createDatabasePoolConfig({databaseUrl:config.databaseUrl,mode:config.mode,ca:config.databaseCa,caFile:config.databaseCaFile}));
+  const {config,github,poolConfig}=await (async()=>{
+    try{
+      const config=await readConfig();
+      const github=config.github?createGithub(config.github):undefined;
+      const poolConfig=await createDatabasePoolConfig({databaseUrl:config.databaseUrl,mode:config.mode,ca:config.databaseCa,caFile:config.databaseCaFile});
+      return {config,github,poolConfig};
+    }catch{throw new StartupConfigurationError();}
+  })();
+  const pool=new pg.Pool(poolConfig);
   pool.on('error',()=>console.error('Herbie database connection unavailable'));
   const store=new Store(pool);
   try {
