@@ -55,6 +55,14 @@ backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters,
 commands to 30 arguments and attempts to five. Existing Daytona deadlines and
 observed token-cost cutoff remain in force; the cutoff is not a hard spending cap.
 
+Verification uses a fresh clone and a protected supervisor, separate from the coding
+user. Artifact downloads are bounded before parsing, patches are capped at 8 MiB,
+and each test output stream is capped at 1 MiB. New artifacts carry verification
+version 2. Before restarting workers on upgrade, cancel held goals with artifacts
+saved by the old verifier and start new attempts after checking sandbox cleanup.
+Old artifacts cannot be published by the new verifier contract.
+Already-published PRs can still be reconciled normally.
+
 ## Live setup (operator approval required)
 
 Implementation includes these flows but has not registered an App, created
@@ -133,6 +141,11 @@ HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:55432/h
 ```
 
 The database integration suites create isolated schemas and remove them afterward.
+The loop's Unix permission tests require root with distinct non-root `compat` and
+`herbie-verify` users, and otherwise skip. Run them in a disposable Linux container
+with Node 24, Git, those users, and an init process that reaps orphaned children.
+They use local fixture repositories and a fake Codex process, without Daytona or
+model calls. Never run repository verification tests as root on a shared host.
 Without `HERBIE_TEST_DATABASE_URL`, database tests explicitly skip; that is not a
 full verification run. Browser E2E uses a dedicated demo service, cancels active
 demo goals to isolate scenarios, and saves screenshots in the web test-results

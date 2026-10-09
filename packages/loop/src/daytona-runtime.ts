@@ -20,6 +20,10 @@ rm node.tar.xz codex.tgz
 // No secret values: Daytona supplies the existing secret reference through its egress proxy.
 export const configureDaytonaRuntime = String.raw`set -eu
 id -u compat >/dev/null 2>&1 || useradd -m -s /bin/bash compat
+id -u herbie-verify >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin herbie-verify
+test "$(id -u compat)" -ne 0
+test "$(id -u herbie-verify)" -ne 0
+test "$(id -u compat)" -ne "$(id -u herbie-verify)"
 mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
 model = "gpt-6-luna"

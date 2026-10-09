@@ -53,7 +53,7 @@ integration('one worker claims work and a paused artifact resumes without repeat
   const worker = claimed[0] ? 'worker-a' : 'worker-b';
   const pausing = await store.control(goal.id, owner, 'pause');
   assert.equal(pausing.stopRequested, 'pause');
-  const changes = { baseCommit: 'abc', patch: Buffer.from('tested patch'), testResult: { exitCode: 0, stdout: 'tests passed', stderr: '' }, verification: { repoUrl: 'https://github.com/example/repo', baseCommit: 'abc', patchSha256: 'sha256', testCommand: ['npm', 'test'], goalCompleted: true, sandboxDeleted: true } };
+  const changes = { baseCommit: 'abc', patch: Buffer.from('tested patch'), testResult: { exitCode: 0, stdout: 'tests passed', stderr: '' }, verification: { version: 2 as const, repoUrl: 'https://github.com/example/repo', baseCommit: 'abc', patchSha256: 'sha256', testCommand: ['npm', 'test'], goalCompleted: true, sandboxDeleted: true } };
   const held = await store.saveArtifact(job.id, worker, { ...changes, verification: { ...changes.verification, goalCompleted: true, sandboxDeleted: true } });
   assert.equal(held.goal.state, 'paused');
   assert.equal(await store.beginPublication(job.id, worker), false);

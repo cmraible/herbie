@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,16 +36,16 @@ async function fixture(t: TestContext, extraFiles = false) {
   const patch = await readFile(patchFile);
   const runtime = join(directory, 'runtime');
   await mkdir(runtime);
-  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner']) {
+  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits']) {
     await writeFile(join(runtime, `${name}.js`), '');
   }
   const changes = await runDaytonaAttempt(async () => ({
     id: 'fixture', delete: async () => {}, git: { clone: async () => {} },
     fs: {
       createFolder: async () => {}, uploadFile: async () => {},
-      downloadFile: async path => Buffer.from(JSON.stringify(path.endsWith('/changes.json')
+      downloadFileStream: async path => Readable.from([Buffer.from(JSON.stringify(path.endsWith('/changes.json')
         ? { baseCommit, patchBase64: patch.toString('base64') }
-        : { exitCode: 0, stdout: '2 tests passed', stderr: '' })),
+        : { exitCode: 0, stdout: '2 tests passed', stderr: '' }))]),
     },
     process: { executeCommand: async command => ({ exitCode: 0,
       result: command.includes('daytona-test-runner') ? 'herbie-tests-completed\n' : 'herbie-attempt-completed\n',
@@ -100,9 +101,10 @@ test('accepts Git identity and authentication configuration only for this public
   assert.equal(process.env.GIT_AUTHOR_NAME, previousName);
 });
 
-for (const invalid of ['unverified', 'untested', 'failed tests', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
+for (const invalid of ['unverified', 'legacy verifier', 'untested', 'failed tests', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
   test(`rejects ${invalid} evidence without publication`, async t => {
     const { changes, scratch, createPullRequest, publish } = await fixture(t);
+    if (invalid === 'legacy verifier') delete changes.verification!.version;
     if (invalid === 'unverified') delete changes.verification;
     if (invalid === 'untested') delete changes.testResult;
     if (invalid === 'failed tests') changes.testResult!.exitCode = 1;
