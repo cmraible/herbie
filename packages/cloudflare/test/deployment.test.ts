@@ -148,3 +148,33 @@ test('native preflight accepts current main and rejects stale or failed lookups 
     else assert.match(result.stderr,/preflight refused/);
   }
 });
+
+
+test('manual mode validation rejects missing and malformed settings without echoing their values',()=>{
+  for(const mode of [undefined,'','Automatic',' automatic','canary-invalid-mode','canary\n::error::injected']){
+    const environment:Record<string,string|undefined>={HERBIE_DEPLOY_MODE:mode};
+    const result=spawnSync('bash',['scripts/check-deploy-mode.sh'],{
+      cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',env:environment});
+    assert.equal(result.status,1);
+    assert.match(result.stderr,/::error::HERBIE_DEPLOY_MODE is missing or invalid/);
+    assert.doesNotMatch(result.stdout+result.stderr,/canary|injected/);
+  }
+});
+
+test('explicitly disabled manual mode succeeds with a clear no-deployment notice and no secrets',()=>{
+  const result=spawnSync('bash',['scripts/check-deploy-mode.sh'],{
+    cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',env:{HERBIE_DEPLOY_MODE:'disabled'}});
+  assert.equal(result.status,0);
+  assert.match(result.stdout,/::notice::.*explicitly disabled.*deployment will be skipped/);
+  assert.equal(result.stderr,'');
+});
+
+test('manual and automatic modes allow a manual run to continue to its remaining gates',()=>{
+  for(const mode of ['manual','automatic']){
+    const result=spawnSync('bash',['scripts/check-deploy-mode.sh'],{
+      cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',env:{HERBIE_DEPLOY_MODE:mode}});
+    assert.equal(result.status,0);
+    assert.match(result.stdout,/preflight and full Verify are still required/);
+    assert.equal(result.stderr,'');
+  }
+});

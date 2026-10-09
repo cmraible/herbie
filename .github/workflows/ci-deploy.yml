@@ -10,9 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  deployment-mode:
+    name: Validate manual deployment mode
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require an explicit deployment mode
+        run: bash scripts/check-deploy-mode.sh
+        env:
+          HERBIE_DEPLOY_MODE: ${{ vars.HERBIE_DEPLOY_MODE }}
+
   preflight:
     name: Deployment configuration preflight
+    needs: deployment-mode
     if: >-
+      !cancelled() &&
+      (needs.deployment-mode.result == 'success' || needs.deployment-mode.result == 'skipped') &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (vars.HERBIE_DEPLOY_MODE == 'automatic' ||
@@ -51,9 +69,10 @@ jobs:
 
   verify:
     name: Verify
-    needs: preflight
+    needs: [deployment-mode, preflight]
     if: >-
       !cancelled() &&
+      (needs.deployment-mode.result == 'success' || needs.deployment-mode.result == 'skipped') &&
       (needs.preflight.result == 'success' || needs.preflight.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
