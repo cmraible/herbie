@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { X509Certificate, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +12,8 @@ import { createDatabasePoolConfig, prepareDatabase } from '../src/database.js';
 
 test('remote database configuration requires verified TLS and a private bounded session pool', async () => {
   const config = await createDatabasePoolConfig({ databaseUrl: 'postgresql://postgres.project:fixture-secret@aws-0-region.pooler.supabase.com:5432/postgres?sslmode=verify-full', mode: 'live' });
-  assert.deepEqual(config.ssl, { rejectUnauthorized: true });
+  assert.equal(typeof config.ssl, 'object');
+  assert.equal((config.ssl as {rejectUnauthorized:boolean}).rejectUnauthorized, true);
   assert.equal(config.options, '-c search_path=herbie');
   assert.equal(config.max, 5);
   assert.equal(config.connectionTimeoutMillis, 10_000);
@@ -154,4 +155,28 @@ test('live preparation refuses a public search path while demo keeps its selecte
   const { goal } = await store.createGoal('demo-user', { repository: 'demo/example', prompt: 'Local demo', testCommand: ['node', '--test'], maxAttempts: 1 }, 'demo', randomUUID());
   assert.equal((await store.getGoal(goal.id))?.prompt, 'Local demo');
   assert.equal((await demoPool.query<Record<string, unknown>>('SELECT current_schema() AS name')).rows[0]?.name, selected);
+});
+
+
+test('only recognized Supabase database hosts receive the verified public CA fallback', async () => {
+  const fingerprint = '80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA';
+  for (const host of ['db.fixtureproject.supabase.co', 'aws-0-region.pooler.supabase.com']) {
+    const config = await createDatabasePoolConfig({databaseUrl:`postgresql://user:fixture@${host}:5432/postgres`,mode:'live'});
+    assert.ok(config.ssl && typeof config.ssl === 'object');
+    assert.equal(config.ssl.rejectUnauthorized,true);
+    assert.ok(Array.isArray(config.ssl.ca));
+    const certificate = config.ssl.ca.map(pem=>new X509Certificate(pem)).find(cert=>cert.fingerprint256===fingerprint);
+    assert.ok(certificate, 'Official Supabase production CA must be available');
+    assert.equal(certificate.ca,true);
+    assert.equal(certificate.verify(certificate.publicKey),true);
+    assert.ok(Date.parse(certificate.validTo)>Date.now());
+    const override = await createDatabasePoolConfig({databaseUrl:`postgresql://user:fixture@${host}/postgres`,mode:'live',ca:rootCertificates[0]});
+    assert.deepEqual(override.ssl,{rejectUnauthorized:true,ca:rootCertificates[0]});
+  }
+  for (const host of ['db.example','supabase.co','supabase.com','api.supabase.com','fixture.supabase.co','db.fixture.supabase.co.example','aws-0-region.pooler.supabase.com.example','nested.aws-0-region.pooler.supabase.com']) {
+    const config = await createDatabasePoolConfig({databaseUrl:`postgresql://user:fixture@${host}/postgres`,mode:'live'});
+    assert.deepEqual(config.ssl,{rejectUnauthorized:true});
+  }
+  const demo = await createDatabasePoolConfig({databaseUrl:'postgresql://user:fixture@db.fixtureproject.supabase.co/postgres',mode:'demo'});
+  assert.equal(demo.ssl,false);
 });

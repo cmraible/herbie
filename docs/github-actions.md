@@ -123,7 +123,7 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
 | `HERBIE_GITHUB_CLIENT_SECRET` | App OAuth client secret |
 | `HERBIE_GITHUB_PRIVATE_KEY` | App RSA private-key PEM, with actual newlines |
 | `HERBIE_GITHUB_WEBHOOK_SECRET` | App webhook secret |
-| `HERBIE_DATABASE_CA` | Optional Supabase public CA PEM; unset or empty when system trust suffices |
+| `HERBIE_DATABASE_CA` | Optional explicit database CA PEM; overrides the bundled Supabase CA fallback |
 
 Every angle-bracketed value above is a synthetic placeholder, not a usable account
 or project identifier. Do not commit the substituted values. `HERBIE_DEPLOY_MODE`
@@ -210,3 +210,21 @@ Sources: [Cloudflare GitHub Actions authentication](https://developers.cloudflar
 [GitHub secret and action security](https://docs.github.com/en/actions/reference/security/secure-use).
 Current Cloudflare documentation and Wrangler 4.148.0 expose API-token CI
 authentication, not a supported GitHub OIDC exchange for this deployment.
+
+
+### Database certificate trust
+
+Herbie includes Supabase's public production CA for verified TLS connections to
+`db.<project>.supabase.co` and `<region>.pooler.supabase.com` database hosts.
+The additional CA is scoped to these database connections; Node's default trust
+is retained, and global TLS trust is unchanged. Other hosts keep default trust.
+Certificate-chain and hostname verification remain mandatory.
+
+`HERBIE_DATABASE_CA` (or `HERBIE_DATABASE_CA_FILE` outside Actions) explicitly
+replaces the automatic CA selection. An incorrect override fails closed; it is
+not silently ignored. The bundled certificate is public vendor material, not a
+credential or a project identifier. Its official source and SHA-256 fingerprint
+are recorded in `packages/service/src/supabase-ca.ts`; it expires April 26, 2031.
+When Supabase rotates this CA, verify the replacement against the official
+[dashboard download](https://supabase.com/docs/guides/platform/ssl-enforcement)
+before updating the certificate and fingerprint test.

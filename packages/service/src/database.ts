@@ -1,6 +1,8 @@
 import type {StartupPhase} from './startup-progress.js';
 import { X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { getCACertificates } from 'node:tls';
+import { supabaseProductionCa } from './supabase-ca.js';
 import type { Pool, PoolConfig } from 'pg';
 import { Store } from './store.js';
 import { migrateAuth } from './auth-store.js';
@@ -31,9 +33,14 @@ export async function createDatabasePoolConfig(config: DatabaseConfig): Promise<
   }
   const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
   const tls = config.mode === 'live' && !loopback || verifiedHint || ca !== undefined;
+  // Add the vendor root only for recognized Supabase database endpoints. Explicit
+  // operator CA settings replace the fallback, and other connections keep Node's
+  // default trust. Never mutate global trust or override hostname verification.
+  const supabaseDatabase = /^(?:db\.[a-z0-9]+\.supabase\.co|[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com)$/.test(url.hostname);
+  const trustedCa = ca ?? (tls && supabaseDatabase ? [...getCACertificates('default'), supabaseProductionCa] : undefined);
   return {
     connectionString: url.href,
-    ssl: tls ? { rejectUnauthorized: true, ...(ca === undefined ? {} : { ca }) } : false,
+    ssl: tls ? { rejectUnauthorized: true, ...(trustedCa === undefined ? {} : { ca: trustedCa }) } : false,
     options: `-c search_path=${config.mode === 'live' ? 'herbie' : 'public'}`,
     max: 5, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000,
     statement_timeout: 30_000, idle_in_transaction_session_timeout: 30_000,
