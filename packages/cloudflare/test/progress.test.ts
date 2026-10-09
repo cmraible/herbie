@@ -27,7 +27,7 @@ test('health reports cadence, readiness booleans and success without private res
   });
   await waitForDeployment('https://'+canary,canary,{timeoutMs:100000,intervalMs:0,report:message=>output.push(message)});
   assert.equal(output.filter(line=>line.startsWith('Health verification waiting')).length,2);
-  assert.match(output[1],/http=200; category=not-ready; live=true; execution-disabled=true; worker-revision-ready=true; image-revision-ready=false/);
+  assert.match(output[1],/http=200; category=not-ready; live=true; execution-disabled=true; execution-mode-ready=true; worker-revision-ready=true; image-revision-ready=false/);
   assert.match(output.at(-1)!,/Health verification passed:.*image-revision-ready=true/);
   assert.doesNotMatch(output.join('\n'),/private-canary|https:|old-/);
 });
