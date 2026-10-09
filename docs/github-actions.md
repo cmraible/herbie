@@ -6,8 +6,10 @@ operator completes the setup below; merging this workflow alone deploys nothing.
 
 ## What runs and when
 
-Every pull request and push to `main`, plus manual dispatch, runs **Verify** on a
-fresh GitHub-hosted Ubuntu runner. It installs Node 24.19.0 and pnpm 10.34.6, uses
+Every pull request and push to `main`, plus manual dispatch, is eligible for
+**Verify** on a fresh GitHub-hosted Ubuntu runner. Runs intended to deploy must
+first pass **Deployment configuration preflight**, described below. Verify
+installs Node 24.19.0 and pnpm 10.34.6, uses
 the frozen lockfile, and runs build, strict typecheck, all unit/Postgres integration
 tests, compiled CLI integration, Chromium browser scenarios, local workerd checks,
 and a Docker/Worker deployment dry-run. No live OAuth, Daytona or model run occurs.
@@ -27,6 +29,25 @@ Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 | Missing or any value other than those below | No deployment |
 | `manual` | Only **Run workflow**, selecting branch `main` |
 | `automatic` | Pushes to `main` and manual runs on `main` |
+
+For a deployment-intended run, preflight runs before Verify, dependency
+installation, browser setup or image building. It checks out the exact run SHA
+and uses Node 24's native TypeScript support to run
+`node packages/cloudflare/scripts/preflight.ts`, with no dependency installation.
+Missing or empty required inputs and malformed known-format inputs fail the job;
+diagnostics contain field names and sanitized reasons only. A failed preflight
+prevents Verify and deployment. PRs and runs outside the deployment mode gate
+skip preflight and retain ordinary Verify checks without production secrets.
+
+Preflight uses the protected `production` environment, so its approval must happen
+before GitHub releases environment secrets. The later deployment job may require
+its own approval. Event-triggered workflows cannot declare environment secrets
+as required inputs; preflight provides that runtime check. It validates shape,
+template configuration and internal consistency only. Opaque tokens receive
+nonempty, single-line format checks, not authentication. Preflight makes no
+provider authentication or connectivity check and proves no provider access. It
+also checks GitHub's current main SHA using a read-only request before Verify;
+unreachable GitHub or a stale run fails closed.
 
 Production additionally requires current `main`, the `production` environment's
 approval/protection rules, and an exact repository match with the private
@@ -94,7 +115,7 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
 | `HERBIE_GITHUB_CLIENT_SECRET` | App OAuth client secret |
 | `HERBIE_GITHUB_PRIVATE_KEY` | App RSA private-key PEM, with actual newlines |
 | `HERBIE_GITHUB_WEBHOOK_SECRET` | App webhook secret |
-| `HERBIE_DATABASE_CA` | Optional Supabase public CA PEM; omit when system trust suffices |
+| `HERBIE_DATABASE_CA` | Optional Supabase public CA PEM; unset or empty when system trust suffices |
 
 Every angle-bracketed value above is a synthetic placeholder, not a usable account
 or project identifier. Do not commit the substituted values. `HERBIE_DEPLOY_MODE`
@@ -109,19 +130,23 @@ The workflow deliberately has no Daytona or OpenAI inputs.
 ## Runtime secret bundle and first release
 
 GitHub stores sensitive values separately so its masking does not depend on a
-single structured JSON secret. Only the deployment step receives them. The Node
-helper validates required inputs before any Cloudflare write. It checks the
-running repository against `HERBIE_DEPLOY_REPOSITORY`, the expected Worker name
-`herbie-service` against `HERBIE_PUBLIC_URL`, the database username against
+single structured JSON secret. Only the preflight and deployment steps receive
+them; a shared step-level YAML mapping keeps their inputs identical. Neither
+job-wide environments, outputs nor artifacts carry production secrets. The
+deployment job reruns preflight with fresh secrets before installing dependencies
+or building, because settings may have changed since the first approval. The
+actual deployment helper validates the same inputs again before any Cloudflare
+write. It checks the running repository against `HERBIE_DEPLOY_REPOSITORY`,
+the expected Worker name `herbie-service` against `HERBIE_PUBLIC_URL`, the database username against
 `HERBIE_SUPABASE_PROJECT_REF`, and the exact database hostname against
 `HERBIE_SUPABASE_POOLER_HOST`. These private comparisons retain the deployment
 target checks without hardcoding an account in source. The helper constructs the
 allowlisted `HERBIE_RUNTIME_SECRETS` JSON bundle, and writes Wrangler's secrets
 file with mode **0600** in a private temporary directory outside the Docker context.
 Runtime credentials are excluded from child-tool environments and build arguments.
-The Cloudflare token reaches Wrangler only; transient registry credentials and
-Wrangler logs use the same temporary directory. Files are removed on completion
-or handled interruption; the disposable runner is the final cleanup boundary.
+Among child tools, the Cloudflare token reaches only Wrangler. Transient registry
+credentials and Wrangler logs use the same temporary directory. Files are removed
+on completion or handled interruption; the disposable runner is the final cleanup boundary.
 No production logs or secret files are uploaded as workflow artifacts. Child-tool
 output is suppressed to avoid credential-bearing diagnostics. Removing identifiers
 from the current repository tree does not erase Git history, prior logs, workflow
@@ -129,8 +154,9 @@ artifacts or previously published copies. Historical cleanup remains a separate
 operator decision.
 
 After permissions, inputs and protections are ready, set the **repository** variable
-`HERBIE_DEPLOY_MODE=manual`. Dispatch the workflow from current `main`, review its
-Verify result, then approve the production environment job. The helper supplies
+`HERBIE_DEPLOY_MODE=manual`. Dispatch the workflow from current `main`, approve
+the preflight environment access, and review its result followed by Verify.
+Approve the later deployment environment job when requested. The helper supplies
 the bundle through pinned Wrangler's `deploy --secrets-file` support, so the first
 release does not need a separate desktop secret-upload command.
 
