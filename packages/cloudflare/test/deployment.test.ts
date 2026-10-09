@@ -12,7 +12,7 @@ import {DeploymentCommandError,DiagnosticTail,diagnosticLimit,deploymentDiagnost
 
 const privateKey=generateKeyPairSync('rsa',{modulusLength:1024}).privateKey.export({type:'pkcs8',format:'pem'}).toString();
 // These identifiers are synthetic fixtures, unrelated to any deployed account.
-const context={HERBIE_DEPLOY_REPOSITORY:'example/herbie',GITHUB_REPOSITORY:'example/herbie',GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',
+const context={HERBIE_ALLOWED_GITHUB_USER_ID:'7',HERBIE_DEPLOY_REPOSITORY:'example/herbie',GITHUB_REPOSITORY:'example/herbie',GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',
   GITHUB_SHA:'1111111111111111111111111111111111111111',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',HERBIE_DEPLOY_ENABLED:'true',
   CLOUDFLARE_ACCOUNT_ID:'00000000000000000000000000000000',CLOUDFLARE_API_TOKEN:'test-only-token',
   HERBIE_PUBLIC_URL:'https://herbie-service.synthetic-fixture.workers.dev',HERBIE_SUPABASE_PROJECT_REF:'aaaaaaaaaaaaaaaaaaaa',
@@ -80,7 +80,7 @@ test('approved preparation bundles only runtime secrets and forces a unique disa
   assert.equal(typeof secrets.HERBIE_RUNTIME_SECRETS,'string');
   assert.ok(typeof secrets.HERBIE_RUNTIME_SECRETS==='string');
   const runtime:unknown=JSON.parse(secrets.HERBIE_RUNTIME_SECRETS);
-  assert.deepEqual(runtime,{DATABASE_URL:context.HERBIE_DATABASE_URL,HERBIE_CREDENTIAL_KEY:context.HERBIE_CREDENTIAL_KEY,
+  assert.deepEqual(runtime,{HERBIE_ALLOWED_GITHUB_USER_ID:'7',DATABASE_URL:context.HERBIE_DATABASE_URL,HERBIE_CREDENTIAL_KEY:context.HERBIE_CREDENTIAL_KEY,
     GITHUB_APP_ID:'12345',GITHUB_CLIENT_ID:'Iv1.example',GITHUB_CLIENT_SECRET:'test-only-client-secret',
     GITHUB_PRIVATE_KEY:privateKey,GITHUB_WEBHOOK_SECRET:'test-only-webhook-secret'});
   assert.equal(prepared.revision,`${context.GITHUB_SHA}-123-1`);
@@ -124,7 +124,7 @@ test('native dependency-free preflight reports all missing credentials and fails
 
 test('optional CA may be empty, but supplied malformed fields are collected with safe diagnostics',()=>{
   assert.doesNotThrow(()=>prepareDeployment({...context,HERBIE_DATABASE_CA:''},config,'/repo/packages/cloudflare'));
-  const changes={HERBIE_DATABASE_CA:'canary-invalid-cert',HERBIE_GITHUB_APP_ID:'0',HERBIE_CREDENTIAL_KEY:'canary-bad-base64',
+  const changes={HERBIE_ALLOWED_GITHUB_USER_ID:'canary-owner',HERBIE_DATABASE_CA:'canary-invalid-cert',HERBIE_GITHUB_APP_ID:'0',HERBIE_CREDENTIAL_KEY:'canary-bad-base64',
     HERBIE_GITHUB_CLIENT_ID:' canary-client',HERBIE_GITHUB_WEBHOOK_SECRET:'canary\nsecret',HERBIE_PUBLIC_URL:context.HERBIE_PUBLIC_URL+'/',
     HERBIE_SUPABASE_PROJECT_REF:'canary-project',HERBIE_SUPABASE_POOLER_HOST:'canary-host',GITHUB_SHA:'canary-sha'};
   assert.throws(()=>prepareDeployment({...context,...changes},config,'/repo/packages/cloudflare'),error=>{
