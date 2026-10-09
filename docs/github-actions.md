@@ -26,9 +26,20 @@ Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 
 | Value | Deployment behavior after Verify succeeds |
 | --- | --- |
-| Missing or any value other than those below | No deployment |
+| Missing or invalid | Manual runs on `main` fail immediately; other runs verify without deployment |
+| `disabled` | Verify only; manual runs on `main` show an explicit no-deployment notice |
 | `manual` | Only **Run workflow**, selecting branch `main` |
 | `automatic` | Pushes to `main` and manual runs on `main` |
+
+Manual dispatch on `main` first runs **Validate manual deployment mode**, without
+production environment access or secrets. A missing or invalid repository variable
+fails this job and blocks Verify and deployment. The accepted values are exactly
+`automatic`, `manual` and `disabled` (case-sensitive, no surrounding whitespace).
+Explicit `disabled` succeeds with a notice, then runs Verify without deploying.
+PRs, pushes, and dispatches outside `main` skip this mode check; their existing
+mode gates and secretless verification behavior remain unchanged. In particular,
+a push in `manual` mode verifies without deploying, while `automatic` on `main`
+continues through production approval, configuration preflight and full Verify.
 
 For a deployment-intended run, preflight runs before Verify, dependency
 installation, browser setup or image building. It checks out the exact run SHA
