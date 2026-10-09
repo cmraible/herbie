@@ -3,7 +3,7 @@ import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {prepareDeployment,waitForDeployment} from './deployment.js';
+import {DeploymentConfigurationError,prepareDeployment,waitForDeployment} from './deployment.js';
 
 const directory=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const controller=new AbortController();
@@ -44,7 +44,8 @@ try{
   phase='new-container health verification';
   await waitForDeployment(prepared.origin,prepared.revision,{signal:controller.signal});
   console.log(`Verified disabled production release ${prepared.revision}.`);
-}catch{
+}catch(error){
+  if(error instanceof DeploymentConfigurationError)console.error(error.message);
   console.error(`Production ${phase} failed or was refused. Check approved inputs, current main and Cloudflare deployment state. No raw tool output was logged.`);
   process.exitCode=1;
 }finally{
