@@ -39,7 +39,7 @@ export async function startCliConsentFixture(database:string){
   const githubAddress=githubServer.address();if(!githubAddress||typeof githubAddress==='string')throw new Error('Expected local GitHub fixture address');
   const githubOrigin=`http://127.0.0.1:${githubAddress.port}`;
   const github=createGithub({appId:'fixture',clientId:'fixture',clientSecret:'fixture',privateKey:'never-used-by-OAuth-fixture',callbackUrl:'https://herbie.example/api/auth/callback',webhookSecret:'fixture'}, {api:githubOrigin,oauth:githubOrigin});
-  const auth=createAuth({mode:'live',publicUrl:'https://herbie.example',credentialKey:Buffer.alloc(32,3).toString('base64')},new PgAuthStore(pool),github);
+  const auth=createAuth({mode:'live',allowedGithubUserId:'7',publicUrl:'https://herbie.example',credentialKey:Buffer.alloc(32,3).toString('base64')},new PgAuthStore(pool),github);
   application=createApiServer({store,auth,adapters:{...createDemoAdapters(),mode:'live'},publicUrl:origin});
   return {origin,async close(){
     await Promise.all([server,githubServer].map(active=>new Promise<void>((resolve,reject)=>active.close(error=>error?reject(error):resolve()))));

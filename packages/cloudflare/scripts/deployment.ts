@@ -63,7 +63,7 @@ export function prepareDeployment(environment:Environment,input:unknown,director
   }
   const account=required(environment,'CLOUDFLARE_ACCOUNT_ID'),origin=required(environment,'HERBIE_PUBLIC_URL');
   const revision=`${required(environment,'GITHUB_SHA')}-${required(environment,'GITHUB_RUN_ID')}-${required(environment,'GITHUB_RUN_ATTEMPT')}`;
-  const runtime={DATABASE_URL:required(environment,'HERBIE_DATABASE_URL'),HERBIE_CREDENTIAL_KEY:required(environment,'HERBIE_CREDENTIAL_KEY'),
+  const runtime={HERBIE_ALLOWED_GITHUB_USER_ID:required(environment,'HERBIE_ALLOWED_GITHUB_USER_ID'),DATABASE_URL:required(environment,'HERBIE_DATABASE_URL'),HERBIE_CREDENTIAL_KEY:required(environment,'HERBIE_CREDENTIAL_KEY'),
     GITHUB_APP_ID:required(environment,'HERBIE_GITHUB_APP_ID'),GITHUB_CLIENT_ID:required(environment,'HERBIE_GITHUB_CLIENT_ID'),
     GITHUB_CLIENT_SECRET:required(environment,'HERBIE_GITHUB_CLIENT_SECRET'),GITHUB_PRIVATE_KEY:required(environment,'HERBIE_GITHUB_PRIVATE_KEY'),
     GITHUB_WEBHOOK_SECRET:required(environment,'HERBIE_GITHUB_WEBHOOK_SECRET'),
@@ -109,6 +109,7 @@ export function validateDeploymentEnvironment(environment:Environment){
       &&!url.hash&&[...url.searchParams].every(([name,value])=>name==='sslmode'&&value==='verify-full');
   },'expected session URL matching HERBIE_SUPABASE_PROJECT_REF and HERBIE_SUPABASE_POOLER_HOST, port 5432, database postgres');
   check('HERBIE_CREDENTIAL_KEY',v=>{const key=Buffer.from(v,'base64');return key.length===32&&key.toString('base64')===v;},'expected canonical base64 for 32 bytes');
+  check('HERBIE_ALLOWED_GITHUB_USER_ID',v=>line(v)&&/^[1-9][0-9]*$/.test(v),'expected positive numeric GitHub account ID');
   check('HERBIE_GITHUB_APP_ID',v=>/^[1-9]\d*$/.test(v),'expected positive numeric App ID');
   check('HERBIE_GITHUB_PRIVATE_KEY',v=>v.includes('-----BEGIN ')&&createPrivateKey(v).asymmetricKeyType==='rsa','expected RSA private-key PEM with actual newlines');
   check('HERBIE_DATABASE_CA',v=>{new X509Certificate(v);return true;},'expected certificate PEM',true);

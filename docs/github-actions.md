@@ -123,6 +123,7 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
 | `HERBIE_GITHUB_CLIENT_SECRET` | App OAuth client secret |
 | `HERBIE_GITHUB_PRIVATE_KEY` | App RSA private-key PEM, with actual newlines |
 | `HERBIE_GITHUB_WEBHOOK_SECRET` | App webhook secret |
+| `HERBIE_ALLOWED_GITHUB_USER_ID` | Required immutable numeric GitHub ID of the sole permitted owner; verify with the authenticated GitHub profile |
 | `HERBIE_DATABASE_CA` | Optional explicit database CA PEM; overrides the bundled Supabase CA fallback |
 
 Every angle-bracketed value above is a synthetic placeholder, not a usable account
@@ -228,3 +229,22 @@ are recorded in `packages/service/src/supabase-ca.ts`; it expires April 26, 2031
 When Supabase rotates this CA, verify the replacement against the official
 [dashboard download](https://supabase.com/docs/guides/platform/ssl-enforcement)
 before updating the certificate and fingerprint test.
+
+
+### Owner-only access
+
+Set the private production environment secret `HERBIE_ALLOWED_GITHUB_USER_ID`
+before deploying this version. Obtain the immutable numeric ID from the owner's
+authenticated GitHub profile; do not use a login name or publish the ID in code,
+documentation, logs, or fixtures. No additional GitHub permission is needed.
+Preflight and live startup fail closed if this setting is missing or malformed.
+
+Only that account can complete browser OAuth or CLI consent, retrieve a completed
+CLI login token, use an existing cookie/bearer session, or release a stored GitHub
+credential to a worker. The account ID is checked on every authenticated request,
+so existing sessions belonging to another account stop working once the new
+service revision is active. A GitHub login rename does not change access. Old
+session/credential records are not deleted. Demo authentication remains local and
+unchanged; public assets, health, and signed GitHub webhooks retain their existing
+access rules. Deployment readiness must confirm the new container revision before
+considering the restriction active.

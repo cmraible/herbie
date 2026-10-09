@@ -59,7 +59,7 @@ async function authFixture(t:TestContext) {
   t.after(async()=>{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
   await migrateAuth(pool);
   const config = {publicUrl:'https://herbie.example',credentialKey:Buffer.alloc(32,1).toString('base64')};
-  const restart = ()=>createAuth({...config,mode:'live'},new PgAuthStore(pool),github);
+  const restart = (allowedGithubUserId='7')=>createAuth({...config,allowedGithubUserId,mode:'live'},new PgAuthStore(pool),github);
   const auth = restart();
   async function pendingLogin() {
     const start=await auth.start('cli');
@@ -225,4 +225,32 @@ test('expired CLI browser approval cannot issue credentials even with the matchi
   await assert.rejects(auth.decideCli(login.approvalToken,login.csrfToken,'approve',login.userCode),error=>error instanceof AuthError&&error.status===400);
   assert.deepEqual(await auth.poll(login.pollToken),{status:'expired'});
   await assert.rejects(auth.userToken('7'),error=>error instanceof AuthError&&error.status===401);
+});
+
+
+test('owner policy rejects OAuth and pending CLI grants and invalidates existing sessions and completed polls',async t=>{
+  if(!process.env.HERBIE_TEST_DATABASE_URL){t.skip('Set HERBIE_TEST_DATABASE_URL');return;}
+  const {auth,restart,pendingLogin,pool}=await authFixture(t);
+  const restricted=restart('8');
+  for(const client of ['web','cli'] as const){
+    const start=await restricted.start(client);
+    const state=new URL(start.url).searchParams.get('state');assert.ok(state);
+    await assert.rejects(restricted.callback('code',state,start.browserState),{status:403,message:'Access is restricted to the configured owner'});
+  }
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM auth_users')).rows[0].count,0);
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM auth_pending_cli')).rows[0].count,0);
+  const pending=await pendingLogin();
+  await assert.rejects(restricted.pendingCli(pending.approvalToken),{status:403});
+  await assert.rejects(restricted.decideCli(pending.approvalToken,pending.csrfToken,'approve',pending.userCode),{status:403});
+  assert.equal((await pool.query('SELECT count(*)::int AS count FROM auth_sessions')).rows[0].count,0);
+  await auth.decideCli(pending.approvalToken,pending.csrfToken,'approve',pending.userCode);
+  assert.deepEqual(await restricted.poll(pending.pollToken),{status:'rejected'});
+  const start=await auth.start('web');const state=new URL(start.url).searchParams.get('state');assert.ok(state);
+  const callback=await auth.callback('code',state,start.browserState);assert.equal(callback.client,'web');
+  if(callback.client!=='web')throw new Error('Expected web session');
+  assert.ok(await auth.session(callback.token));
+  assert.equal(await restricted.session(callback.token),null);
+  await assert.rejects(restricted.userToken('7'),{status:403});
+  await pool.query("UPDATE auth_users SET login='renamed-owner' WHERE id='7'");
+  assert.equal((await auth.session(callback.token))?.user.login,'renamed-owner');
 });

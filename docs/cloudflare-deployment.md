@@ -82,14 +82,17 @@ encryption key stable unless performing a separately planned data migration.
    endpoint on port 5432, with URL-encoded password and verified TLS. Recognized
    Supabase database hosts use the bundled public Supabase CA unless an explicit
    CA override is supplied. The runtime pool is bounded to five.
-4. Approved GitHub App ID, client ID, client secret, private key and webhook
+4. A private `HERBIE_ALLOWED_GITHUB_USER_ID` setting containing the verified
+   immutable numeric ID of the sole permitted GitHub owner. Live startup fails
+   closed without it; nonowner OAuth, CLI grants and existing sessions are denied.
+5. Approved GitHub App ID, client ID, client secret, private key and webhook
    secret. Callback: `<HERBIE_PUBLIC_URL>/api/auth/callback`.
    Webhook: `<HERBIE_PUBLIC_URL>/api/webhooks/github`. Replace the origin placeholder
    with the exact private `HERBIE_PUBLIC_URL` value.
    Installation scope/permissions are described in [service operations](service.md).
-5. A stable 32-byte base64 credential-encryption key. Store it and the database
+6. A stable 32-byte base64 credential-encryption key. Store it and the database
    backup together in the operator's secret/backup system.
-6. Only before enabling execution: approved Daytona API key, the existing
+7. Only before enabling execution: approved Daytona API key, the existing
    organization OpenAI secret **name**, optional approved API URL/snapshot, and
    a separately approved bounded live run. No raw OpenAI key goes into this bundle.
 
