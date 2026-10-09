@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { DaytonaAttemptChanges } from './daytona-attempt.js';
+import { MAX_PATCH_BYTES } from './artifact-limits.js';
 
 type CreatePullRequest = (request: {
   repository: string; base: string; head: string; title: string; body: string; draft: true;
@@ -41,8 +42,9 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
   }
   const remoteUrl = `https://github.com/${repository}.git`;
   const { verification, baseCommit } = changes;
+  if (changes.patch.length > MAX_PATCH_BYTES) throw new Error('Repository patch exceeds its byte limit');
   const patch = Buffer.from(changes.patch);
-  if (!verification || verification.goalCompleted !== true || verification.sandboxDeleted !== true
+  if (!verification || verification.version !== 2 || verification.goalCompleted !== true || verification.sandboxDeleted !== true
     || changes.testResult?.exitCode !== 0 || !verification.testCommand.length
     || verification.baseCommit !== baseCommit || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(baseCommit)
     || ![remoteUrl, remoteUrl.slice(0, -4)].includes(verification.repoUrl)

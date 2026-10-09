@@ -12,7 +12,7 @@ const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.to
 const artifactSchema = z.object({
   baseCommit: z.string(), patchBase64: z.string(),
   testResult: z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string() }).optional(),
-  verification: z.object({ repoUrl: z.string(), baseCommit: z.string(), patchSha256: z.string(), testCommand: z.array(z.string()), goalCompleted: z.literal(true), sandboxDeleted: z.literal(true) }).optional(),
+  verification: z.object({ version: z.literal(2).optional(), repoUrl: z.string(), baseCommit: z.string(), patchSha256: z.string(), testCommand: z.array(z.string()), goalCompleted: z.literal(true), sandboxDeleted: z.literal(true) }).optional(),
 });
 const jobRow = z.object({
   id: z.string().uuid(), goal_id: z.string().uuid(), branch: z.string(), cycle: z.number().int(),

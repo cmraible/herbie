@@ -230,7 +230,10 @@ sandbox. The Node/Codex archive digests are verified before extraction. This reu
 the runtime pins from the successful compatibility probe; it does not build a custom
 reusable snapshot or install repository dependencies. An optional snapshot must be
 a root-accessible Ubuntu-compatible runtime with Node 24+, Git, Codex and `runuser`.
-The adapter configures a dedicated unprivileged `compat` user for both Codex and tests.
+The adapter configures separate unprivileged users: `compat` for Codex and
+`herbie-verify` for repository verification. The verification supervisor runs as
+root with protected scripts, input and result files; it drops privileges for
+every Git operation and test command.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
@@ -276,15 +279,19 @@ The runner records HEAD before Codex runs, then stages the final checkout and cr
 a binary-capable Git patch against that original commit. This includes Codex commits,
 tracked edits/deletions, file modes, and new non-ignored files; no changes yields an
 empty patch. `patch` is a Buffer: base64 transport preserves binary and non-UTF-8 patch
-bytes. The artifact is downloaded into host memory before deletion. If deletion
+bytes. Streaming downloads stop at a bounded JSON envelope before parsing; the
+decoded patch must be at most 8 MiB. The artifact is downloaded into host memory
+before deletion. If deletion
 fails, the adapter still rejects and exposes the retrieved artifact on
 `DaytonaAttemptError.changes`. The caller owns durable storage of returned/recovered
 artifacts. Goal, extraction, change-artifact download, or malformed-artifact failures
 reject and still attempt deletion; they do not provide a partial patch.
 
-With `testCommand`, the adapter uploads the recovered patch bytes back into the same
-sandbox. A separate runner creates a clean, detached Git worktree at `baseCommit`,
-applies the patch, and runs the supplied executable and literal arguments there,
+With `testCommand`, the adapter uploads the recovered patch bytes into a new
+root-owned directory in the same sandbox. It independently clones the public
+repository at `baseCommit`, excluding the coding checkout's Git configuration,
+hooks and working files. A protected supervisor applies the patch and runs the
+supplied executable and literal arguments as `herbie-verify` in its private checkout,
 without an implicit shell. An empty patch tests the unchanged base. Repository code
 runs only in the disposable sandbox; the attempt adapter does not execute it on the host.
 The caller must choose the test command and ensure its dependencies are available;
@@ -296,14 +303,19 @@ A nonzero test exit rejects with the changes and completed result on
 `DaytonaAttemptError.changes`. Apply errors, missing executables, timeouts, and
 result-retrieval failures also reject while retaining the recovered changes. Test
 output is returned, not printed in phase reports. Each output stream has Node's
-default 1 MiB buffer limit; exceeding it fails verification. The command deadline
+1 MiB buffer limit; exceeding it fails verification. The host also bounds the
+streamed result JSON (including worst-case escaping) and validates decoded output
+sizes. The test process receives a private home and proxy/CA settings, without the
+coding process's OpenAI credential placeholder. The command deadline
 defaults to 60 seconds (configurable from 1–60,000 ms); the verifier has a 150-second
 sandbox execution deadline covering checkout, apply, and tests. Sandbox deletion
 still runs on every outcome and must be confirmed. Test-generated changes are not
 recaptured into the patch. After the goal, tests, and deletion all succeed, the host
 also attaches `verification` evidence binding the repository URL, base commit,
 SHA-256 of the patch bytes, and test command to confirmed goal completion and sandbox
-deletion. Untested attempts and recovered artifacts on errors lack this evidence.
+deletion. This evidence carries verification version 2; the publisher rejects
+older saved artifacts, which must be regenerated through protected verification.
+Untested attempts and recovered artifacts on errors lack this evidence.
 
 This preserves the final repository file state, not commit history or ignored files;
 submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
