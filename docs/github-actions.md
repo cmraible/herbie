@@ -28,10 +28,11 @@ Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 | `manual` | Only **Run workflow**, selecting branch `main` |
 | `automatic` | Pushes to `main` and manual runs on `main` |
 
-Production additionally requires the exact repository `cmraible/herbie`, current
-`main`, and the `production` environment's approval/protection rules. PRs, forks,
-tags and other branches cannot enter the deployment job. It uses a separate clean
-runner, no PR artifacts or dependency caches, and a read-only `GITHUB_TOKEN`.
+Production additionally requires current `main`, the `production` environment's
+approval/protection rules, and an exact repository match with the private
+`HERBIE_DEPLOY_REPOSITORY` secret. PRs, tags and other branches cannot deploy;
+forks do not inherit the production environment secrets. The job uses a separate
+clean runner, no PR artifacts or dependency caches, and a read-only `GITHUB_TOKEN`.
 There is no `pull_request_target`, `workflow_run`, `id-token: write`, repository
 write permission or model credential in the workflow.
 
@@ -48,10 +49,10 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
 
 ## One-time operator setup
 
-1. Confirm Workers Paid eligibility on account
-   `3e763a0e4e26f85d5bc3e5ea698faf06`. The approved $20/month incremental hosting
-   budget excludes AI/Daytona and is not a hard billing cap. A plan upgrade needs
-   separate approval if the account is not already eligible.
+1. Confirm Workers Paid eligibility on the operator-selected Cloudflare account.
+   The approved $20/month incremental hosting budget excludes AI/Daytona and is
+   not a hard billing cap. A plan upgrade needs separate approval if the account
+   is not already eligible.
 2. Create GitHub environment **production**. Select deployment **branch `main`
    only**, with no tag rule. Add the intended human reviewer and disable admin
    bypass. With one operator, do not prevent self-review unless another reviewer
@@ -62,8 +63,9 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
    Dockerfile, dependency pins and runtime changes. These settings are operator
    actions; checking in this workflow does not configure GitHub protections.
 4. Create an **account-owned Cloudflare API token**, scoped only to the account
-   above. Initial creation requires **Workers Admin at Workers product scope**
-   plus **Containers Edit** (API catalog: **Containers Write**). Once
+   selected for this deployment. Initial creation requires **Workers Admin at
+   Workers product scope** plus **Containers Edit** (API catalog: **Containers
+   Write**). Once
    `herbie-service` exists, replace the bootstrap token with **Workers Editor
    scoped to that Worker**, retaining account-scoped Containers Edit. No DNS,
    Zone Workers Routes, R2, D1, KV, Pages or separate Images permission is needed.
@@ -71,24 +73,33 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
    deployment. Never reuse a broad personal/global API key.
 5. Enter the following values directly in the **production environment** settings.
    The user handles sensitive transfer; do not put values in chat, source, issues,
-   workflow inputs or shell arguments. Use the existing Herbie Supabase project's
-   password; creating this workflow does not reset it or create a GitHub App.
-
-| Environment variable | Value |
-| --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | `3e763a0e4e26f85d5bc3e5ea698faf06` |
-| `HERBIE_GITHUB_APP_ID` | Approved Herbie GitHub App numeric ID |
-| `HERBIE_GITHUB_CLIENT_ID` | That App's OAuth client ID |
+   workflow inputs or shell arguments. Account and project identifiers belong in
+   **secrets even when they are not authentication credentials**. Use the selected
+   Herbie Supabase project's password; creating this workflow does not reset it or
+   create a GitHub App. Keep the environment URL unset so an account-specific
+   application origin is not recorded in the public workflow.
 
 | Environment secret | Value |
 | --- | --- |
+| `HERBIE_DEPLOY_REPOSITORY` | Exact expected GitHub `owner/repository`, such as the synthetic placeholder `<github-owner>/<repository>` |
+| `CLOUDFLARE_ACCOUNT_ID` | The selected account ID; replace `<cloudflare-account-id>` privately |
+| `HERBIE_PUBLIC_URL` | Exact HTTPS Worker origin, such as `https://herbie-service.<workers-subdomain>.workers.dev`, with no path, query or fragment |
+| `HERBIE_SUPABASE_PROJECT_REF` | The selected project's reference; replace `<supabase-project-ref>` privately |
+| `HERBIE_SUPABASE_POOLER_HOST` | Exact session pooler hostname from that project's connection settings; replace `<session-pooler-host>` privately, without a scheme, port or path |
+| `HERBIE_GITHUB_APP_ID` | Approved GitHub App numeric ID |
+| `HERBIE_GITHUB_CLIENT_ID` | That App's OAuth client ID |
 | `CLOUDFLARE_API_TOKEN` | The scoped deployment token described above |
-| `HERBIE_DATABASE_URL` | Exact **session** pooler URL for `bhzabpglsjrqvhinishw`, username `postgres.bhzabpglsjrqvhinishw`, port 5432, database `postgres`; URL-encode its password |
+| `HERBIE_DATABASE_URL` | Exact **session** pooler URL, using username `postgres.<supabase-project-ref>`, the selected session pooler hostname, port 5432 and database `postgres`; URL-encode its password |
 | `HERBIE_CREDENTIAL_KEY` | Stable 32-byte base64 encryption key, generated once through the approved secret-management process; keep with database backups |
 | `HERBIE_GITHUB_CLIENT_SECRET` | App OAuth client secret |
 | `HERBIE_GITHUB_PRIVATE_KEY` | App RSA private-key PEM, with actual newlines |
 | `HERBIE_GITHUB_WEBHOOK_SECRET` | App webhook secret |
 | `HERBIE_DATABASE_CA` | Optional Supabase public CA PEM; omit when system trust suffices |
+
+Every angle-bracketed value above is a synthetic placeholder, not a usable account
+or project identifier. Do not commit the substituted values. `HERBIE_DEPLOY_MODE`
+remains a nonidentifying **repository variable**; the identifying deployment inputs
+in this table are **production environment secrets**, not public variables.
 
 GitHub App permissions, callback, webhook and repository installation are in
 [service setup](service.md) and [the deployment runbook](cloudflare-deployment.md).
@@ -99,7 +110,12 @@ The workflow deliberately has no Daytona or OpenAI inputs.
 
 GitHub stores sensitive values separately so its masking does not depend on a
 single structured JSON secret. Only the deployment step receives them. The Node
-helper validates required inputs before any Cloudflare write, constructs the
+helper validates required inputs before any Cloudflare write. It checks the
+running repository against `HERBIE_DEPLOY_REPOSITORY`, the expected Worker name
+`herbie-service` against `HERBIE_PUBLIC_URL`, the database username against
+`HERBIE_SUPABASE_PROJECT_REF`, and the exact database hostname against
+`HERBIE_SUPABASE_POOLER_HOST`. These private comparisons retain the deployment
+target checks without hardcoding an account in source. The helper constructs the
 allowlisted `HERBIE_RUNTIME_SECRETS` JSON bundle, and writes Wrangler's secrets
 file with mode **0600** in a private temporary directory outside the Docker context.
 Runtime credentials are excluded from child-tool environments and build arguments.
@@ -107,7 +123,10 @@ The Cloudflare token reaches Wrangler only; transient registry credentials and
 Wrangler logs use the same temporary directory. Files are removed on completion
 or handled interruption; the disposable runner is the final cleanup boundary.
 No production logs or secret files are uploaded as workflow artifacts. Child-tool
-output is suppressed to avoid credential-bearing diagnostics.
+output is suppressed to avoid credential-bearing diagnostics. Removing identifiers
+from the current repository tree does not erase Git history, prior logs, workflow
+artifacts or previously published copies. Historical cleanup remains a separate
+operator decision.
 
 After permissions, inputs and protections are ready, set the **repository** variable
 `HERBIE_DEPLOY_MODE=manual`. Dispatch the workflow from current `main`, review its
