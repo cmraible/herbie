@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath,URL} from 'node:url';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,mkdirSync,readdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {generateKeyPairSync} from 'node:crypto';
 import {createServer} from 'node:http';
 import test from 'node:test';
 import {prepareDeployment,waitForDeployment} from '../scripts/deployment.js';
+import {DeploymentCommandError,DiagnosticTail,diagnosticLimit,deploymentDiagnostic,readDiagnosticTail,runDeploymentCommand} from '../scripts/diagnostics.js';
 
 const privateKey=generateKeyPairSync('rsa',{modulusLength:1024}).privateKey.export({type:'pkcs8',format:'pem'}).toString();
 // These identifiers are synthetic fixtures, unrelated to any deployed account.
@@ -177,4 +178,88 @@ test('manual and automatic modes allow a manual run to continue to its remaining
     assert.match(result.stdout,/preflight and full Verify are still required/);
     assert.equal(result.stderr,'');
   }
+});
+
+test('diagnostic tails retain at most 64 KiB across large chunks and split markers',()=>{
+  const tail=new DiagnosticTail();
+  tail.append(Buffer.from('discard-canary'.repeat(diagnosticLimit)));
+  assert.equal(tail.byteLength,65536);
+  tail.append(Buffer.alloc(diagnosticLimit,120));
+  tail.append(Buffer.from('Uploaded private-canary\nLogin failed with co'));
+  tail.append(Buffer.from('de: 1\n-----BEGIN PRIVATE KEY-----\nprivate-canary-body\n-----END PRIVATE KEY-----'));
+  assert.equal(tail.byteLength,65536);
+  assert.ok(!tail.text().includes('discard-canary'));
+  assert.equal(deploymentDiagnostic([tail.text()],1,null),
+    'Deployment diagnostic: stage=container-registry-login; category=registry-login; exit=1; signal=none; codes=none.');
+});
+
+test('unknown diagnostic content never reaches public output, even with injected annotations or nonallowlisted codes',()=>{
+  const text='secret-canary\n::error::https://private-canary.invalid/path\n'+
+    '-----BEGIN PRIVATE KEY-----\nprivate-canary-body\n-----END PRIVATE KEY-----\n'+
+    '{"account":"private-canary-account","project":"private-canary-project"} [code: 1234567890]';
+  assert.equal(deploymentDiagnostic([text],987654321,'private-canary-signal'),
+    'Deployment diagnostic: stage=unknown; category=unclassified; exit=unknown; signal=other; codes=none.');
+});
+
+test('recognized API diagnostics report only fixed labels and exact allowlisted code tokens',()=>{
+  const text='Uploaded private-canary\n\u001b[31m[ERROR] A request to the Cloudflare API (https://private-canary.invalid) failed.\u001b[0m\n'+
+    'private-canary-token [code: 10000] [code: 10021] [code: 100146] [code: 100000] [code: 987654321]';
+  assert.equal(deploymentDiagnostic([text],7,null),
+    'Deployment diagnostic: stage=worker-upload-complete; category=cloudflare-api; exit=7; signal=none; codes=10000,10021,100146.');
+});
+
+test('private log reads use a bounded tail and tolerate missing logs without echoing paths',async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'herbie-diagnostic-test-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const path=join(directory,'private-canary.log');
+  writeFileSync(path,'discard-canary\n'+'x'.repeat(2*diagnosticLimit)+'\nError creating application: private-canary');
+  const text=await readDiagnosticTail(path);
+  assert.equal(Buffer.byteLength(text),65536);
+  assert.ok(!text.includes('discard-canary'));
+  assert.equal(deploymentDiagnostic([text],1,null),
+    'Deployment diagnostic: stage=container-application-create; category=application-create; exit=1; signal=none; codes=none.');
+  assert.equal(await readDiagnosticTail(join(directory,'private-canary-missing')),'');
+});
+
+test('deployment subprocess drains stdout and stderr while retaining only bounded diagnostic tails',async()=>{
+  const script=`process.stdout.write('discard-canary'.repeat(20000)+'\\nUploaded private-canary\\n');
+    process.stderr.write('discard-canary'.repeat(20000)+'\\nError creating application: private-canary-token\\n',()=>{process.exitCode=13;});`;
+  await assert.rejects(runDeploymentCommand(process.execPath,['-e',script],{
+    cwd:process.cwd(),env:{},logPath:'/nonexistent/private-canary.log'}),error=>{
+    assert.ok(error instanceof DeploymentCommandError);
+    assert.equal(error.message,'Deployment diagnostic: stage=container-application-create; category=application-create; exit=13; signal=none; codes=none.');
+    assert.doesNotMatch(error.stack??'',/discard-canary|private-canary/);
+    return true;
+  });
+});
+
+test('deployment subprocess reports spawn failure and termination without raw errors',async()=>{
+  await assert.rejects(runDeploymentCommand('/nonexistent/private-canary-binary',[],{
+    cwd:process.cwd(),env:{},logPath:'/nonexistent/private-canary.log'}),
+    /stage=unknown; category=subprocess-start; exit=unknown; signal=none; codes=none/);
+  await assert.rejects(runDeploymentCommand(process.execPath,['-e',"process.kill(process.pid,'SIGTERM')"],{
+    cwd:process.cwd(),env:{},logPath:'/nonexistent/private-canary.log'}),
+    /stage=unknown; category=unclassified; exit=unknown; signal=SIGTERM; codes=none/);
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(runDeploymentCommand(process.execPath,['-e','setInterval(()=>{},1000)'],{
+    cwd:process.cwd(),env:{},signal:controller.signal,logPath:'/nonexistent/private-canary.log'}),/category=subprocess-interrupted/);
+});
+
+test('deploy entrypoint classifies private Wrangler log before cleaning all temporary secrets and diagnostics',t=>{
+  const directory=mkdtempSync(join(tmpdir(),'herbie-diagnostic-test-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const bin=join(directory,'bin');mkdirSync(bin);
+  writeFileSync(join(bin,'git'),`#!/bin/sh\nprintf '%s' '${context.GITHUB_SHA}'\n`,{mode:0o700});
+  writeFileSync(join(bin,'pnpm'),`#!/bin/sh
+printf '%s\\n' 'Uploaded private-canary-worker' 'Exceeded account limits: private-canary-account' > "$WRANGLER_LOG_PATH"
+printf '%s\\n' 'private-canary-stdout'
+printf '%s\\n' '-----BEGIN PRIVATE KEY-----' 'private-canary-body' '-----END PRIVATE KEY-----' >&2
+exit 9
+`,{mode:0o700});
+  const result=spawnSync(process.execPath,['--import','tsx','packages/cloudflare/scripts/deploy.ts'],{
+    cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',env:{...context,PATH:bin,TMPDIR:directory}});
+  assert.equal(result.status,1);
+  assert.match(result.stderr,/Deployment diagnostic: stage=container-limits; category=account-limit; exit=9; signal=none; codes=none/);
+  assert.doesNotMatch(result.stdout+result.stderr,/private-canary|BEGIN PRIVATE|test-only|synthetic-fixture/);
+  assert.deepEqual(readdirSync(directory).filter(name=>name.startsWith('herbie-deploy-')),[]);
 });

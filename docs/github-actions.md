@@ -179,6 +179,17 @@ approval. Do not add execution credentials to bypass that gate.
 
 ## Failure and rotation
 
+A failed deployment subprocess now reports a fixed diagnostic stage/category,
+its exit code or signal, and recognized Cloudflare error codes from a small
+allowlist (`10000`, `10021`, `100146`). These are observations, not a guarantee of
+the root cause. Unknown errors remain `unclassified`; unfamiliar codes are omitted.
+The helper retains at most 64 KiB from each of stdout and stderr, and reads at
+most the final 64 KiB of its private Wrangler log after failure. It classifies
+known markers into fixed labels, rather than printing redacted raw messages.
+No captured text, response bodies, URLs, paths or identifying values are printed
+or uploaded. The private temporary log and secrets are removed after classification
+by the existing cleanup path. Missing/truncated logs may reduce diagnostic detail.
+
 An invalid/missing input fails before Cloudflare writes. A stale-main run is
 refused. A rollout/health failure marks the job failed. Deployment is not
 transactional: the new Worker can be active even if image publication or container
