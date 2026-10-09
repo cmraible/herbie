@@ -208,3 +208,18 @@ database authentication, TLS, connection timeout, or unknown. Categories use tru
 startup phases and recognized structured error codes, never message matching. Errors
 without a recognized type/code remain unknown; these labels are evidence, not proof
 that a particular credential or infrastructure setting is wrong.
+
+Hosted startup now reports fixed phases separately: configuration, database connection,
+private-schema protection, application migrations, authentication migrations, schema
+verification, authentication setup, adapter setup and HTTP listen. Each transition and
+failure includes monotonic elapsed times. A code-less database driver failure is still
+identified as a database connection failure by its phase. Only allowlisted SQLSTATE,
+network, TLS and local guard codes from up to four causes are printed; messages, stack
+traces, hostnames and connection values remain private. Cleanup errors cannot replace
+the first startup error.
+
+The hosted process has a separate 60-second startup watchdog, with a pending-phase
+summary every ten seconds. If startup or failed-start cleanup stalls, it reports the
+pending phase and exits nonzero, closing database sockets so uncommitted transactions
+can roll back. This does not replace or extend the deployment script's shared 180-second
+deadline. The watchdog is removed once the HTTP service is ready.
