@@ -6,9 +6,10 @@ operator completes the setup below; merging this workflow alone deploys nothing.
 
 ## What runs and when
 
-Every pull request and push to `main`, plus manual dispatch, is eligible for
-**Verify** on a fresh GitHub-hosted Ubuntu runner. Runs intended to deploy must
-first pass **Deployment configuration preflight**, described below. Verify
+Every pull request runs **Verify** on a fresh GitHub-hosted Ubuntu runner. Pushes
+to `main` do not run Verify: after a PR passes the required check and is merged,
+the push runs **Deployment configuration preflight** and deployment as separate
+jobs. Verify
 installs Node 24.19.0 and pnpm 10.34.6, uses
 the frozen lockfile, and runs build, strict typecheck, all unit/Postgres integration
 tests, compiled CLI integration, Chromium browser scenarios, local workerd checks,
@@ -24,31 +25,25 @@ Review dependency and image-pin updates through ordinary pull requests.
 
 Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 
-| Value | Deployment behavior after Verify succeeds |
+| Value | Deployment behavior |
 | --- | --- |
-| Missing or invalid | Manual runs on `main` fail immediately; other runs verify without deployment |
-| `disabled` | Verify only; manual runs on `main` show an explicit no-deployment notice |
-| `manual` | Only **Run workflow**, selecting branch `main` |
-| `automatic` | Pushes to `main` and manual runs on `main` |
+| Missing or invalid | PRs still verify; pushes to `main` skip deployment |
+| `disabled` | PRs verify; pushes to `main` skip deployment |
+| `automatic` | Pushes to `main` run preflight and deploy; PRs run Verify only |
 
-Manual dispatch on `main` first runs **Validate manual deployment mode**, without
-production environment access or secrets. A missing or invalid repository variable
-fails this job and blocks Verify and deployment. The accepted values are exactly
-`automatic`, `manual` and `disabled` (case-sensitive, no surrounding whitespace).
-Explicit `disabled` succeeds with a notice, then runs Verify without deploying.
-PRs, pushes, and dispatches outside `main` skip this mode check; their existing
-mode gates and secretless verification behavior remain unchanged. In particular,
-a push in `manual` mode verifies without deploying, while `automatic` on `main`
-continues through production approval, configuration preflight and full Verify.
+There is no manual dispatch. This keeps Verify scoped to the proposed PR commit
+and avoids rerunning it on the merge commit. Set the variable to `automatic` to
+deploy every protected push to `main`; `disabled` pauses deployments while PR
+verification continues.
 
-For a deployment-intended run, preflight runs before Verify, dependency
-installation, browser setup or image building. It checks out the exact run SHA
+For a deployment-intended push, preflight runs before dependency installation
+or image building. It checks out the exact run SHA
 and uses Node 24's native TypeScript support to run
 `node packages/cloudflare/scripts/preflight.ts`, with no dependency installation.
 Missing or empty required inputs and malformed known-format inputs fail the job;
 diagnostics contain field names and sanitized reasons only. A failed preflight
-prevents Verify and deployment. PRs and runs outside the deployment mode gate
-skip preflight and retain ordinary Verify checks without production secrets.
+prevents deployment. PRs skip preflight and retain ordinary Verify checks without
+production secrets.
 
 Preflight uses the protected `production` environment, so its approval must happen
 before GitHub releases environment secrets. The later deployment job may require
@@ -57,7 +52,7 @@ as required inputs; preflight provides that runtime check. It validates shape,
 template configuration and internal consistency only. Opaque tokens receive
 nonempty, single-line format checks, not authentication. Preflight makes no
 provider authentication or connectivity check and proves no provider access. It
-also checks GitHub's current main SHA using a read-only request before Verify;
+also checks GitHub's current main SHA using a read-only request before deployment;
 unreachable GitHub or a stale run fails closed.
 
 Production additionally requires current `main`, the `production` environment's
@@ -91,9 +86,11 @@ ten minutes. An old image restarted with new configuration cannot pass readiness
    is available. Use **Selected branches and tags**, because **Protected branches
    only** allows all branches when no branch rules exist.
 3. Protect `main`: require a pull request and the **Verify** check, disallow force
-   pushes/deletion, and arrange human review of deployment workflows, helpers,
-   Dockerfile, dependency pins and runtime changes. These settings are operator
-   actions; checking in this workflow does not configure GitHub protections.
+   pushes/deletion and administrator bypass. This ensures only PRs with passing
+   verification can reach `main`, which then triggers deployment when mode is
+   `automatic`. Arrange human review of deployment workflows, helpers, Dockerfile,
+   dependency pins and runtime changes. These settings are operator actions;
+   checking in this workflow does not configure GitHub protections.
 4. Create an **account-owned Cloudflare API token**, scoped only to the account
    selected for this deployment. Initial creation requires **Workers Admin at
    Workers product scope** plus **Containers Edit** (API catalog: **Containers
@@ -165,14 +162,14 @@ artifacts or previously published copies. Historical cleanup remains a separate
 operator decision.
 
 After permissions, inputs and protections are ready, set the **repository** variable
-`HERBIE_DEPLOY_MODE=manual`. Dispatch the workflow from current `main`, approve
-the preflight environment access, and review its result followed by Verify.
-Approve the later deployment environment job when requested. The helper supplies
+`HERBIE_DEPLOY_MODE=automatic`. Merge a PR after **Verify** passes, then approve
+the preflight environment access and deployment environment job when requested.
+The helper supplies
 the bundle through pinned Wrangler's `deploy --secrets-file` support, so the first
 release does not need a separate desktop secret-upload command.
 
 Check login, repository access, disabled start/resume, actual Supabase TLS and
-security advisors before setting `HERBIE_DEPLOY_MODE=automatic`. Automatic mode
+security advisors before enabling automatic deployment. Automatic mode
 still observes configured environment approvals. Every release keeps execution
 off; enabling paid work requires a separately reviewed change and explicit run
 approval. Do not add execution credentials to bypass that gate.
