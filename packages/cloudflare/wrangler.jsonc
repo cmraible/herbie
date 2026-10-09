@@ -1,14 +1,13 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "herbie-service",
-  "account_id": "3e763a0e4e26f85d5bc3e5ea698faf06",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-08",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "HERBIE_PUBLIC_URL": "https://herbie-service.cmraible1.workers.dev",
+    "HERBIE_PUBLIC_URL": "https://herbie.example.invalid",
     "HERBIE_DEPLOYMENT_ID": "local",
     "HERBIE_EXECUTION_ENABLED": "false"
   },

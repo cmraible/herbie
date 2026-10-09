@@ -56,8 +56,8 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
           GIT_CONFIG_KEY_0:'http.https://github.com/.extraHeader',GIT_CONFIG_VALUE_0:`Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
           GIT_CONFIG_KEY_1:'credential.helper',GIT_CONFIG_VALUE_1:'',
           GIT_CONFIG_KEY_2:'core.hooksPath',GIT_CONFIG_VALUE_2:'/dev/null',
-          GIT_AUTHOR_NAME:'Herbie',GIT_AUTHOR_EMAIL:'herbie@users.noreply.github.com',
-          GIT_COMMITTER_NAME:'Herbie',GIT_COMMITTER_EMAIL:'herbie@users.noreply.github.com',
+          GIT_AUTHOR_NAME:'Herbie',GIT_AUTHOR_EMAIL:'herbie@example.invalid',
+          GIT_COMMITTER_NAME:'Herbie',GIT_COMMITTER_EMAIL:'herbie@example.invalid',
         },
       });
       const confirmed = await github.findPullRequest(token,access.repository,execution.branch);

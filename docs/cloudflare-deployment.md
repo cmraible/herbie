@@ -1,10 +1,11 @@
 # Cloudflare and Supabase deployment
 
-The deployment is a new personal application named `herbie-service`. Its checked-in
-Cloudflare account is `3e763a0e4e26f85d5bc3e5ea698faf06`, with planned origin
-`https://herbie-service.cmraible1.workers.dev`. It does not reuse or modify
-`herbie-agent-factory`, `websynth`, or Ghost resources. Review these identifiers
-before deploying from another account.
+The deployment uses a Worker named `herbie-service` in an operator-selected
+Cloudflare account and a separate Supabase project. Supply account, application
+origin, repository, project and GitHub App identifiers through private GitHub
+`production` environment secrets, as described in [GitHub Actions](github-actions.md).
+Examples in these runbooks use synthetic placeholders that must be replaced
+privately before deployment.
 
 ```mermaid
 flowchart LR
@@ -69,11 +70,11 @@ encryption key stable unless performing a separately planned data migration.
 
 ## Required resources and approved handoff
 
-1. A separate Herbie Supabase project in Chris's personal organization, with a
+1. A separate Herbie Supabase project in an operator-selected organization, with a
    suitable region, connection allowance, backup and availability policy. Follow
    [private database setup](supabase.md). Keep `herbie` out of exposed schemas;
    disable the Data API if nothing else uses it. No browser Supabase key is needed.
-2. Workers Paid eligibility and budget approval in the personal Cloudflare
+2. Workers Paid eligibility and budget approval in the selected Cloudflare
    account. Resources are one Worker/assets deployment, its Durable Object
    namespace, one container application/image, and one Cron trigger. No custom
    DNS zone, Hyperdrive, D1, R2, Queue, or external VM is required for this slice.
@@ -81,8 +82,9 @@ encryption key stable unless performing a separately planned data migration.
    endpoint on port 5432, with URL-encoded password and verified TLS. Supply the
    downloaded CA certificate if required. The runtime pool is bounded to five.
 4. Approved GitHub App ID, client ID, client secret, private key and webhook
-   secret. Callback: `https://herbie-service.cmraible1.workers.dev/api/auth/callback`.
-   Webhook: `https://herbie-service.cmraible1.workers.dev/api/webhooks/github`.
+   secret. Callback: `<HERBIE_PUBLIC_URL>/api/auth/callback`.
+   Webhook: `<HERBIE_PUBLIC_URL>/api/webhooks/github`. Replace the origin placeholder
+   with the exact private `HERBIE_PUBLIC_URL` value.
    Installation scope/permissions are described in [service operations](service.md).
 5. A stable 32-byte base64 credential-encryption key. Store it and the database
    backup together in the operator's secret/backup system.
@@ -129,9 +131,12 @@ pass it in arguments, or use Docker build arguments for secrets. The image revis
 is a public rollout marker and must never contain secret material.
 
 After the exact account, resource creation, credential transfer and deployment
-are approved, supply individual GitHub environment values and dispatch the workflow
-from `main`. Its helper constructs this bundle privately and passes a secrets file
-to Wrangler during the full deployment. No desktop authentication is required.
+are approved, supply the individual GitHub `production` environment secrets and
+dispatch the workflow from `main`. Identifying fields belong in secrets even when
+they are not authentication credentials. The nonidentifying repository variable
+`HERBIE_DEPLOY_MODE` controls the release mode. The deployment helper constructs
+this bundle privately and passes a secrets file to Wrangler during the full
+deployment. No desktop authentication is required.
 
 Keep execution disabled for the first deployment. Complete GitHub App setup and
 verify login, account/repository permissions, private database access, advisor
@@ -151,7 +156,10 @@ path for this fixed-image configuration.
 Invocation logs and traces are disabled because OAuth callback/polling URLs can
 contain sensitive values. Application logs contain only sanitized lifecycle and
 availability messages, not raw errors, request URLs, headers or environments.
-Review other account-level logging/export products separately.
+Review other account-level logging/export products separately. Removing identifiers
+from the current repository tree does not erase Git history, prior logs, workflow
+artifacts or previously published copies. Historical cleanup is a separate operator
+decision.
 
 At the published October 2026 prices, one continuously running `basic` instance
 (1 GiB RAM, 4 GB disk) uses approximately **$11.93 per 30-day month**, including

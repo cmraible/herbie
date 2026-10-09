@@ -62,7 +62,7 @@ jobs:
     name: Deploy disabled production service
     needs: verify
     if: >-
-      github.repository == 'cmraible/herbie' && github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (vars.HERBIE_DEPLOY_MODE == 'automatic' ||
         (vars.HERBIE_DEPLOY_MODE == 'manual' && github.event_name == 'workflow_dispatch'))
@@ -70,7 +70,6 @@ jobs:
     timeout-minutes: 30
     environment:
       name: production
-      url: https://herbie-service.cmraible1.workers.dev
     concurrency:
       group: herbie-production
       cancel-in-progress: false
@@ -94,10 +93,14 @@ jobs:
         run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
         env:
           HERBIE_DEPLOY_ENABLED: 'true'
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          HERBIE_DEPLOY_REPOSITORY: ${{ secrets.HERBIE_DEPLOY_REPOSITORY }}
+          HERBIE_PUBLIC_URL: ${{ secrets.HERBIE_PUBLIC_URL }}
+          HERBIE_SUPABASE_PROJECT_REF: ${{ secrets.HERBIE_SUPABASE_PROJECT_REF }}
+          HERBIE_SUPABASE_POOLER_HOST: ${{ secrets.HERBIE_SUPABASE_POOLER_HOST }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          HERBIE_GITHUB_APP_ID: ${{ vars.HERBIE_GITHUB_APP_ID }}
-          HERBIE_GITHUB_CLIENT_ID: ${{ vars.HERBIE_GITHUB_CLIENT_ID }}
+          HERBIE_GITHUB_APP_ID: ${{ secrets.HERBIE_GITHUB_APP_ID }}
+          HERBIE_GITHUB_CLIENT_ID: ${{ secrets.HERBIE_GITHUB_CLIENT_ID }}
           HERBIE_DATABASE_URL: ${{ secrets.HERBIE_DATABASE_URL }}
           HERBIE_CREDENTIAL_KEY: ${{ secrets.HERBIE_CREDENTIAL_KEY }}
           HERBIE_GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}

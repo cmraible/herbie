@@ -30,7 +30,7 @@ try{
   const input:unknown=JSON.parse(await readFile(join(directory,'wrangler.jsonc'),'utf8'));
   const prepared=prepareDeployment(process.env,input,directory);
   phase='current-main verification';
-  const latest=(await command('git',['ls-remote','https://github.com/cmraible/herbie.git','refs/heads/main'])).split(/\s+/)[0];
+  const latest=(await command('git',['ls-remote',prepared.repositoryUrl,'refs/heads/main'])).split(/\s+/)[0];
   if(latest!==process.env.GITHUB_SHA)throw new Error('Refusing a stale deployment; run the workflow on current main');
   temporary=await mkdtemp(join(tmpdir(),'herbie-deploy-'));
   const configPath=join(temporary,'wrangler.json'),secretsPath=join(temporary,'secrets.json');
@@ -42,7 +42,7 @@ try{
     {...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
       DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')});
   phase='new-container health verification';
-  await waitForDeployment('https://herbie-service.cmraible1.workers.dev',prepared.revision,{signal:controller.signal});
+  await waitForDeployment(prepared.origin,prepared.revision,{signal:controller.signal});
   console.log(`Verified disabled production release ${prepared.revision}.`);
 }catch{
   console.error(`Production ${phase} failed or was refused. Check approved inputs, current main and Cloudflare deployment state. No raw tool output was logged.`);
