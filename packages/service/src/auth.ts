@@ -28,7 +28,7 @@ export interface AuthStore {
   session(tokenHash:string):Promise<{user:User;expiresAt:Date;mode:'demo'|'live'}|null>;
   deleteSession(tokenHash:string):Promise<void>;
 }
-export interface AuthConfig {mode:'demo'|'live';publicUrl:string;credentialKey:string}
+export interface AuthConfig {mode:'demo'|'live';publicUrl:string;credentialKey:string;allowedGithubUserId?:string}
 export class AuthError extends Error {constructor(readonly status:number,message:string){super(message);}}
 
 const hash = (value:string)=>createHash('sha256').update(value).digest('hex');
@@ -39,6 +39,9 @@ function userCode() {
   return `${code.slice(0,4)}-${code.slice(4)}`;
 }
 export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
+  if(config.mode==='live'&&(!config.allowedGithubUserId||config.allowedGithubUserId.trim()!==config.allowedGithubUserId||!(/^[1-9][0-9]*$/).test(config.allowedGithubUserId)))throw new Error('HERBIE_ALLOWED_GITHUB_USER_ID must be a positive numeric GitHub account ID');
+  const allowed=(userId:string)=>config.mode!=='live'||userId===config.allowedGithubUserId;
+  function requireOwner(userId:string){if(!allowed(userId))throw new AuthError(403,'Access is restricted to the configured owner');}
   const key = Buffer.from(config.credentialKey,'base64');
   if (key.length!==32 || key.toString('base64')!==config.credentialKey) throw new Error('Credential key must be 32 bytes encoded as base64');
   const publicUrl = new URL(config.publicUrl);
@@ -59,6 +62,7 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
     return Buffer.concat([cipher.update(Buffer.from(encrypted,'base64url')),cipher.final()]).toString('utf8');
   }
   async function issue(user:User,expiresAt:Date) {
+    requireOwner(user.id);
     const token = secret();
     await store.createSession({tokenHash:hash(token),userId:user.id,expiresAt,mode:config.mode});
     return {token,session:{user,mode:config.mode}};
@@ -81,6 +85,7 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
       if (flow.client==='web' && (!browserState || hash(browserState)!==flow.browserHash)) throw new AuthError(400,'Authorization browser does not match; start login again');
       if (flow.client==='cli' && (!flow.pollHash || !flow.userCodeHash)) throw new AuthError(400,'CLI authorization is expired or invalid; start login again');
       const authorized = await github.authenticate(code,flow.verifier);
+      requireOwner(authorized.user.id);
       if (flow.client==='cli') {
         if (!flow.pollHash || !flow.userCodeHash) throw new AuthError(400,'Missing CLI authorization binding');
         const approvalToken = secret();
@@ -97,10 +102,14 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
       if (config.mode!=='live') throw new AuthError(400,'CLI authorization is unavailable');
       const pending = await store.pendingCli(hash(approvalToken));
       if (!pending || pending.expiresAt.getTime()<=Date.now()) throw new AuthError(400,'CLI authorization is expired or invalid; start login again');
+      requireOwner(pending.user.id);
       return {login:pending.user.login,expiresAt:pending.expiresAt,csrfToken:pending.csrfToken};
     },
     async decideCli(approvalToken:string,csrfToken:string,decision:'approve'|'reject',code?:string):Promise<{status:'approved'|'rejected'}> {
       if (config.mode!=='live') throw new AuthError(400,'CLI authorization is unavailable');
+      const pending=await store.pendingCli(hash(approvalToken));
+      if(!pending)throw new AuthError(400,'CLI authorization is expired or invalid; start login again');
+      requireOwner(pending.user.id);
       const token = secret();
       const outcome = await store.decideCli({approvalHash:hash(approvalToken),csrfToken,decision,
         userCodeHash:code ? hash(code.trim().toUpperCase()) : null,session:{tokenHash:hash(token),encryptedToken:encrypt(token)}});
@@ -110,12 +119,16 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
     async poll(token:string):Promise<{status:'pending'|'complete'|'expired'|'rejected';token?:string}> {
       if (!/^[\w-]{43}$/.test(token)) return {status:'expired'};
       const result = await store.takePoll(hash(token));
-      return result.status==='complete' ? {status:'complete',token:decrypt(result.encryptedToken)} : result;
+      if(result.status!=='complete')return result;
+      const sessionToken=decrypt(result.encryptedToken);
+      const session=await store.session(hash(sessionToken));
+      if(!session||session.mode!==config.mode||session.expiresAt.getTime()<=Date.now()||!allowed(session.user.id))return {status:'rejected'};
+      return {status:'complete',token:sessionToken};
     },
     async session(token:string):Promise<Session|null> {
       if (!/^[\w-]{43}$/.test(token)) return null;
       const session = await store.session(hash(token));
-      return session && session.mode===config.mode && session.expiresAt.getTime()>Date.now() ? {user:session.user,mode:config.mode} : null;
+      return session && allowed(session.user.id) && session.mode===config.mode && session.expiresAt.getTime()>Date.now() ? {user:session.user,mode:config.mode} : null;
     },
     async logout(token:string) { await store.deleteSession(hash(token)); },
     async demoLogin() {
@@ -127,6 +140,7 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
     },
     async userToken(userId:string) {
       if (config.mode!=='live') throw new AuthError(400,'Demo has no GitHub credentials');
+      requireOwner(userId);
       const credential = await store.credential(userId);
       if (!credential || credential.expiresAt.getTime()<=Date.now()) throw new AuthError(401,'GitHub login expired; log in again before continuing');
       return decrypt(credential.encryptedToken);

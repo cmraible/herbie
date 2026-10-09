@@ -33,7 +33,7 @@ async function fixture(t: TestContext) {
   const upstreamUrl = `http://127.0.0.1:${upstreamAddress.port}`;
   const github = createGithub({ appId: 'test-app', clientId: 'test-client', clientSecret: 'fixture-secret', privateKey: 'unused-for-these-read-only-user-requests', callbackUrl: 'https://herbie.example/api/auth/callback', webhookSecret: 'fixture-webhook' }, { api: upstreamUrl, oauth: upstreamUrl });
   const authStore = new PgAuthStore(pool);
-  const auth = createAuth({ mode: 'live', publicUrl: 'https://herbie.example', credentialKey: Buffer.alloc(32, 1).toString('base64') }, authStore, github);
+  const auth = createAuth({ mode: 'live', allowedGithubUserId:'7', publicUrl: 'https://herbie.example', credentialKey: Buffer.alloc(32, 1).toString('base64') }, authStore, github);
   const adapters: Adapters = {
     ...createDemoAdapters(), mode: 'live',
     async repositories(userId) { await auth.userToken(userId); return []; },
@@ -62,7 +62,7 @@ test('HTTP rejects expired and wrong-mode sessions and hides another owner’s g
   if (!setup) return;
   const { store, session, base } = setup;
   const { goal } = await store.createGoal('owner', { repository: 'demo/example', prompt: 'Private goal text', testCommand: ['node', '--test'], maxAttempts: 1 }, 'live', randomUUID());
-  const other = await session('other-owner');
+  const other = await session('7');
   for (const path of [`/api/goals/${goal.id}`, `/api/goals/${goal.id}/events`]) {
     const response = await fetch(`${base}${path}`, { headers: other });
     assert.equal(response.status, 404);
@@ -72,7 +72,7 @@ test('HTTP rejects expired and wrong-mode sessions and hides another owner’s g
   assert.equal(deniedControl.status, 404);
   assert.equal((await store.getGoal(goal.id))?.state, 'queued');
   assert.deepEqual(await (await fetch(`${base}/api/goals`, { headers: other })).json(), []);
-  for (const headers of [await session('expired-owner', { expired: true }), await session('demo-owner', { mode: 'demo' })]) {
+  for (const headers of [await session('7', { expired: true }), await session('7', { mode: 'demo' })]) {
     const response = await fetch(`${base}/api/session`, { headers });
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { error: 'Login required' });
@@ -83,12 +83,12 @@ test('HTTP reports expired GitHub login, denied repository permission, and inval
   const setup = await fixture(t);
   if (!setup) return;
   const { session, base } = setup;
-  const expired = await session('expired-credential', { expiredCredential: true });
+  const expired = await session('7', { expiredCredential: true });
   const repositories = await fetch(`${base}/api/repositories`, { headers: expired });
   assert.equal(repositories.status, 401);
   assert.deepEqual(await repositories.json(), { error: 'GitHub login expired; log in again before continuing' });
   const denied = await fetch(`${base}/api/goals`, {
-    method: 'POST', headers: { ...await session('owner'), 'content-type': 'application/json', 'idempotency-key': randomUUID() },
+    method: 'POST', headers: { ...await session('7'), 'content-type': 'application/json', 'idempotency-key': randomUUID() },
     body: JSON.stringify({ repository: 'demo/example', prompt: 'Fix bug', testCommand: ['node', '--test'], maxAttempts: 1 }),
   });
   assert.equal(denied.status, 403);
@@ -96,4 +96,17 @@ test('HTTP reports expired GitHub login, denied repository permission, and inval
   const callback = await fetch(`${base}/api/auth/callback?code=expired&state=unknown`);
   assert.equal(callback.status, 400);
   assert.deepEqual(await callback.json(), { error: 'Authorization is expired or invalid; start login again' });
+});
+
+
+test('existing nonowner bearer and cookie sessions cannot access authenticated APIs',async t=>{
+  const setup=await fixture(t);if(!setup)return;
+  const {session,base}=setup;const bearer=await session('8');
+  const cookie={cookie:`herbie_session=${bearer.authorization.slice('Bearer '.length)}`};
+  for(const headers of [bearer,cookie])for(const path of ['/api/session','/api/repositories','/api/goals']){
+    const response=await fetch(`${base}${path}`,{headers});assert.equal(response.status,401);
+    assert.deepEqual(await response.json(),{error:'Login required'});
+  }
+  const response=await fetch(`${base}/api/goals`,{method:'POST',headers:{...bearer,'content-type':'application/json','idempotency-key':randomUUID()},body:JSON.stringify({repository:'demo/example',prompt:'Denied',testCommand:['true'],maxAttempts:1})});
+  assert.equal(response.status,401);
 });

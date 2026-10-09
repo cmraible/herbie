@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {containerEnvironment,executionEnabled,blocksExecution} from '../src/configuration.js';
 
-const credentials={DATABASE_URL:'postgresql://fixture',HERBIE_CREDENTIAL_KEY:'fixture',GITHUB_APP_ID:'fixture',GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture',GITHUB_PRIVATE_KEY:'fixture',GITHUB_WEBHOOK_SECRET:'fixture'};
+const credentials={HERBIE_ALLOWED_GITHUB_USER_ID:'7',DATABASE_URL:'postgresql://fixture',HERBIE_CREDENTIAL_KEY:'fixture',GITHUB_APP_ID:'fixture',GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture',GITHUB_PRIVATE_KEY:'fixture',GITHUB_WEBHOOK_SECRET:'fixture'};
 test('disabled deployment passes only allowlisted server configuration and needs no paid execution secrets',()=>{
   const environment=containerEnvironment(JSON.stringify(credentials),'https://herbie.example',false,'release-123');
   assert.equal(environment.HERBIE_EXECUTION_ENABLED,'false');
