@@ -105,7 +105,8 @@ jobs:
         with:
           version: 10.34.6
           run_install: false
-          cache: false
+          cache: true
+          cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @herbie/web exec playwright install --with-deps chromium
       - name: Unit, integration, CLI, browser, edge and container verification
@@ -153,7 +154,8 @@ jobs:
         with:
           version: 10.34.6
           run_install: false
-          cache: false
+          cache: true
+          cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Deploy current main and verify the new container revision
