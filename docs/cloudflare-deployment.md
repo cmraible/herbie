@@ -202,3 +202,9 @@ mode, execution disabled, and both Worker and image revisions matching the reque
 URLs, provider identifiers, response bodies, secrets, and raw tool errors remain private;
 temporary diagnostics are removed when the script exits. A timeout does not roll back any
 provider changes already accepted, and it must not be treated as permission to retry blindly.
+
+Hosted startup failures also emit one fixed diagnostic category: configuration,
+database authentication, TLS, connection timeout, or unknown. Categories use trusted
+startup phases and recognized structured error codes, never message matching. Errors
+without a recognized type/code remain unknown; these labels are evidence, not proof
+that a particular credential or infrastructure setting is wrong.
