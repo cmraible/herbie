@@ -28,7 +28,7 @@ export async function migrateAuth(pool:Pool) {
       CREATE INDEX IF NOT EXISTS auth_pending_cli_expiry ON auth_pending_cli(expires_at);
     `);
     await client.query('COMMIT');
-  } catch(error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+  } catch(error) {try{await client.query('ROLLBACK');}catch{/* Preserve the migration failure. */}throw error;} finally {client.release();}
 }
 const flowSchema = z.object({state_hash:z.string(),poll_hash:z.string().nullable(),browser_hash:z.string().nullable(),user_code_hash:z.string().nullable(),client:z.enum(['web','cli']),expires_at:z.date(),verifier:z.string()});
 const pendingSchema = z.object({approval_hash:z.string(),poll_hash:z.string(),user_code_hash:z.string(),csrf_token:z.string(),

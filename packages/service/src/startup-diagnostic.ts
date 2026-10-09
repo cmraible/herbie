@@ -1,7 +1,7 @@
 import {ZodError} from 'zod';
 
 export class StartupConfigurationError extends Error {
-  constructor(){super('Startup configuration invalid');}
+  constructor(cause?:unknown){super('Startup configuration invalid',{cause});}
 }
 
 // Codes are inspected only to choose fixed labels. Never print error messages,

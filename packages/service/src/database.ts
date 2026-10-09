@@ -1,3 +1,4 @@
+import type {StartupPhase} from './startup-progress.js';
 import { X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Pool, PoolConfig } from 'pg';
@@ -46,7 +47,7 @@ async function protectPrivateSchema(pool: Pool): Promise<void> {
     await client.query('BEGIN');
     await client.query("SELECT pg_advisory_xact_lock(hashtext('herbie-private-schema-v1'))");
     const searchPath = await client.query<Record<string, unknown>>("SELECT current_setting('search_path') AS path");
-    if (searchPath.rows[0]?.path !== 'herbie') throw new Error('Live database search_path must contain only the private herbie schema');
+    if (searchPath.rows[0]?.path !== 'herbie') throw Object.assign(new Error('Live database search_path must contain only the private herbie schema'),{code:'HERBIE_SEARCH_PATH_MISMATCH'});
     await client.query('CREATE SCHEMA IF NOT EXISTS herbie');
     await client.query(`
       DO $herbie_private$
@@ -75,17 +76,17 @@ async function protectPrivateSchema(pool: Pool): Promise<void> {
     // Role inheritance or ownership outside this application's schema is not repaired
     // implicitly. Fail closed if a Data API role still reaches the private namespace.
     const reachable = await client.query<Record<string, unknown>>("SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role') AND has_schema_privilege(oid,'herbie','USAGE,CREATE')");
-    if (reachable.rows.length) throw new Error('A Data API role still has private-schema access; use a dedicated trusted database owner');
+    if (reachable.rows.length) throw Object.assign(new Error('A Data API role still has private-schema access; use a dedicated trusted database owner'),{code:'HERBIE_PRIVATE_SCHEMA_ACCESS'});
     await client.query('COMMIT');
-  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  } catch (error) { try{await client.query('ROLLBACK');}catch{/* Preserve the original failure. */} throw error; }
   finally { client.release(); }
 }
 
-export async function prepareDatabase(pool: Pool, mode: 'demo' | 'live'): Promise<void> {
+export async function prepareDatabase(pool: Pool, mode: 'demo' | 'live',phase?:(phase:StartupPhase)=>void): Promise<void> {
   // Revoke namespace access before migrations, so even legacy default grants cannot
   // expose a newly created table while migrations are running.
-  if (mode === 'live') await protectPrivateSchema(pool);
-  await new Store(pool).migrate();
-  await migrateAuth(pool);
-  if (mode === 'live') await protectPrivateSchema(pool);
+  if (mode === 'live') {phase?.('schema-protection');await protectPrivateSchema(pool);}
+  phase?.('application-migrations');await new Store(pool).migrate();
+  phase?.('auth-migrations');await migrateAuth(pool);
+  if (mode === 'live') {phase?.('schema-verification');await protectPrivateSchema(pool);}
 }

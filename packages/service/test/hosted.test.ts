@@ -90,5 +90,7 @@ test('hosted process sanitizes startup failure output before exiting',async()=>{
   const code=await new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
   assert.equal(code,1);
   assert.equal(stdout,'');
-  assert.equal(stderr,'Herbie startup diagnostic: category=configuration.\nHerbie startup failed. Check configuration and database availability.\n');
+  assert.match(stderr,/Herbie startup failed: phase=configuration; elapsed-ms=\d+; phase-elapsed-ms=\d+; Herbie startup diagnostic: category=configuration/);
+  assert.doesNotMatch(stderr,/secret-canary|postgres:\/\//);
+  assert.ok(stderr.endsWith('Herbie startup failed. Check configuration and database availability.\n'));
 });
