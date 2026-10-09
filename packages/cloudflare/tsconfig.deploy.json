@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": { "noEmit": true, "allowImportingTsExtensions": true },
-  "include": ["scripts/**/*.ts", "test/deployment.test.ts"]
+  "include": ["scripts/**/*.ts", "test/deployment.test.ts", "test/progress.test.ts"]
 }

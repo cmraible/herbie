@@ -157,5 +157,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Deploy current main and verify the new container revision
+        timeout-minutes: 4
         run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
         env: *deployment_inputs

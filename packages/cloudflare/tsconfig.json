@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts"],
-  "exclude": ["test/deployment.test.ts"]
+  "exclude": ["test/deployment.test.ts", "test/progress.test.ts"]
 }

@@ -11,19 +11,39 @@ function required(values:Record<string,unknown>,name:string){
   return value;
 }
 
-export async function waitForDeployment(origin:string,revision:string,options:{timeoutMs?:number;intervalMs?:number;signal?:AbortSignal}={}){
-  const deadline=Date.now()+(options.timeoutMs??600_000);
-  while(Date.now()<deadline&&!options.signal?.aborted){
+export class DeploymentHealthError extends Error {}
+
+export async function waitForDeployment(origin:string,revision:string,options:{timeoutMs?:number;intervalMs?:number;signal?:AbortSignal;report?:(message:string)=>void}={}){
+  const started=performance.now(),deadline=started+(options.timeoutMs??600_000);
+  let reportedAt=started-30_000,attempts=0;
+  let status='none',category='not-checked',live=false,disabled=false,workerRevision=false,imageRevision=false;
+  const summary=()=>`elapsed=${Math.floor((performance.now()-started)/1000)}s; attempts=${attempts}; http=${status}; category=${category}; live=${live}; execution-disabled=${disabled}; worker-revision-ready=${workerRevision}; image-revision-ready=${imageRevision}`;
+  options.report?.('Health verification started; waiting for both requested revisions with live execution disabled.');
+  while(performance.now()<deadline&&!options.signal?.aborted){
+    attempts++;status='none';category='request-failed';live=false;disabled=false;workerRevision=false;imageRevision=false;
+    const signal=AbortSignal.any([AbortSignal.timeout(Math.max(1,Math.ceil(Math.min(10_000,deadline-performance.now())))),...(options.signal?[options.signal]:[])]);
     try{
-      const signal=AbortSignal.any([AbortSignal.timeout(10_000),...(options.signal?[options.signal]:[])]);
       const response=await fetch(`${origin}/api/health`,{signal,redirect:'error'});
+      status=String(response.status);category='invalid-response';
       const health:unknown=await response.json();
-      if(response.ok&&isRecord(health)&&health.mode==='live'&&health.executionEnabled===false
-        &&health.deploymentId===revision&&health.imageRevision===revision)return;
-    }catch{/* Responses can contain credentials or platform details; never print them. */}
-    await delay(options.intervalMs??5000,undefined,{signal:options.signal}).catch(()=>undefined);
+      if(isRecord(health)){
+        live=health.mode==='live';disabled=health.executionEnabled===false;
+        workerRevision=health.deploymentId===revision;imageRevision=health.imageRevision===revision;
+        category=response.ok?'not-ready':'http-error';
+        if(response.ok&&live&&disabled&&workerRevision&&imageRevision&&!options.signal?.aborted&&performance.now()<deadline){
+          category='ready';options.report?.(`Health verification passed: ${summary()}.`);return;
+        }
+      }
+    }catch{
+      // Never inspect error text or response bodies for public diagnostics.
+      if(signal.aborted)category=options.signal?.aborted?'interrupted':'request-timeout';
+    }
+    if(performance.now()-reportedAt>=30_000){options.report?.(`Health verification waiting: ${summary()}.`);reportedAt=performance.now();}
+    const remaining=deadline-performance.now();
+    if(remaining>0)await delay(Math.min(options.intervalMs??5000,remaining),undefined,{signal:options.signal}).catch(()=>undefined);
   }
-  throw new Error('Deployment did not become ready for the requested revision');
+  const outcome=options.signal?.aborted?'aborted':'timed-out';
+  throw new DeploymentHealthError(`Deployment did not become ready for the requested revision: outcome=${outcome}; ${summary()}.`);
 }
 
 export function prepareDeployment(environment:Environment,input:unknown,directory:string){
