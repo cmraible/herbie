@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DeploymentConfigurationError,prepareDeployment,waitForDeployment} from './deployment.js';
+import {DeploymentCommandError,runDeploymentCommand} from './diagnostics.js';
 
 const directory=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const controller=new AbortController();
@@ -38,13 +39,14 @@ try{
   await writeFile(secretsPath,prepared.secrets,{mode:0o600});
   phase='Worker and container deployment';
   console.log('Deploying the verified main revision with live execution disabled.');
-  await command('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
-    {...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
-      DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')});
+  await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
+    {cwd:directory,signal:controller.signal,logPath:join(temporary,'wrangler.log'),env:{...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
+      DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')}});
   phase='new-container health verification';
   await waitForDeployment(prepared.origin,prepared.revision,{signal:controller.signal});
   console.log(`Verified disabled production release ${prepared.revision}.`);
 }catch(error){
+  if(error instanceof DeploymentCommandError)console.error(error.message);
   if(error instanceof DeploymentConfigurationError)console.error(error.message);
   console.error(`Production ${phase} failed or was refused. Check approved inputs, current main and Cloudflare deployment state. No raw tool output was logged.`);
   process.exitCode=1;
