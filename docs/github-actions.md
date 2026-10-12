@@ -61,7 +61,7 @@ approval/protection rules, and an exact repository match with the private
 forks do not inherit the production environment secrets. The job uses a separate
 clean runner, no PR artifacts or dependency caches, and a read-only `GITHUB_TOKEN`.
 There is no `pull_request_target`, `workflow_run`, `id-token: write`, repository
-write permission or model credential in the workflow.
+write permission or raw OpenAI credential in the workflow.
 
 Deployments share `herbie-production` concurrency with cancellation disabled.
 Immediately before release, the helper checks GitHub's current `main` SHA and
@@ -71,8 +71,8 @@ deploy`, including image push, assets, Worker, Durable Object and Cron setup.
 Each run/attempt gives the image a distinct public revision, including secret-only
 updates. The image has its own baked-in revision, independent of the Worker startup
 configuration. Success requires `/api/health` to report both revisions matching the
-requested release, working Postgres, live mode and **execution disabled** within
-ten minutes. An old image restarted with new configuration cannot pass readiness.
+requested release, working Postgres, live mode and the **requested execution
+mode** within the shared deployment deadline. An old image restarted with new configuration cannot pass readiness.
 
 ## One-time operator setup
 
@@ -229,6 +229,55 @@ are recorded in `packages/service/src/supabase-ca.ts`; it expires April 26, 2031
 When Supabase rotates this CA, verify the replacement against the official
 [dashboard download](https://supabase.com/docs/guides/platform/ssl-enforcement)
 before updating the certificate and fingerprint test.
+
+
+### Enabling execution after owner access and spend approval
+
+The production environment variable `HERBIE_EXECUTION_ENABLED` selects `true` or
+`false`; missing/empty defaults to `false`. An invalid value fails preflight.
+Before merging this support, verify that the variable is unset or `false`; an
+already configured `true` would enable execution on the resulting deployment.
+Keep it unset or `false` until
+owner-only access is deployed and the following operator checks are complete:
+
+1. Verify presence of production environment secrets `DAYTONA_API_KEY` and
+   `HERBIE_DAYTONA_OPENAI_SECRET` without printing values. The latter names an
+   existing Daytona-managed secret mapped to `OPENAI_API_KEY`, not the OpenAI
+   API key itself. Verify that the Daytona key can create, operate and delete
+   sandboxes, that its referenced secret exists, and that the OpenAI credential
+   can use the configured model. Preflight checks syntax only, not authentication.
+   Do not create credentials or expand permissions as part of this check.
+2. Optional private secrets `DAYTONA_API_URL` and `HERBIE_DAYTONA_SNAPSHOT` select
+   an existing API endpoint or prepared runtime snapshot. Otherwise the runtime
+   uses the SDK endpoint and provisions its pinned Ubuntu runtime. Custom API
+   URLs must use HTTPS without credentials, query or fragment.
+3. Verify the existing GitHub App installation grants Contents and Pull requests
+   write access for the selected public repository, and the owner has push
+   access. Workflow `GITHUB_TOKEN` remains read-only. No permission expansion is
+   performed by this change.
+4. Inspect live queue metadata before activation. The enabled hosted worker
+   immediately reconciles and claims eligible live queued/ready/publishing work;
+   a successful health check is not a queue-release barrier. Paused/cancelled
+   goals are not automatically resumed. Verify owner-only access and confirm the
+   queue contains only approved work.
+5. Obtain separate model/Daytona spending approval. The hosting budget does not
+   cover these costs. Current safeguards are one hosted worker, 1–5 attempts per
+   goal (default 1), a 15-minute sandbox TTL, a 90-second model turn, a 60-second
+   repository test timeout, bounded setup/command calls and confirmed cleanup.
+   The model is `gpt-6-luna` with low effort and no transport retries. These are
+   resource/time bounds, **not a dollar cap**; no application-wide monetary budget
+   or one-run spending gate is implemented. Inspect provider-side limits and
+   agree an appropriate bounded run before submitting a goal.
+
+After approval, set the production variable to `true` and rerun the latest
+current-main deployment workflow (or merge a verified current-main change).
+Enabled preflight requires both execution fields and reports all missing or
+malformed names without their values. Disabled deployments neither require nor
+forward execution credentials. The private runtime bundle carries enabled-only
+inputs; no credential becomes a build argument or public Worker variable.
+Readiness checks require the exact requested execution boolean and both new
+revisions. Set the variable back to `false` and redeploy to block new work; an
+already-running bounded attempt still completes cleanup during graceful shutdown.
 
 
 ### Owner-only access

@@ -13,24 +13,25 @@ function required(values:Record<string,unknown>,name:string){
 
 export class DeploymentHealthError extends Error {}
 
-export async function waitForDeployment(origin:string,revision:string,options:{timeoutMs?:number;intervalMs?:number;signal?:AbortSignal;report?:(message:string)=>void}={}){
+export async function waitForDeployment(origin:string,revision:string,options:{executionEnabled?:boolean;timeoutMs?:number;intervalMs?:number;signal?:AbortSignal;report?:(message:string)=>void}={}){
+  const expectedExecution=options.executionEnabled??false;
   const started=performance.now(),deadline=started+(options.timeoutMs??600_000);
   let reportedAt=started-30_000,attempts=0;
-  let status='none',category='not-checked',live=false,disabled=false,workerRevision=false,imageRevision=false;
-  const summary=()=>`elapsed=${Math.floor((performance.now()-started)/1000)}s; attempts=${attempts}; http=${status}; category=${category}; live=${live}; execution-disabled=${disabled}; worker-revision-ready=${workerRevision}; image-revision-ready=${imageRevision}`;
-  options.report?.('Health verification started; waiting for both requested revisions with live execution disabled.');
+  let status='none',category='not-checked',live=false,disabled=false,executionReady=false,workerRevision=false,imageRevision=false;
+  const summary=()=>`elapsed=${Math.floor((performance.now()-started)/1000)}s; attempts=${attempts}; http=${status}; category=${category}; live=${live}; execution-disabled=${disabled}; execution-mode-ready=${executionReady}; worker-revision-ready=${workerRevision}; image-revision-ready=${imageRevision}`;
+  options.report?.(`Health verification started; waiting for both requested revisions with live execution ${expectedExecution?'enabled':'disabled'}.`);
   while(performance.now()<deadline&&!options.signal?.aborted){
-    attempts++;status='none';category='request-failed';live=false;disabled=false;workerRevision=false;imageRevision=false;
+    attempts++;status='none';category='request-failed';live=false;disabled=false;executionReady=false;workerRevision=false;imageRevision=false;
     const signal=AbortSignal.any([AbortSignal.timeout(Math.max(1,Math.ceil(Math.min(10_000,deadline-performance.now())))),...(options.signal?[options.signal]:[])]);
     try{
       const response=await fetch(`${origin}/api/health`,{signal,redirect:'error'});
       status=String(response.status);category='invalid-response';
       const health:unknown=await response.json();
       if(isRecord(health)){
-        live=health.mode==='live';disabled=health.executionEnabled===false;
+        live=health.mode==='live';disabled=health.executionEnabled===false;executionReady=health.executionEnabled===expectedExecution;
         workerRevision=health.deploymentId===revision;imageRevision=health.imageRevision===revision;
         category=response.ok?'not-ready':'http-error';
-        if(response.ok&&live&&disabled&&workerRevision&&imageRevision&&!options.signal?.aborted&&performance.now()<deadline){
+        if(response.ok&&live&&executionReady&&workerRevision&&imageRevision&&!options.signal?.aborted&&performance.now()<deadline){
           category='ready';options.report?.(`Health verification passed: ${summary()}.`);return;
         }
       }
@@ -48,6 +49,7 @@ export async function waitForDeployment(origin:string,revision:string,options:{t
 
 export function prepareDeployment(environment:Environment,input:unknown,directory:string){
   validateDeploymentEnvironment(environment);
+  const executionEnabled=environment.HERBIE_EXECUTION_ENABLED==='true';
   const repository=required(environment,'HERBIE_DEPLOY_REPOSITORY');
   if(!/^[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+$/.test(repository)||environment.GITHUB_REPOSITORY!==repository||environment.GITHUB_REF!=='refs/heads/main'
     ||!['push','workflow_dispatch'].includes(environment.GITHUB_EVENT_NAME??'')||environment.HERBIE_DEPLOY_ENABLED!=='true'){
@@ -67,10 +69,13 @@ export function prepareDeployment(environment:Environment,input:unknown,director
     GITHUB_APP_ID:required(environment,'HERBIE_GITHUB_APP_ID'),GITHUB_CLIENT_ID:required(environment,'HERBIE_GITHUB_CLIENT_ID'),
     GITHUB_CLIENT_SECRET:required(environment,'HERBIE_GITHUB_CLIENT_SECRET'),GITHUB_PRIVATE_KEY:required(environment,'HERBIE_GITHUB_PRIVATE_KEY'),
     GITHUB_WEBHOOK_SECRET:required(environment,'HERBIE_GITHUB_WEBHOOK_SECRET'),
-    ...(environment.HERBIE_DATABASE_CA?{HERBIE_DATABASE_CA:environment.HERBIE_DATABASE_CA}:{})};
-  return {revision,origin,repositoryUrl:`https://github.com/${repository}.git`,secrets:JSON.stringify({HERBIE_RUNTIME_SECRETS:JSON.stringify(runtime)}),
+    ...(environment.HERBIE_DATABASE_CA?{HERBIE_DATABASE_CA:environment.HERBIE_DATABASE_CA}:{}),
+    ...(executionEnabled?{DAYTONA_API_KEY:required(environment,'DAYTONA_API_KEY'),HERBIE_DAYTONA_OPENAI_SECRET:required(environment,'HERBIE_DAYTONA_OPENAI_SECRET'),
+      ...(environment.DAYTONA_API_URL?{DAYTONA_API_URL:environment.DAYTONA_API_URL}:{}),
+      ...(environment.HERBIE_DAYTONA_SNAPSHOT?{HERBIE_DAYTONA_SNAPSHOT:environment.HERBIE_DAYTONA_SNAPSHOT}:{})}:{})};
+  return {revision,origin,executionEnabled,repositoryUrl:`https://github.com/${repository}.git`,secrets:JSON.stringify({HERBIE_RUNTIME_SECRETS:JSON.stringify(runtime)}),
     config:{...config,account_id:account,main:resolve(directory,required(config,'main')),
-      vars:{...vars,HERBIE_PUBLIC_URL:origin,HERBIE_EXECUTION_ENABLED:'false',HERBIE_DEPLOYMENT_ID:revision},
+      vars:{...vars,HERBIE_PUBLIC_URL:origin,HERBIE_EXECUTION_ENABLED:String(executionEnabled),HERBIE_DEPLOYMENT_ID:revision},
       assets:{...assets,directory:resolve(directory,required(assets,'directory'))},
       containers:[{...container,image:resolve(directory,required(container,'image')),image_build_context:resolve(directory,required(container,'image_build_context')),
         image_vars:{HERBIE_RUNTIME_REVISION:revision}}]}};
@@ -90,6 +95,15 @@ export function validateDeploymentEnvironment(environment:Environment){
     catch{failures.push(`${name}: ${reason}`);}
   };
   const line=(value:string)=>value.trim()===value&&!/[\r\n\0]/.test(value);
+  check('HERBIE_EXECUTION_ENABLED',v=>v==='true'||v==='false','expected true or false',true);
+  if(environment.HERBIE_EXECUTION_ENABLED==='true'){
+    for(const name of ['DAYTONA_API_KEY','HERBIE_DAYTONA_OPENAI_SECRET'])check(name,line,'expected nonempty single-line value without surrounding whitespace');
+    check('HERBIE_DAYTONA_SNAPSHOT',line,'expected nonempty single-line value without surrounding whitespace',true);
+    check('DAYTONA_API_URL',v=>{
+      const url=new URL(v);
+      return line(v)&&url.protocol==='https:'&&!!url.hostname&&!url.username&&!url.password&&!url.search&&!url.hash;
+    },'expected HTTPS API URL without credentials, query or fragment',true);
+  }
   check('HERBIE_DEPLOY_REPOSITORY',v=>/^[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+$/.test(v),'expected owner/repository');
   check('CLOUDFLARE_ACCOUNT_ID',v=>/^[a-f0-9]{32}$/.test(v),'expected 32 lowercase hex characters');
   check('HERBIE_SUPABASE_PROJECT_REF',v=>/^[a-z0-9]{20}$/.test(v),'expected 20 lowercase alphanumeric characters');
