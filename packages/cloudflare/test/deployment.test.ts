@@ -263,3 +263,44 @@ exit 9
   assert.doesNotMatch(result.stdout+result.stderr,/private-canary|BEGIN PRIVATE|test-only|synthetic-fixture/);
   assert.deepEqual(readdirSync(directory).filter(name=>name.startsWith('herbie-deploy-')),[]);
 });
+
+test('enabled deployment requires execution credentials and bundles only approved private inputs',()=>{
+  const enabled={...context,HERBIE_EXECUTION_ENABLED:'true'};
+  assert.throws(()=>prepareDeployment(enabled,config,'/repo/packages/cloudflare'),error=>{
+    assert.ok(error instanceof Error);
+    assert.match(error.message,/DAYTONA_API_KEY: required/);
+    assert.match(error.message,/HERBIE_DAYTONA_OPENAI_SECRET: required/);
+    return true;
+  });
+  const inputs={...enabled,DAYTONA_API_KEY:'fixture-daytona-key',HERBIE_DAYTONA_OPENAI_SECRET:'fixture-openai-secret',DAYTONA_API_URL:'https://daytona.example/api',HERBIE_DAYTONA_SNAPSHOT:'fixture-snapshot'};
+  const prepared=prepareDeployment(inputs,config,'/repo/packages/cloudflare');
+  assert.equal(prepared.executionEnabled,true);
+  assert.equal(prepared.config.vars.HERBIE_EXECUTION_ENABLED,'true');
+  const runtime=JSON.parse(JSON.parse(prepared.secrets).HERBIE_RUNTIME_SECRETS);
+  for(const name of ['DAYTONA_API_KEY','HERBIE_DAYTONA_OPENAI_SECRET','DAYTONA_API_URL','HERBIE_DAYTONA_SNAPSHOT'] as const)assert.equal(runtime[name],inputs[name]);
+  assert.doesNotMatch(JSON.stringify(prepared.config),/fixture-daytona|fixture-openai|daytona.example|fixture-snapshot/);
+  const disabled=prepareDeployment({...inputs,HERBIE_EXECUTION_ENABLED:'false'},config,'/repo/packages/cloudflare');
+  assert.equal(disabled.executionEnabled,false);
+  assert.doesNotMatch(disabled.secrets,/DAYTONA/);
+  for(const change of [{HERBIE_EXECUTION_ENABLED:'TRUE'},{DAYTONA_API_KEY:'private-canary\nkey'},{HERBIE_DAYTONA_OPENAI_SECRET:' private-canary'},{DAYTONA_API_URL:'http://private-canary.example'},{DAYTONA_API_URL:'https://user:private-canary@daytona.example'},{HERBIE_DAYTONA_SNAPSHOT:'private-canary\nsnapshot'}]){
+    assert.throws(()=>prepareDeployment({...inputs,...change},config,'/repo/packages/cloudflare'),error=>{
+      assert.ok(error instanceof Error);for(const name of Object.keys(change))assert.ok(error.message.includes(name));
+      assert.doesNotMatch(error.message,/private-canary/);return true;
+    });
+  }
+});
+
+test('readiness requires the requested execution mode as well as matching revisions',async t=>{
+  let enabled:unknown=false;
+  const server=createServer((_request,response)=>{response.setHeader('content-type','application/json');response.end(JSON.stringify({mode:'live',executionEnabled:enabled,deploymentId:'expected',imageRevision:'expected'}));});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+  const address=server.address();assert.ok(address&&typeof address!=='string');
+  const origin=`http://127.0.0.1:${address.port}`;
+  await assert.rejects(waitForDeployment(origin,'expected',{executionEnabled:true,timeoutMs:80,intervalMs:5}),/requested revision/);
+  enabled=true;
+  await waitForDeployment(origin,'expected',{executionEnabled:true,timeoutMs:1000,intervalMs:5});
+  await assert.rejects(waitForDeployment(origin,'expected',{timeoutMs:80,intervalMs:5}),/requested revision/);
+  enabled='true';
+  await assert.rejects(waitForDeployment(origin,'expected',{executionEnabled:true,timeoutMs:80,intervalMs:5}),/requested revision/);
+});

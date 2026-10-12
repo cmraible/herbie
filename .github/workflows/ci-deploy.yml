@@ -32,6 +32,11 @@ jobs:
         run: node packages/cloudflare/scripts/preflight.ts
         env: &deployment_inputs
           HERBIE_DEPLOY_ENABLED: 'true'
+          HERBIE_EXECUTION_ENABLED: ${{ vars.HERBIE_EXECUTION_ENABLED || 'false' }}
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          HERBIE_DAYTONA_OPENAI_SECRET: ${{ secrets.HERBIE_DAYTONA_OPENAI_SECRET }}
+          DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
+          HERBIE_DAYTONA_SNAPSHOT: ${{ secrets.HERBIE_DAYTONA_SNAPSHOT }}
           HERBIE_DEPLOY_REPOSITORY: ${{ secrets.HERBIE_DEPLOY_REPOSITORY }}
           HERBIE_PUBLIC_URL: ${{ secrets.HERBIE_PUBLIC_URL }}
           HERBIE_SUPABASE_PROJECT_REF: ${{ secrets.HERBIE_SUPABASE_PROJECT_REF }}
@@ -99,7 +104,7 @@ jobs:
           retention-days: 7
 
   deploy:
-    name: Deploy disabled production service
+    name: Deploy configured production service
     needs: [preflight]
     if: >-
       needs.preflight.result == 'success' &&

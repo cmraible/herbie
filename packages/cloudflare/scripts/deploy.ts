@@ -41,13 +41,13 @@ try{
   await writeFile(secretsPath,prepared.secrets,{mode:0o600});
   if(controller.signal.aborted||deadline.expired())throw new Error('Deployment interrupted');
   phase='Worker and container deployment';
-  console.log('Deploying the verified main revision with live execution disabled.');
+  console.log(`Deploying the verified main revision with live execution ${prepared.executionEnabled?'enabled':'disabled'}.`);
   await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
     {cwd:directory,signal:controller.signal,report:message=>console.log(message),logPath:join(temporary,'wrangler.log'),env:{...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
       DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')}});
   phase='new-container health verification';
-  await waitForDeployment(prepared.origin,prepared.revision,{signal:controller.signal,timeoutMs:deadline.remaining(),report:message=>console.log(message)});
-  console.log(`Verified disabled production release ${prepared.revision}.`);
+  await waitForDeployment(prepared.origin,prepared.revision,{executionEnabled:prepared.executionEnabled,signal:controller.signal,timeoutMs:deadline.remaining(),report:message=>console.log(message)});
+  console.log(`Verified production release ${prepared.revision}.`);
 }catch(error){
   if(deadline.expired())console.error('Deployment exceeded the shared 180-second deadline; subprocess groups were terminated (up to 2 seconds termination grace).');
   if(error instanceof DeploymentCommandError)console.error(error.message);
