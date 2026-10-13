@@ -18,6 +18,8 @@ export interface PullRequest {
   branch: string;
   state: 'open' | 'closed' | 'merged';
 }
+export type PublicationPhase = 'preflight_reconciliation'|'authorization'|'installation_token'|'existing_pr_check'|'git_preparation'|'branch_push'|'pull_request_creation'|'publication_confirmation'|'state_persistence';
+export type PublicationRetryCheck = 'ready'|'pull_request_exists'|'branch_exists'|'base_changed';
 export class KnownAttemptFailure extends Error {}
 export interface Adapters {
   mode: 'demo' | 'live';
@@ -26,6 +28,7 @@ export interface Adapters {
   repositories(userId: string): Promise<Repository[]>;
   attempt(execution: Execution, report: (message: string) => Promise<void>): Promise<DaytonaAttemptChanges>;
   // Recheck ownership after awaited preparation and immediately before each remote write.
-  publish(execution: Execution, changes: DaytonaAttemptChanges, requireLease: () => Promise<void>): Promise<Omit<PullRequest, 'state'>>;
+  publish(execution: Execution, changes: DaytonaAttemptChanges, requireLease: () => Promise<void>, reportPhase?: (phase: PublicationPhase) => Promise<void>): Promise<Omit<PullRequest, 'state'>>;
+  checkPublicationRetry?(execution:Execution,changes:DaytonaAttemptChanges):Promise<PublicationRetryCheck>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
 }

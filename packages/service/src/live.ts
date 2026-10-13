@@ -1,7 +1,7 @@
 import { Daytona } from '@daytona/sdk';
 import { runDaytonaAttempt } from '@herbie/loop/daytona-attempt';
 import { publishTestedPatch } from '@herbie/loop/publish-patch';
-import {KnownAttemptFailure,type Adapters} from './adapters.js';
+import {KnownAttemptFailure,type Adapters,type PublicationPhase} from './adapters.js';
 import type { Auth } from './auth.js';
 import type { Github } from './github.js';
 
@@ -38,17 +38,24 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       if (reportError) throw new Error('Attempt events could not be persisted');
       return changes;
     },
-    async publish(execution,changes,requireLease) {
+    async publish(execution,changes,requireLease,reportPhase) {
       if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
       // Authorize again at publication; a removed user permission must stop new writes.
+      await reportPhase?.('authorization');
       const access = await github.authorize(await auth.userToken(execution.goal.ownerId),execution.repository.repository);
+      await reportPhase?.('installation_token');
       const token = await github.installationToken(access.installationId,access.repository);
+      await reportPhase?.('existing_pr_check');
       const existing = await github.findPullRequest(token,access.repository,execution.branch);
       if (existing) return {url:existing.url,number:existing.number,branch:existing.branch};
       await requireLease();
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
       const published = await publishTestedPatch(request=>github.openPullRequest(token,request,requireLease), {
         beforeWrite:requireLease,
+        onPhase:async stage=>{
+          const phases:Record<typeof stage,PublicationPhase>={preparing:'git_preparation',pushing:'branch_push','opening-pr':'pull_request_creation',published:'publication_confirmation'};
+          await reportPhase?.(phases[stage]);
+        },
         repository:access.repository,baseBranch:access.defaultBranch,branch:execution.branch,title,
         body:`Goal: ${execution.goal.prompt}\n\nAttempt: ${execution.attemptId}\n\nVerified in a disposable Daytona sandbox with ${JSON.stringify(execution.goal.testCommand)}. Review the patch and test evidence before merging.`,changes,
         gitEnvironment:{
@@ -60,6 +67,7 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
           GIT_COMMITTER_NAME:'Herbie',GIT_COMMITTER_EMAIL:'herbie@example.invalid',
         },
       });
+      await reportPhase?.('publication_confirmation');
       const confirmed = await github.findPullRequest(token,access.repository,execution.branch);
       if (!confirmed || confirmed.url!==published.url) throw new Error('Published PR could not be reconciled');
       return {url:confirmed.url,number:confirmed.number,branch:confirmed.branch};
@@ -67,6 +75,16 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
     async reconcile(execution) {
       const token = await github.installationToken(execution.repository.installationId,execution.repository.repository,'read');
       return github.findPullRequest(token,execution.repository.repository,execution.branch);
+    },
+    async checkPublicationRetry(execution,changes) {
+      const userToken=await auth.userToken(execution.goal.ownerId);
+      const access=await github.authorize(userToken,execution.goal.repository);
+      const token=await github.installationToken(access.installationId,access.repository,'read');
+      if(await github.findPullRequest(token,access.repository,execution.branch))return 'pull_request_exists';
+      if(await github.branchCommit(token,access.repository,execution.branch))return 'branch_exists';
+      const head=await github.branchCommit(token,access.repository,access.defaultBranch);
+      if(!head||head!==changes.baseCommit)return 'base_changed';
+      return 'ready';
     },
   };
 }

@@ -17,6 +17,7 @@ type Request = {
   beforeWrite?: () => Promise<void>;
   // Trusted caller-owned, per-process auth/identity. Never persist credentials in Git config.
   gitEnvironment?: Readonly<Record<string, string>>;
+  onPhase?: (phase:PublicationState['stage'])=>Promise<void>;
 };
 
 export interface PublicationState {
@@ -33,6 +34,16 @@ export class PatchPublicationError extends AggregateError {
   }
 }
 
+export function hasValidPublicationEvidence(repository:string,changes:DaytonaAttemptChanges):boolean{
+  const remoteUrl=`https://github.com/${repository}.git`;
+  const {verification,baseCommit}=changes;
+  const patch=Buffer.from(changes.patch);
+  return changes.patch.length<=MAX_PATCH_BYTES&&!!verification&&verification.version===2&&verification.goalCompleted===true&&verification.sandboxDeleted===true
+    &&changes.testResult?.exitCode===0&&verification.testCommand.length>0&&verification.baseCommit===baseCommit
+    &&/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(baseCommit)&&[remoteUrl,remoteUrl.slice(0,-4)].includes(verification.repoUrl)
+    &&verification.patchSha256===createHash('sha256').update(patch).digest('hex');
+}
+
 // Host-only: use existing Git authentication and a caller-owned GitHub API client.
 // No checkout, repository scripts, dependency installation, or sandbox credentials.
 export async function publishTestedPatch(createPullRequest: CreatePullRequest, request: Request): Promise<{ url: string; branch: string; commit: string }> {
@@ -40,15 +51,11 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !title.trim() || !branch || !baseBranch || branch === baseBranch) {
     throw new Error('Repository, distinct branch names, and a PR title are required');
   }
-  const remoteUrl = `https://github.com/${repository}.git`;
-  const { verification, baseCommit } = changes;
   if (changes.patch.length > MAX_PATCH_BYTES) throw new Error('Repository patch exceeds its byte limit');
   const patch = Buffer.from(changes.patch);
-  if (!verification || verification.version !== 2 || verification.goalCompleted !== true || verification.sandboxDeleted !== true
-    || changes.testResult?.exitCode !== 0 || !verification.testCommand.length
-    || verification.baseCommit !== baseCommit || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(baseCommit)
-    || ![remoteUrl, remoteUrl.slice(0, -4)].includes(verification.repoUrl)
-    || verification.patchSha256 !== createHash('sha256').update(patch).digest('hex')) {
+  const remoteUrl = `https://github.com/${repository}.git`;
+  const { baseCommit } = changes;
+  if (!hasValidPublicationEvidence(repository,changes)) {
     throw new Error('Matching successful goal, test, and cleanup evidence is required for this patch');
   }
   if (!patch.length) throw new Error('Cannot publish an empty patch');
@@ -67,6 +74,7 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     const headRef = `refs/heads/${branch}`;
     await git('check-ref-format', headRef);
     await git('check-ref-format', `refs/heads/${baseBranch}`);
+    await request.onPhase?.('preparing');
     await git('remote', 'add', 'origin', remoteUrl);
     if (await git('ls-remote', '--heads', 'origin', headRef)) throw new Error('Publication branch already exists');
     await git('fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`);
@@ -81,11 +89,13 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     state.commit = commit;
     await request.beforeWrite?.();
     state.stage = 'pushing';
+    await request.onPhase?.('pushing');
     // An empty expected value makes branch creation atomic: never replace an existing ref.
     const pushed = await git('push', '--porcelain', `--force-with-lease=${headRef}:`, 'origin', `${commit}:${headRef}`);
     if (!pushed.split('\n').some(line => line.startsWith('*\t'))) throw new Error('Push did not create a new branch');
     await request.beforeWrite?.();
     state.stage = 'opening-pr';
+    await request.onPhase?.('opening-pr');
     const { url } = await createPullRequest({ repository, base: baseBranch, head: branch, title, body, draft: true });
     state.url = url;
     state.stage = 'published';

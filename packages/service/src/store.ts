@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { goalInput, goalSchema, eventSchema, type Goal, type GoalInput, type GoalAction, type GoalEvent } from '@herbie/contracts';
+import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
+import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
 const goalColumns = `id, owner_id AS "ownerId", repository, prompt, test_command AS "testCommand",
@@ -24,6 +26,7 @@ export interface Job {
   id: string; attemptId: string; goal: Goal; branch: string;
   stage: z.infer<typeof jobRow>['stage']; artifact: DaytonaAttemptChanges | null;
 }
+export type PublicationRetryCandidate={kind:'retryable';job:Job}|{kind:'already_queued'|'in_progress'|'unavailable';goal:Goal};
 export type PullRequest = NonNullable<Goal['pullRequest']>;
 export class StoreError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'StoreError'; }
@@ -105,6 +108,19 @@ export class Store {
     const goal = await goalFrom(this.pool, id);
     return goal && (ownerId === undefined || goal.ownerId === ownerId) ? goal : null;
   }
+  async publicationRetryCandidate(id:string,ownerId:string):Promise<PublicationRetryCandidate|null>{
+    const goal=await goalFrom(this.pool,id);
+    if(!goal||goal.ownerId!==ownerId)return null;
+    const result=await this.pool.query<Record<string,unknown>>('SELECT *, (lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 ORDER BY cycle DESC LIMIT 1',[id]);
+    if(!result.rows[0])return {kind:'unavailable',goal};
+    const row=jobRow.parse(result.rows[0]);
+    const job=decodeJob(row,goal);
+    if(row.stage==='publishing'&&row.lease_valid)return {kind:'in_progress',goal};
+    if(row.stage==='ready'&&row.artifact&&['queued','running'].includes(goal.state))return {kind:'already_queued',goal};
+    if(goal.mode==='live'&&row.stage==='publishing'&&!row.lease_valid&&['needs_attention','running'].includes(goal.state)
+      &&!goal.stopRequested&&job.artifact&&hasValidPublicationEvidence(goal.repository,job.artifact))return {kind:'retryable',job};
+    return {kind:'unavailable',goal};
+  }
   async listGoals(ownerId: string): Promise<Goal[]> {
     const result = await this.pool.query<Record<string, unknown>>(`SELECT ${goalColumns} FROM goals WHERE owner_id=$1 ORDER BY created_at DESC`, [ownerId]);
     return result.rows.map(row => databaseGoal.parse(row));
@@ -170,6 +186,15 @@ export class Store {
   async appendEvent(goalId: string, type: string, message: string): Promise<void> {
     await this.transaction(client => addEvent(client, goalId, type, message));
   }
+  async recordPublicationPhase(jobId:string,workerId:string,phase:PublicationPhase):Promise<void>{
+    await this.transaction(async client=>{
+      const {row,goal}=await lockJob(client,jobId,workerId);
+      if(row.stage!=='publishing')throw conflict('Publication phase requires a publishing job');
+      const previous=await client.query<{message:string}>('SELECT message FROM goal_events WHERE goal_id=$1 AND type=$2 ORDER BY id DESC LIMIT 1',[goal.id,'publication_phase']);
+      const message=`Publication phase: ${phase}`;
+      if(previous.rows[0]?.message!==message)await addEvent(client,goal.id,'publication_phase',message);
+    });
+  }
   async saveArtifact(jobId: string, workerId: string, changes: DaytonaAttemptChanges): Promise<Job> {
     const artifact = artifactSchema.parse({ ...changes, patchBase64: changes.patch.toString('base64') });
     return this.transaction(async client => {
@@ -216,7 +241,24 @@ export class Store {
       if (row.stage !== 'publishing') throw conflict('Only a started publication can have an uncertain outcome');
       await client.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp()+interval '60 seconds' WHERE id=$1", [jobId]);
       await client.query("UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1", [goal.id, error]);
-      await addEvent(client, goal.id, 'publication_uncertain', error);
+      if(goal.error!==error)await addEvent(client, goal.id, 'publication_uncertain', error);
+    });
+  }
+  async queueSavedPublication(jobId:string,ownerId:string,expectedBranch:string,expectedBaseCommit:string):Promise<Goal>{
+    return this.transaction(async client=>{
+      const {row,goal}=await lockJob(client,jobId);
+      if(goal.ownerId!==ownerId)throw new StoreError(404,'Goal not found');
+      if(row.stage==='ready'&&row.artifact&&['queued','running'].includes(goal.state))return goal;
+      const job=decodeJob(row,goal);
+      if(goal.mode!=='live'||row.stage!=='publishing'||row.lease_valid||!['needs_attention','running'].includes(goal.state)||goal.stopRequested
+        ||!job.artifact||row.branch!==expectedBranch||job.artifact.baseCommit!==expectedBaseCommit
+        ||!hasValidPublicationEvidence(goal.repository,job.artifact))throw conflict('Saved publication is no longer eligible for a safe retry');
+      await client.query("UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1",[jobId]);
+      await client.query("UPDATE goals SET state='queued',error=NULL,updated_at=clock_timestamp() WHERE id=$1",[goal.id]);
+      await addEvent(client,goal.id,'publication_retry_queued','Queued the saved tested artifact for publication; no new attempt will run.');
+      const updated=await goalFrom(client,goal.id);
+      if(!updated)throw new Error('Missing retried publication goal');
+      return updated;
     });
   }
   async fail(jobId: string, workerId: string, error: string, needsAttention = false): Promise<void> {

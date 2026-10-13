@@ -10,6 +10,7 @@ export interface GithubConfig {
 export class GithubError extends Error {constructor(readonly status:number,message:string){super(message);}}
 const repositorySchema = z.object({id:z.number().int(),full_name:z.string(),private:z.boolean(),default_branch:z.string(),permissions:z.object({push:z.boolean().optional()}).optional()});
 const installationSchema = z.object({id:z.number().int(),permissions:z.object({contents:z.string().optional(),pull_requests:z.string().optional()})});
+const branchSchema=z.object({commit:z.object({sha:z.string().regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/)})});
 const appSchema = z.object({slug:z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/)});
 const pullSchema = z.object({number:z.number().int(),html_url:z.string().url(),state:z.enum(['open','closed']),merged_at:z.string().nullable(),head:z.object({ref:z.string()}),base:z.object({ref:z.string()})});
 const tokenSchema = z.object({access_token:z.string().min(1),expires_in:z.number().positive().optional()});
@@ -73,6 +74,11 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     if (!pr.html_url.startsWith(`https://github.com/${repository}/pull/`)) throw new Error('Unexpected GitHub pull request URL');
     return {url:pr.html_url,number:pr.number,branch,state:pr.merged_at ? 'merged' : pr.state};
   }
+  async function branchCommit(token:string,repository:string,branch:string):Promise<string|null>{
+    if(!/^[\w.-]+\/[\w.-]+$/.test(repository)||!branch)throw new GithubError(400,'Invalid branch lookup');
+    try{return branchSchema.parse(await request(`/repos/${repository}/branches/${encodeURIComponent(branch)}`,token)).commit.sha;}
+    catch(error){if(error instanceof GithubError&&error.status===404)return null;throw error;}
+  }
   async function installationToken(installationId:number, repository:string,permission:'read'|'write'='write') {
     if (!Number.isSafeInteger(installationId) || installationId<1 || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository installation');
     const value = z.object({token:z.string().regex(/^[A-Za-z0-9_]+$/),expires_at:z.string()}).parse(await request(`/app/installations/${installationId}/access_tokens`,jwt(),{repositories:[repository.split('/')[1]],permissions:{contents:permission,pull_requests:permission}}));
@@ -80,7 +86,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     return value.token;
   }
   return {
-    repositories, authorize, findPullRequest, installationToken,
+    repositories, authorize, findPullRequest, branchCommit, installationToken,
     async installationUrl(state:string) {
       if(!/^[A-Za-z0-9_-]{43}$/.test(state))throw new Error('Invalid installation state');
       const app=appSchema.parse(await request('/app',jwt()));

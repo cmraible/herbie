@@ -37,6 +37,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     start: (input: GoalInput, requestId: string) => request('/api/goals', goalSchema, goalInput.parse(input), requestId),
     events: (id: string, after = 0) => request(`${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`, z.array(eventSchema)),
     action: (id: string, action: GoalAction) => request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
+    retryPublication: (id:string) => request(`${goalPath(id)}/retry-publication`,goalSchema,{}),
     authStart: (client: 'cli'|'web') => request('/api/auth/start', authStartSchema, {client}),
     installationStart: () => request('/api/auth/install/start', installationStartSchema, {}),
     authPoll: (token: string) => request(`/api/auth/poll?token=${encodeURIComponent(token)}`, authPollSchema),

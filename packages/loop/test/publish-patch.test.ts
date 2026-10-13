@@ -159,8 +159,9 @@ for (const problem of ['existing branch', 'base drift', 'invalid patch']) {
 
 test('a push failure reports uncertain remote state without opening a PR or retrying', async t => {
   const { remote, scratch, request, createPullRequest, publish } = await fixture(t);
+  const phases: string[] = [];
   await writeFile(join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\nexit 1\n', { mode: 0o700 });
-  await assert.rejects(publish(), error => {
+  await assert.rejects(publishTestedPatch(createPullRequest, { ...request, onPhase: async phase => { phases.push(phase); } }), error => {
     assert.ok(error instanceof PatchPublicationError);
     assert.equal(error.publication.stage, 'pushing');
     assert.match(error.publication.commit!, /^[0-9a-f]{40}$/);
@@ -168,6 +169,7 @@ test('a push failure reports uncertain remote state without opening a PR or retr
   });
   assert.equal(await git(remote, 'branch', '--list', request.branch), '');
   assert.equal(createPullRequest.mock.callCount(), 0);
+  assert.deepEqual(phases, ['preparing','pushing']);
   assert.deepEqual(await readdir(scratch), []);
 });
 

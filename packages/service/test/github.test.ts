@@ -12,7 +12,7 @@ import { goalSchema } from '@herbie/contracts';
 
 export async function githubFixture(t: TestContext) {
   const requests: {path: string; authorization: string; body: unknown}[] = [];
-  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, pr: false, losePrResponse:false };
+  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -29,9 +29,14 @@ export async function githubFixture(t: TestContext) {
     else if (path === '/app') res.end(JSON.stringify({slug:'herbie-fixture'}));
     else if (path === '/repos/alice/project/installation') res.end(JSON.stringify({id:11,permissions:{contents:fixture.contents,pull_requests:fixture.pullRequests}}));
     else if (path === '/repos/alice/project') res.end(JSON.stringify(repository));
+    else if (path.startsWith('/repos/alice/project/branches/')) {
+      const name=decodeURIComponent(path.slice('/repos/alice/project/branches/'.length));
+      const sha=fixture.branchHeads.get(name);
+      if(sha)res.end(JSON.stringify({commit:{sha}}));else{res.statusCode=404;res.end('{}');}
+    }
     else if (path === '/app/installations/11/access_tokens') res.end(JSON.stringify({token:'ghs_fixture',expires_at:new Date(Date.now()+3600000).toISOString()}));
     else if (path.startsWith('/repos/alice/project/pulls')) {
-      const pr = {number:8,html_url:'https://github.com/alice/project/pull/8',state:'open',merged_at:null,head:{ref:'herbie/attempt-1'},base:{ref:'main'}};
+      const pr = {number:8,html_url:'https://github.com/alice/project/pull/8',state:'open',merged_at:null,head:{ref:fixture.prBranch},base:{ref:'main'}};
       if(req.method==='POST') {
         fixture.pr=true;
         if(fixture.losePrResponse) {res.statusCode=500;res.end('{}');}
@@ -127,6 +132,25 @@ test('review reconciliation uses only repository-scoped read permission after us
   assert.deepEqual(requests.find(request=>request.path==='/app/installations/11/access_tokens')?.body,{repositories:['project'],permissions:{contents:'read',pull_requests:'read'}});
   fixture.private=true;
   await assert.rejects(live.reconciliationRepository('alice/project'),/public/);
+});
+
+test('publication recovery checks all-state PR, exact branch and pinned base using read-only GitHub access',async t=>{
+  const {github,fixture,requests}=await githubFixture(t);
+  const live=createLiveAdapters({apiKey:'fixture-never-used',openaiSecretName:'existing-secret'},github,{userToken:async()=> 'ghu_fixture'});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',testCommand:['node','--test'],maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
+  const execution={goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/synthetic-goal/synthetic-job'};
+  const changes={baseCommit:'0'.repeat(40),patch:Buffer.from('fixture')};
+  assert.equal(await live.checkPublicationRetry?.(execution,changes),'ready');
+  assert.ok(requests.some(request=>request.path==='/repos/alice/project/branches/herbie%2Fsynthetic-goal%2Fsynthetic-job'));
+  assert.ok(requests.filter(request=>request.path.startsWith('/app/installations/11/access_tokens')).every(request=>JSON.stringify(request.body).includes('"contents":"read"')));
+
+  fixture.branchHeads.set(execution.branch,'1'.repeat(40));
+  assert.equal(await live.checkPublicationRetry?.(execution,changes),'branch_exists');
+  fixture.branchHeads.delete(execution.branch);
+  fixture.pr=true;fixture.prBranch=execution.branch;
+  assert.equal(await live.checkPublicationRetry?.(execution,changes),'pull_request_exists');
+  fixture.pr=false;fixture.branchHeads.set('main','2'.repeat(40));
+  assert.equal(await live.checkPublicationRetry?.(execution,changes),'base_changed');
 });
 
 test('checks webhook raw bytes and rejects malformed signatures', async t => {
