@@ -257,11 +257,21 @@ printf '%s\\n' 'private-canary-stdout'
 printf '%s\\n' '-----BEGIN PRIVATE KEY-----' 'private-canary-body' '-----END PRIVATE KEY-----' >&2
 exit 9
 `,{mode:0o700});
-  const result=spawnSync(process.execPath,['--import','tsx','packages/cloudflare/scripts/deploy.ts'],{
+  const preload=join(directory,'cloudflare-fixture.mjs');
+  writeFileSync(preload,`import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';
+globalThis.fetch=async (url,options)=>{
+  assert.equal(String(url),'https://api.cloudflare.com/client/v4/accounts/${context.CLOUDFLARE_ACCOUNT_ID}/containers/applications');
+  assert.equal(options.headers.authorization,'Bearer ${context.CLOUDFLARE_API_TOKEN}');
+  writeFileSync(${JSON.stringify(join(directory,'image-looked-up'))},'yes');
+  return Response.json({success:true,result:[{name:'herbie-service-herbiecontainer',configuration:{image:'registry.cloudflare.com/${context.CLOUDFLARE_ACCOUNT_ID}/herbie-service-herbiecontainer@sha256:${'a'.repeat(64)}'}}]});
+};`);
+  const result=spawnSync(process.execPath,['--import',preload,'--import','tsx','packages/cloudflare/scripts/deploy.ts'],{
     cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',env:{...context,PATH:bin,TMPDIR:directory}});
   assert.equal(result.status,1);
   assert.match(result.stderr,/Deployment diagnostic: stage=container-limits; category=account-limit; exit=9; signal=none; codes=none/);
   assert.doesNotMatch(result.stdout+result.stderr,/private-canary|BEGIN PRIVATE|test-only|synthetic-fixture/);
+  assert.ok(readdirSync(directory).includes('image-looked-up'));
   assert.deepEqual(readdirSync(directory).filter(name=>name.startsWith('herbie-deploy-')),[]);
 });
 
