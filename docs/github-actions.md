@@ -157,10 +157,8 @@ target checks without hardcoding an account in source. The helper constructs the
 allowlisted `HERBIE_RUNTIME_SECRETS` JSON bundle, and writes Wrangler's secrets
 file with mode **0600** in a private temporary directory outside the Docker context.
 Runtime credentials are excluded from child-tool environments and build arguments.
-The Cloudflare token reaches Docker only for registry login and image publication,
-and reaches Wrangler for the Worker deployment. Docker registry credentials are
-stored under the runner's temporary directory and removed at the end of the job.
-Wrangler logs and its secrets file use a separate private temporary directory.
+The Cloudflare token reaches Wrangler for image publication and Worker deployment.
+Wrangler logs and its secrets file use a private temporary directory.
 Files are removed on completion or handled interruption; the disposable runner is the final cleanup boundary.
 No production logs or secret files are uploaded as workflow artifacts. Child-tool
 output is suppressed to avoid credential-bearing diagnostics. Removing identifiers
@@ -177,10 +175,12 @@ release does not need a separate desktop secret-upload command.
 
 Before deployment, the workflow builds the container once with Buildx and publishes
 an immutable image tagged with the commit and workflow run. GitHub's Actions cache
-retains Docker build layers between production releases. Wrangler deploys that
-published image instead of rebuilding the Dockerfile. The helper starts checking
-the public health endpoint while Wrangler deploys and only reports success when
-the Worker and container both report the requested revision and execution mode.
+retains Docker build layers between production releases; Wrangler publishes the
+locally loaded image to Cloudflare's registry using the existing API token.
+Wrangler deploys that published image instead of rebuilding the Dockerfile. The
+helper starts checking the public health endpoint while Wrangler deploys and only
+reports success when the Worker and container both report the requested revision
+and execution mode.
 
 Check login, repository access, disabled start/resume, actual Supabase TLS and
 security advisors before enabling automatic deployment. Automatic mode
