@@ -32,6 +32,20 @@ let phase='configuration validation';
 try{
   const input:unknown=JSON.parse(await readFile(join(directory,'wrangler.jsonc'),'utf8'));
   const prepared=prepareDeployment(process.env,input,directory);
+  phase='serving-container preservation';
+  // Preserve the existing application exactly: changing its image would still
+  // trigger a stop/start rollout before the readiness-gated handoff.
+  const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/containers/applications`,{
+    headers:{authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(10_000)]),redirect:'error'});
+  const applications:unknown=await response.json();
+  if(!response.ok||!applications||typeof applications!=='object'||!('result' in applications)||!Array.isArray(applications.result))throw new Error('Could not preserve serving application');
+  const serving:unknown=applications.result.find((app:unknown)=>!!app&&typeof app==='object'&&'name' in app&&app.name==='herbie-service-herbiecontainer');
+  if(!serving||typeof serving!=='object'||!('configuration' in serving)||!serving.configuration||typeof serving.configuration!=='object'||!('image' in serving.configuration))throw new Error('Serving application missing');
+  const servingImage=serving.configuration.image;
+  if(typeof servingImage!=='string'||!new RegExp(`^registry\\.cloudflare\\.com/${process.env.CLOUDFLARE_ACCOUNT_ID}/[a-z0-9-]+@sha256:[a-f0-9]{64}$`).test(servingImage))throw new Error('Serving image identity unavailable');
+  prepared.config.containers[0].image=servingImage;
+  delete prepared.config.containers[0].image_build_context;
+  delete prepared.config.containers[0].image_vars;
   phase='current-main verification';
   const latest=(await command('git',['ls-remote',prepared.repositoryUrl,'refs/heads/main'])).split(/\s+/)[0];
   if(latest!==process.env.GITHUB_SHA)throw new Error('Refusing a stale deployment; run the workflow on current main');
@@ -47,7 +61,7 @@ try{
   const health=waitForDeployment(prepared.origin,prepared.revision,{executionEnabled:prepared.executionEnabled,signal:healthSignal,timeoutMs:deadline.remaining(),report:message=>console.log(message)})
     .then(()=>({ok:true as const}),error=>({ok:false as const,error}));
   try{
-    await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
+    await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath],
       {cwd:directory,signal:controller.signal,report:message=>console.log(message),logPath:join(temporary,'wrangler.log'),env:{...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
         DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')}});
   }catch(error){healthController.abort();await health;throw error;}

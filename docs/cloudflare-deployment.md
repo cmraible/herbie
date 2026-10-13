@@ -10,9 +10,11 @@ privately before deployment.
 ```mermaid
 flowchart LR
   Clients[Web and CLI] --> Edge[Cloudflare Worker / React assets]
-  Edge --> DO[Named Durable Object]
-  Cron[One-minute Cron] --> DO
-  DO --> Node[One trusted Node API + worker container]
+  Edge --> Router[Durable release router]
+  Cron[One-minute Cron] --> Router
+  Router --> Node[Active Node API + worker container]
+  Router -. readiness checks .-> Candidate[Candidate release container]
+  Candidate --> PG
   Node --> PG[Private Supabase Postgres schema]
   Node --> GH[GitHub App API / native Git publication]
   Node --> Daytona[Disposable Daytona coding sandbox]
@@ -25,30 +27,70 @@ The trusted API and publisher share one container; neither executes generated
 code. GitHub write tokens stay there, outside Daytona. Repository tests still run
 only in disposable Daytona sandboxes.
 
-The container uses the current native `ctx.container` API with the **default**
-scheduling policy, one `basic` instance, and a fixed `herbie` Durable Object name.
-There is no per-user container fleet or second durable job queue. All goals,
-leases, sessions, artifacts and publication intent remain in Postgres.
+The native `ctx.container` API uses a release-specific Durable Object and the
+**durable_object** scheduling policy. Cloudflare does not replace these instances
+when a Worker/image map is deployed. A separate router stores the active release
+in Durable Object storage. It warms the candidate in the background and commits a
+new route only after live API/database readiness, execution mode and both release
+identities match. Requests continue using the previous route during startup or
+startup failures. A deployment that never becomes ready retains the old route.
+
+This scheduling policy is a Cloudflare public beta. It cannot be enabled on the
+existing application in place, so the migration retains the original `basic`
+application as a fallback and creates a new application/namespace. Before every
+production deployment, the helper reads and pins the original application's
+existing image digest; it refuses deployment if that image cannot be identified.
+The old process is never destroyed because Worker variables changed.
+
+New releases use `standard-1`: `basic` is unavailable with this policy. Expect a
+higher steady instance cost plus overlap during deployment; reassess the existing
+$20/month incremental hosting budget before rollout. There is one active API
+instance, a candidate during startup, and retired instances during shutdown.
+This is deployment availability, not host-failure replication or a per-user fleet.
+Postgres remains the source of truth for all goals, leases and publication intent.
+
+Candidate cleanup is recorded durably before preparation begins. Candidates that
+never promote receive SIGTERM after 25 minutes and are forcefully retired after
+another 15 minutes, including deletion of stored launch credentials. Restarted
+Durable Objects restore the serving container inactivity timeout immediately.
+
+After promotion, the old release remains untouched for one minute to allow
+requests that already selected it to finish. A persistent alarm then sends SIGTERM,
+which stops new claims and HTTP acceptance while active work drains. After another
+15 minutes the alarm forcefully retires any remaining process and removes its
+stored launch credentials. The candidate and old worker can briefly overlap;
+transactional job claims (`FOR UPDATE ... SKIP LOCKED`) and lease fencing prevent
+them from claiming the same job. Never revoke a retiring worker's credentials
+before its active external work has settled.
+
+The launch image digest and exact runtime environment are retained in encrypted
+Durable Object storage so a restarted old release can still serve its own image
+and settings. Launch credentials are deleted when that release is retired.
+Do not roll back to the old singleton Worker: it bypasses the persisted active
+route and may restart the legacy container. Roll back code by reverting a commit
+and deploying it as a new, readiness-checked release through the same router.
+Assets and Worker code activate before the API handoff, so API/schema changes
+must support both adjacent versions. Destructive schema changes need a separate,
+backwards-compatible migration plan.
 
 ## Lifecycle and the execution gate
 
 `HERBIE_EXECUTION_ENABLED` defaults to `false` in live service configuration and
 is checked into Wrangler as `false`. Both ingress and the authenticated Node API
-reject new goals/resume. The hosted worker is not started, and execution adapters
+reject new goals/resume. The hosted worker is not started in the new release, and execution adapters
 cannot call Daytona or publish. GitHub sign-in, reads, pause/cancel, and review
 webhooks remain available once their configuration exists. Daytona credentials
 are not required while execution is disabled. There is no fallback to a public
 demo or simulated live success.
 
-When enabled, the independent one-minute Cron calls `ensureRunning` on the same
-Durable Object, starts a stopped container, and waits for API/database readiness.
-A ten-minute inactivity timeout is set after start and restored when the Durable
-Object restarts. Database polling alone is not assumed to keep the container
-alive. Closing every browser/CLI does not stop supervision. Startup/readiness
-failures fail the scheduled invocation with sanitized logs; the next Cron retries.
-When disabled, Cron is a no-op, so an unused container can sleep.
+The independent one-minute Cron keeps the active API warm regardless of the
+execution flag and retries candidate startup. Execution stays gated independently.
+A thirty-minute inactivity timeout allows retiring workers to finish shutdown.
+A slow or failed candidate is logged without interrupting requests to the active
+release. Failure of the active service fails the scheduled invocation; no success
+response is fabricated.
 
-Containers may stop during host failures or rollouts. Disk is ephemeral: it holds
+Containers may still stop during host failures. Disk is ephemeral: it holds
 only temporary bare Git publication files. SIGTERM stops new claims and HTTP
 acceptance while the active bounded attempt finishes cleanup. The platform can
 still terminate it before cleanup finishes. Expired leases preserve the existing
@@ -59,11 +101,10 @@ Container environment variables are a startup snapshot. Changing Worker secrets
 or the execution flag does **not** update an already-running process. Before a
 rotation/update: disable new work at ingress, pause all nonterminal goals,
 including those awaiting review, and wait for active work/publication to settle.
-For a configuration-only change, increment the non-secret `HERBIE_RUNTIME_REVISION`
-in Wrangler's `image_vars`; its Docker image label forces a changed image rather
-than a no-op deployment. Deploy with `--containers-rollout=immediate`, wait for
-replacement to finish, then verify `/api/health` reports the intended execution
-state before resuming goals. Deployment success only means the rollout started.
+For a configuration-only change, deploy through the GitHub workflow. Every
+run/attempt already creates a unique image/release identity. The new process is
+warmed beside the old one, and `/api/health` confirms the handoff. Deployment
+success requires the new route to be ready, not merely a successful image upload.
 Do not treat a flag
 change as cancellation of an attempt already in flight. Keep the credential
 encryption key stable unless performing a separately planned data migration.
@@ -76,7 +117,8 @@ encryption key stable unless performing a separately planned data migration.
    disable the Data API if nothing else uses it. No browser Supabase key is needed.
 2. Workers Paid eligibility and budget approval in the selected Cloudflare
    account. Resources are one Worker/assets deployment, its Durable Object
-   namespace, one container application/image, and one Cron trigger. No custom
+   release router and container namespaces, the retained legacy application, a
+   release-managed container application/images, and one Cron trigger. No custom
    DNS zone, Hyperdrive, D1, R2, Queue, or external VM is required for this slice.
 3. A trusted PostgreSQL owner connection using the actual Supavisor **session**
    endpoint on port 5432, with URL-encoded password and verified TLS. Recognized

@@ -57,8 +57,9 @@ export function prepareDeployment(environment:Environment,input:unknown,director
   }
   const config=object(input),vars=object(config.vars),assets=object(config.assets);
   const containers=config.containers;
-  if(!Array.isArray(containers)||containers.length!==1)throw new Error('Invalid deployment configuration');
-  const container=object(containers[0]);
+  if(!Array.isArray(containers)||containers.length!==2)throw new Error('Invalid deployment configuration');
+  const container=object(containers[0]),release=object(containers[1]),images=object(release.images),image=object(images.release);
+  if(release.class_name!=='ReleaseContainer'||release.scheduling_policy!=='durable_object'||release.max_instances!==undefined||release.instance_type!==undefined)throw new Error('Invalid release configuration');
   if(config.account_id!==undefined||config.name!=='herbie-service'||vars.HERBIE_PUBLIC_URL!=='https://herbie.example.invalid'
     ||vars.HERBIE_EXECUTION_ENABLED!=='false'||container.instance_type!=='basic'||container.max_instances!==1){
     throw new Error('Deployment target or disabled execution configuration does not match the approved service');
@@ -73,12 +74,13 @@ export function prepareDeployment(environment:Environment,input:unknown,director
     ...(executionEnabled?{DAYTONA_API_KEY:required(environment,'DAYTONA_API_KEY'),HERBIE_DAYTONA_OPENAI_SECRET:required(environment,'HERBIE_DAYTONA_OPENAI_SECRET'),
       ...(environment.DAYTONA_API_URL?{DAYTONA_API_URL:environment.DAYTONA_API_URL}:{}),
       ...(environment.HERBIE_DAYTONA_SNAPSHOT?{HERBIE_DAYTONA_SNAPSHOT:environment.HERBIE_DAYTONA_SNAPSHOT}:{})}:{})};
+  const legacy:{[key:string]:unknown;image:string;image_build_context?:string;image_vars?:{HERBIE_RUNTIME_REVISION:string}}={...container,image:resolve(directory,required(container,'image')),image_build_context:resolve(directory,required(container,'image_build_context')),image_vars:{HERBIE_RUNTIME_REVISION:revision}};
   return {revision,origin,executionEnabled,repositoryUrl:`https://github.com/${repository}.git`,secrets:JSON.stringify({HERBIE_RUNTIME_SECRETS:JSON.stringify(runtime)}),
     config:{...config,account_id:account,main:resolve(directory,required(config,'main')),
       vars:{...vars,HERBIE_PUBLIC_URL:origin,HERBIE_EXECUTION_ENABLED:String(executionEnabled),HERBIE_DEPLOYMENT_ID:revision},
       assets:{...assets,directory:resolve(directory,required(assets,'directory'))},
-      containers:[{...container,image:resolve(directory,required(container,'image')),image_build_context:resolve(directory,required(container,'image_build_context')),
-        image_vars:{HERBIE_RUNTIME_REVISION:revision}}]}};
+      containers:[legacy,
+        {...release,images:{release:{...image,dockerfile:resolve(directory,required(image,'dockerfile')),build_context:resolve(directory,required(image,'build_context')),build_vars:{HERBIE_RUNTIME_REVISION:revision}}}}] satisfies [Record<string,unknown>,Record<string,unknown>]}};
 }
 
 // Dependency-free schema: collect only static field names/reasons, never parser errors or values.

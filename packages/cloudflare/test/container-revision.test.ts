@@ -22,29 +22,29 @@ test('a running container stays up when its startup revision matches the Worker'
   assert.equal(container.running,true);assert.deepEqual(container.calls,[]);assert.equal(starts,0);
 });
 
-test('a deployment revision change restarts the container with current Worker configuration',async()=>{
+test('a deployment revision change preserves the serving container until a router handoff',async()=>{
   const storage=new MemoryStorage();await storage.put('containerStartedRevision','release-a');
   const container=new FakeContainer(true);let starts=0;
   await ensureContainerRevision(container,storage,'release-b',()=>{starts++;container.running=true;},async()=>{});
-  assert.deepEqual(container.calls,['destroy:Worker deployment changed']);
-  assert.equal(starts,1);assert.equal(container.running,true);
-  assert.equal(await storage.get('containerStartedRevision'),'release-b');
+  assert.deepEqual(container.calls,[]);
+  assert.equal(starts,0);assert.equal(container.running,true);
+  assert.equal(await storage.get('containerStartedRevision'),'release-a');
 });
 
-test('a stopped or previously untracked container starts once and records its configuration revision',async()=>{
+test('a stopped container starts once while an untracked running container remains available',async()=>{
   for(const running of [false,true]){
     const storage=new MemoryStorage();const container=new FakeContainer(running);let starts=0;
     await ensureContainerRevision(container,storage,'release-new',()=>{starts++;container.running=true;},async()=>{});
-    assert.deepEqual(container.calls,running?['destroy:Worker deployment changed']:[]);
-    assert.equal(starts,1);assert.equal(container.running,true);
-    assert.equal(await storage.get('containerStartedRevision'),'release-new');
+    assert.deepEqual(container.calls,[]);
+    assert.equal(starts,running?0:1);assert.equal(container.running,true);
+    assert.equal(await storage.get('containerStartedRevision'),running?undefined:'release-new');
   }
 });
 
-test('a failed container destroy does not start or record a new revision',async()=>{
+test('a deployment never calls destroy on the serving container',async()=>{
   const storage=new MemoryStorage();await storage.put('containerStartedRevision','release-a');
   const container=new FakeContainer(true);container.destroy=async()=>{throw new Error('destroy failed');};let starts=0;
-  await assert.rejects(ensureContainerRevision(container,storage,'release-b',()=>{starts++;},async()=>{}),/destroy failed/);
+  await ensureContainerRevision(container,storage,'release-b',()=>{starts++;},async()=>{});
   assert.equal(starts,0);assert.equal(await storage.get('containerStartedRevision'),'release-a');
 });
 

@@ -26,11 +26,28 @@
     "scheduling_policy": "default",
     "instance_type": "basic",
     "max_instances": 1
+  }, {
+    "class_name": "ReleaseContainer",
+    "scheduling_policy": "durable_object",
+    "images": { "release": {
+      "dockerfile": "../../Dockerfile",
+      "build_context": "../..",
+      "build_vars": { "HERBIE_RUNTIME_REVISION": "1" }
+    } },
+    "observability": { "logs": { "enabled": true } }
   }],
   "durable_objects": {
-    "bindings": [{ "name": "HERBIE", "class_name": "HerbieContainer" }]
+    "bindings": [
+      { "name": "HERBIE", "class_name": "HerbieContainer" },
+      { "name": "RELEASES", "class_name": "ReleaseContainer" },
+      { "name": "ROUTER", "class_name": "ReleaseRouter" }
+    ]
   },
-  "exports": { "HerbieContainer": { "type": "durable-object", "storage": "sqlite" } },
+  "exports": {
+    "HerbieContainer": { "type": "durable-object", "storage": "sqlite" },
+    "ReleaseContainer": { "type": "durable-object", "storage": "sqlite" },
+    "ReleaseRouter": { "type": "durable-object", "storage": "sqlite" }
+  },
   "triggers": { "crons": ["* * * * *"] },
   "observability": {
     "enabled": true,
