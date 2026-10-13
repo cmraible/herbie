@@ -76,6 +76,14 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       const token = await github.installationToken(execution.repository.installationId,execution.repository.repository,'read');
       return github.findPullRequest(token,execution.repository.repository,execution.branch);
     },
+    async checkUnpublished(execution) {
+      const userToken=await auth.userToken(execution.goal.ownerId);
+      const access=await github.authorize(userToken,execution.goal.repository);
+      const token=await github.installationToken(access.installationId,access.repository,'read');
+      if(await github.findPullRequest(token,access.repository,execution.branch))return 'pull_request_exists';
+      if(await github.branchCommit(token,access.repository,execution.branch))return 'branch_exists';
+      return 'absent';
+    },
     async checkPublicationRetry(execution,changes) {
       const userToken=await auth.userToken(execution.goal.ownerId);
       const access=await github.authorize(userToken,execution.goal.repository);
