@@ -1,0 +1,153 @@
+import {test,expect,type Page} from '@playwright/test';
+import {randomUUID} from 'node:crypto';
+
+const demoSession={mode:'demo',user:{id:'fixture-user',login:'sample-user'}};
+const goalId=randomUUID();
+const fixtureGoal={id:goalId,ownerId:'fixture-owner',repository:'demo/sample',prompt:'Keep loaded work visible',testCommand:['npm','test'],maxAttempts:1,attemptCount:1,state:'running',createdAt:'2026-10-13T00:00:00.000Z',updatedAt:'2026-10-13T00:00:00.000Z',mode:'demo',stopRequested:null,pullRequest:null,error:null};
+const health={mode:'demo'};
+const json=(route:Parameters<Parameters<Page['route']>[1]>[0],body:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+async function routeSignedIn(page:Page,goals:unknown[]=[fixtureGoal]){
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>json(route,demoSession));
+  await page.route('**/api/goals',route=>route.request().method()==='GET'?json(route,goals):route.continue());
+  await page.route('**/api/repositories',route=>json(route,[]));
+  await page.route('**/api/goals/*/events**',route=>json(route,[]));
+}
+
+test('the welcome copy renders immediately while health and session are pending',async({page})=>{
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/api/health',async route=>{await gate;await json(route,health);});
+  await page.route('**/api/session',async route=>{await gate;await json(route,null,401);});
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:/Give your next idea/})).toBeVisible();
+  await expect(page.getByText('Checking your workspace…')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Enter local demo'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Continue with GitHub'})).toHaveCount(0);
+  await page.screenshot({path:'test-results/loading-welcome-pending.png',fullPage:true});
+  release();
+  await expect(page.getByRole('button',{name:'Enter local demo'})).toBeVisible();
+});
+
+test('goals, totals, details, and repository actions stay pending until their responses arrive',async({page})=>{
+  let releaseGoals!:()=>void;
+  let releaseRepos!:()=>void;
+  const goalsGate=new Promise<void>(resolve=>{releaseGoals=resolve;});
+  const reposGate=new Promise<void>(resolve=>{releaseRepos=resolve;});
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>json(route,demoSession));
+  await page.route('**/api/goals',async route=>{if(route.request().method()==='GET'){await goalsGate;await json(route,[]);}else await route.continue();});
+  await page.route('**/api/repositories',async route=>{await reposGate;await json(route,[]);});
+  await page.route('**/api/goals/*/events**',route=>json(route,[]));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Your coding goals.'})).toBeVisible();
+  await expect(page.getByRole('status').filter({hasText:'Loading your goals'})).toBeVisible();
+  await expect(page.getByText('A fresh start')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'+ New goal'})).toBeDisabled();
+  await page.screenshot({path:'test-results/loading-dashboard-pending.png',fullPage:true});
+  releaseGoals();
+  await expect(page.getByText('A fresh start')).toBeVisible();
+  await expect(page.getByRole('button',{name:'+ New goal'})).toBeEnabled();
+  await page.getByRole('button',{name:'+ New goal'}).click();
+  await expect(page.getByRole('status').filter({hasText:'Checking repository access'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
+  releaseRepos();
+  await expect(page.getByRole('dialog').getByText('No repositories available.')).toBeVisible();
+  await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
+});
+
+test('failed startup checks never masquerade as a signed-out session and can be retried',async({page})=>{
+  let sessionRequest=0;
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>{sessionRequest++;return sessionRequest===1?json(route,{error:'session unavailable'},503):json(route,null,401);});
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('session unavailable');
+  await expect(page.getByRole('button',{name:'Continue with GitHub'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Try again'}).click();
+  await expect(page.getByRole('button',{name:'Enter local demo'})).toBeVisible();
+});
+
+test('an initial goal failure has a retry state instead of looking like an empty workspace',async({page})=>{
+  let requests=0;
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>json(route,demoSession));
+  await page.route('**/api/goals',route=>{requests++;return requests===1?json(route,{error:'goals unavailable'},503):json(route,[]);});
+  await page.route('**/api/repositories',route=>json(route,[]));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Goals didn’t load'})).toBeVisible();
+  await expect(page.getByText('A fresh start')).toHaveCount(0);
+  await page.getByRole('button',{name:'Try again'}).first().click();
+  await expect(page.getByText('A fresh start')).toBeVisible();
+});
+
+test('an owner-protected goals rejection never exposes an empty workspace or goal actions',async({page})=>{
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>json(route,demoSession));
+  await page.route('**/api/goals',route=>json(route,{error:'Not authorized to access these goals'},403));
+  await page.route('**/api/repositories',route=>json(route,[]));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Goals didn’t load'})).toBeVisible();
+  await expect(page.getByText('A fresh start')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'+ New goal'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Create your first goal →'})).toHaveCount(0);
+});
+
+test('signed-out, sign-in, and sign-out states only appear after their responses',async({page})=>{
+  let releaseLogin!:()=>void;
+  let releaseLogout!:()=>void;
+  const loginGate=new Promise<void>(resolve=>{releaseLogin=resolve;});
+  const logoutGate=new Promise<void>(resolve=>{releaseLogout=resolve;});
+  await page.route('**/api/health',route=>json(route,health));
+  await page.route('**/api/session',route=>json(route,null,401));
+  await page.route('**/api/demo/login',async route=>{await loginGate;await json(route,demoSession);});
+  await page.route('**/api/auth/logout',async route=>{await logoutGate;await json(route,{ok:true});});
+  await page.route('**/api/goals',route=>json(route,[]));
+  await page.route('**/api/repositories',route=>json(route,[]));
+  await page.goto('/');
+  const login=page.getByRole('button',{name:'Enter local demo'});
+  await login.click();
+  await expect(login).toBeDisabled();
+  await expect(page.getByRole('heading',{name:/Give your next idea/})).toBeVisible();
+  releaseLogin();
+  await expect(page.getByRole('heading',{name:'Your coding goals.'})).toBeVisible();
+  const logout=page.getByRole('button',{name:'Sign out'}).first();
+  await logout.click();
+  await expect(logout).toBeDisabled();
+  await expect(page.getByRole('heading',{name:'Your coding goals.'})).toBeVisible();
+  releaseLogout();
+  await expect(page.getByRole('button',{name:'Enter local demo'})).toBeVisible();
+});
+
+test('poll failures keep the last goal and details on screen',async({page})=>{
+  let requests=0;
+  await routeSignedIn(page);
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',route=>{
+    if(route.request().method()!=='GET')return route.continue();
+    requests++;
+    return requests===1?json(route,[fixtureGoal]):json(route,{error:'temporary goals outage'},503);
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Keep loaded work visible'})).toBeVisible();
+  await expect(page.getByText('Showing the latest saved progress.')).toBeVisible({timeout:6000});
+  await expect(page.getByRole('heading',{name:'Keep loaded work visible'})).toBeVisible();
+  await expect(page.getByText('A fresh start')).toHaveCount(0);
+});
+
+test('mobile loading and repeated refresh clicks remain within the viewport',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  let requests=0;
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>{requests++;return json(route,[]);});
+  await page.goto('/');
+  await expect(page.getByText('A fresh start')).toBeVisible();
+  await page.getByRole('button',{name:'+ New goal'}).click();
+  const refresh=page.getByRole('button',{name:'Refresh repositories'});
+  await refresh.click();
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(requests).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});
