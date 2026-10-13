@@ -167,6 +167,21 @@ test('publication recovery checks all-state PR, exact branch and pinned base usi
   assert.equal(await live.checkPublicationRetry?.(execution,changes),'base_changed');
 });
 
+test('cancellation absence checks use read-only reconciliation access after archival',async t=>{
+  const {github,fixture,requests}=await githubFixture(t);
+  fixture.archived=true;
+  const live=createLiveAdapters(undefined,github,{userToken:async()=>{throw new Error('Read-only cancellation must not require write authorization');}});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',testCommand:['node','--test'],maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
+  const execution={goal,repository:await live.reconciliationRepository(goal.repository),attemptId:randomUUID(),branch:'herbie/attempt-1'};
+  assert.equal(await live.checkUnpublished?.(execution),'absent');
+  fixture.branchHeads.set(execution.branch,'1'.repeat(40));
+  assert.equal(await live.checkUnpublished?.(execution),'branch_exists');
+  fixture.pr=true;
+  assert.equal(await live.checkUnpublished?.(execution),'pull_request_exists');
+  assert.ok(requests.filter(request=>request.path.endsWith('/access_tokens')).every(request=>JSON.stringify(request.body)===JSON.stringify({repositories:['project'],permissions:{contents:'read',pull_requests:'read'}})));
+  assert.ok(!requests.some(request=>request.path.startsWith('/user/installations')));
+});
+
 test('checks webhook raw bytes and rejects malformed signatures', async t => {
   const {github} = await githubFixture(t);
   const body = Buffer.from('{"action":"closed"}');

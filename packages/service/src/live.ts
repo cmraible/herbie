@@ -73,8 +73,10 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       return github.findPullRequest(token,execution.repository.repository,execution.branch);
     },
     async checkUnpublished(execution) {
-      const userToken=await auth.userToken(execution.goal.ownerId);
-      const access=await github.authorize(userToken,execution.goal.repository);
+      // The owner-authenticated API already obtained this repository with the
+      // App's read-only reconciliation access. Archival must not block safe
+      // cancellation of prior work; this check never authorizes a new write.
+      const access=execution.repository;
       const token=await github.installationToken(access.installationId,access.repository,'read');
       if(await github.findPullRequest(token,access.repository,execution.branch))return 'pull_request_exists';
       if(await github.branchCommit(token,access.repository,execution.branch))return 'branch_exists';
