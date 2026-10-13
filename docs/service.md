@@ -48,6 +48,13 @@ worker before manual database repair. Operator recovery tooling and recovering a
 pushed branch that has no PR are follow-up work. Do not use cancellation to imply
 that an uncertain external publication was undone.
 
+For an unpublished saved artifact, the authenticated CLI supports
+`retry-publication GOAL_ID`. The server checks verification evidence, ownership,
+the exact attempt PR and branch, and the original base commit before queuing
+publication without another model run. An existing branch or changed base returns
+a conflict; inspect `logs GOAL_ID` and the remote state before further recovery.
+This command does not retry sandbox execution or bypass publication checks.
+
 Demo rows and sessions are separate from live work by mode. Prefer a separate
 Postgres database for production; the sample password and fixed demo encryption
 key are only for local demo. Keep the database and encryption key together in

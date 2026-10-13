@@ -9,7 +9,7 @@ import { goalInput, actionSchema } from '@herbie/contracts';
 import { createClient, ApiError } from '@herbie/contracts/client';
 
 const savedSession = z.object({baseUrl: z.string().url(), token: z.string().min(1)}).strict();
-const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT --test '["npm","test"]' [--max-attempts 1] [--request-id UUID]\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
+const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT --test '["npm","test"]' [--max-attempts 1] [--request-id UUID]\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n  retry-publication GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved verified work only when the server confirms safe recovery.\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
 
 export type CliIO = {configPath?: string; stdout: (value: string) => void; stderr: (value: string) => void};
 
@@ -101,6 +101,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
     }
     if (!id) throw new Error(`${command} requires a goal ID`);
     if (command === 'logs') { print(await client.events(id, Number(values.after ?? 0))); return 0; }
+    if (command === 'retry-publication') { print(await client.retryPublication(id)); return 0; }
     const action = actionSchema.safeParse(command);
     if (action.success) { print(await client.action(id, action.data)); return 0; }
     throw new Error(`Unknown command: ${command}`);

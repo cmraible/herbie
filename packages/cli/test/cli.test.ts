@@ -96,6 +96,32 @@ test('a saved bearer token is never sent to a different service', async () => {
   } finally { await app.close(); }
 });
 
+test('saved publication recovery sends authenticated POST and reports server refusals', async () => {
+  let retryCount = 0;
+  const app = await fixture((request, response) => {
+    if (request.url === '/api/demo/login') { json(response, {token:'private-session',session}); return; }
+    assert.equal(request.url, `/api/goals/${goalId}/retry-publication`);
+    assert.equal(request.method, 'POST');
+    assert.equal(request.headers.authorization, 'Bearer private-session');
+    assert.equal(request.headers.origin, app.baseUrl);
+    retryCount++;
+    if (retryCount === 1) json(response, {...goal, mode:'live'});
+    else json(response, {error:'The repository base changed; the saved artifact cannot be published without retesting.'}, 409);
+  });
+  try {
+    await app.invoke(['login','--demo','--url',app.baseUrl]);
+    assert.equal(await app.invoke(['retry-publication']), 1);
+    assert.equal(await app.invoke(['retry-publication','invalid-id']), 1);
+    assert.equal(retryCount, 0);
+    assert.equal(await app.invoke(['retry-publication',goalId]), 0);
+    assert.equal(JSON.parse(app.output.at(-1) ?? '').state, 'queued');
+    assert.equal(await app.invoke(['retry-publication',goalId]), 1);
+    assert.match(app.errors.at(-1) ?? '', /base changed/);
+    assert.equal(retryCount, 2);
+    assert.ok(!app.output.join('').includes('private-session'));
+  } finally { await app.close(); }
+});
+
 test('the CLI refuses misspelled options and malformed test commands before creating a goal', async () => {
   const app = await fixture((_request,response) => json(response,{token:'private-session',session}));
   try {
