@@ -76,7 +76,9 @@ Each run/attempt gives the image a distinct public revision, including secret-on
 updates. The image has its own baked-in revision, independent of the Worker startup
 configuration. Success requires `/api/health` to report both revisions matching the
 requested release, working Postgres, live mode and the **requested execution
-mode** within the shared deployment deadline. An old image restarted with new configuration cannot pass readiness.
+mode** within the shared 20-minute deployment deadline. The deployment step has
+a 22-minute timeout for termination and cleanup, inside the job's 30-minute limit.
+An old image restarted with new configuration cannot pass readiness.
 
 ## One-time operator setup
 

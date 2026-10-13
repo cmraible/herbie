@@ -12,7 +12,7 @@ export function terminateOnAbort(child:ChildProcess,signal?:AbortSignal){
   return ()=>{signal?.removeEventListener('abort',abort);if(escalation){clearTimeout(escalation);kill('SIGKILL');}};
 }
 
-export function deploymentDeadline(timeoutMs=180_000){
+export function deploymentDeadline(timeoutMs=20*60_000){
   const started=performance.now(),controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   return {controller,remaining:()=>Math.max(0,timeoutMs-(performance.now()-started)),
