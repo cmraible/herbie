@@ -182,6 +182,12 @@ helper starts checking the public health endpoint while Wrangler deploys and onl
 reports success when the Worker and container both report the requested revision
 and execution mode.
 
+The host-side asset build uses `pnpm build:deploy`, which builds the loop package
+before typechecking and building the web assets. Web types reference service types
+that import the loop package's compiled exports. PR build verification runs this
+same command before the full workspace build, so missing build dependencies fail
+before merge.
+
 Check login, repository access, disabled start/resume, actual Supabase TLS and
 security advisors before enabling automatic deployment. Automatic mode
 still observes configured environment approvals. Every release keeps execution
