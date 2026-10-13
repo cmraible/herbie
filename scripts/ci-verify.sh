@@ -150,8 +150,12 @@ run_build() {
   run_step build pnpm build
   run_step typecheck pnpm typecheck
 }
-run_unit() {
+run_unit_tests() {
   run_step unit-tests pnpm test
+}
+run_unit() {
+  run_step build pnpm build
+  run_unit_tests
 }
 run_cli_e2e() {
   start_hosted_service
@@ -208,7 +212,7 @@ case "$stage" in
   all)
     start_browser_install
     run_build
-    run_unit
+    run_unit_tests
     run_cli_e2e
     wait_browser_install
     run_browser
