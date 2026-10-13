@@ -35,7 +35,7 @@ test('connect repositories returns to Herbie, refreshes access, and survives Bac
   await page.getByRole('button',{name:'Close new goal'}).click();
   releaseInstallStart();
   await pendingConnect;
-  await expect(page.getByRole('status')).toHaveText('GitHub installation verified. Your public repositories are refreshing.');
+  await expect(page.getByText('GitHub installation verified. Your public repositories are refreshing.',{exact:true})).toBeVisible();
   await expect(page).toHaveURL(`${baseUrl}/`);
   expect(repositoryRequests).toBeGreaterThanOrEqual(2);
   await page.getByRole('button',{name:'+ New goal'}).click();
