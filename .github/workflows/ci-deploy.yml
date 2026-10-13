@@ -308,6 +308,39 @@ jobs:
           CLOUDFLARE_INCLUDE_PROCESS_ENV: 'false'
           WRANGLER_SEND_METRICS: 'false'
 
+  all-tests-passed:
+    name: All tests passed
+    needs:
+      - verify
+      - unit-verification
+      - cli-verification
+      - browser-verification
+      - edge-verification
+      - container-verification
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every blocking check to pass
+        env:
+          BUILD_RESULT: ${{ needs.verify.result }}
+          UNIT_RESULT: ${{ needs.unit-verification.result }}
+          CLI_RESULT: ${{ needs.cli-verification.result }}
+          BROWSER_RESULT: ${{ needs.browser-verification.result }}
+          EDGE_RESULT: ${{ needs.edge-verification.result }}
+          CONTAINER_RESULT: ${{ needs.container-verification.result }}
+        run: |
+          failed=0
+          for check in BUILD UNIT CLI BROWSER EDGE CONTAINER; do
+            result_var="${check}_RESULT"
+            result="${!result_var}"
+            if [[ "$result" != success ]]; then
+              printf '%s verification result: %s\n' "$check" "$result" >&2
+              failed=1
+            fi
+          done
+          exit "$failed"
+
   deploy:
     name: Deploy configured production service
     needs: [preflight]

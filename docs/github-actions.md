@@ -6,11 +6,13 @@ operator completes the setup below; merging this workflow alone deploys nothing.
 
 ## What runs and when
 
-Every pull request runs **Build and typecheck**, **Unit and PostgreSQL integration
-tests**, **Compiled CLI end-to-end**, **Browser**, **Edge Worker**, and **Deployment
-container dry run** jobs in parallel. Require all six status checks in branch
-protection so each remains merge-blocking. The jobs use Node 24.19.0, pnpm 10.34.6
-and the frozen lockfile. They retain all existing checks:
+Every pull request runs **Verify** (build and typecheck), **Unit and PostgreSQL
+integration tests**, **Compiled CLI end-to-end**, **Browser verification**, **Edge
+Worker verification**, and **Deployment container dry run** in parallel. The
+**All tests passed** check waits for all six jobs and fails if any job fails or is
+skipped. Require **All tests passed** in branch protection to keep the full suite
+merge-blocking. The jobs use Node 24.19.0, pnpm 10.34.6 and the frozen lockfile.
+They retain all existing checks:
 build, strict typecheck, unit and database integration tests, CLI, Chromium browser
 scenarios, local Worker checks, and the Docker/Worker deployment dry run. The
 headless Chromium binary is cached by lockfile. No live OAuth, Daytona or model run
@@ -32,10 +34,10 @@ Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 | `disabled` | PRs verify; pushes to `main` skip deployment |
 | `automatic` | Pushes to `main` run preflight and deploy; PRs run all verification jobs |
 
-There is no manual dispatch. This keeps Verify scoped to the proposed PR commit
-and avoids rerunning it on the merge commit. Set the variable to `automatic` to
-deploy every protected push to `main`; `disabled` pauses deployments while PR
-verification continues.
+There is no manual dispatch. This keeps PR verification scoped to the proposed
+commit and avoids rerunning it on the merge commit. Set the variable to
+`automatic` to deploy every protected push to `main`; `disabled` pauses
+deployments while PR verification continues.
 
 For a deployment-intended push, preflight runs before dependency installation
 or image building. It checks out the exact run SHA
@@ -86,12 +88,11 @@ mode** within the shared deployment deadline. An old image restarted with new co
    bypass. With one operator, do not prevent self-review unless another reviewer
    is available. Use **Selected branches and tags**, because **Protected branches
    only** allows all branches when no branch rules exist.
-3. Protect `main`: require a pull request and all six PR checks (**Verify**, **Unit
-   and PostgreSQL integration tests**, **Compiled CLI end-to-end**, **Browser
-   verification**, **Edge Worker verification**, and **Deployment container dry
-   run**); disallow force pushes/deletion and administrator bypass. This ensures
-   only PRs with passing verification can reach `main`, which then triggers
-   deployment when mode is `automatic`. Arrange human review of deployment workflows, helpers, Dockerfile,
+3. Protect `main`: require a pull request and the **All tests passed** status check;
+   disallow force pushes/deletion and administrator bypass. This check fails unless
+   all six PR verification jobs pass. This ensures only PRs with passing
+   verification can reach `main`, which then triggers deployment when mode is
+   `automatic`. Arrange human review of deployment workflows, helpers, Dockerfile,
    dependency pins and runtime changes. These settings are operator actions;
    checking in this workflow does not configure GitHub protections.
 4. Create an **account-owned Cloudflare API token**, scoped only to the account
