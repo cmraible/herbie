@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import {StartupProgress} from './startup-progress.js';
 import {randomUUID} from 'node:crypto';
 import type {Server} from 'node:http';
@@ -24,7 +25,7 @@ export async function startHostedService(injected?:HostedRuntime,startup?:Startu
     });
   }catch(error){
     startup?.failure(error);startup?.begin('database-cleanup');
-    try{await store.close();}catch{/* Preserve the listener failure. */}
+    try{await store.close();}catch(error){logFailure(error,{component:'listener-cleanup'});}
     throw error;
   }
   const controller=new AbortController();
@@ -42,7 +43,8 @@ export async function startHostedService(injected?:HostedRuntime,startup?:Startu
       // and fenced database writes before the shared pool is closed.
       const results=await Promise.allSettled([httpClosed,worker]);
       await store.close();
-      if(results.some(result=>result.status==='rejected'))throw new Error('Hosted shutdown did not complete cleanly');
+      const failures=results.filter((result):result is PromiseRejectedResult=>result.status==='rejected');
+      if(failures.length)throw new AggregateError(failures.map(result=>result.reason),'Hosted shutdown did not complete cleanly');
     })();
     return closing;
   }
@@ -57,7 +59,7 @@ if(process.argv[1]&&pathToFileURL(process.argv[1]).href===import.meta.url){
     const service=await startHostedService(undefined,startup);
     startup.dispose();
     console.log('Herbie hosted API ready. Execution follows the configured operator gate.');
-    const shutdown=()=>{void service.close().catch(()=>{console.error('Herbie shutdown failed; inspect durable state before restarting work.');process.exitCode=1;});};
+    const shutdown=()=>{void service.close().catch(error=>{logFailure(error,{component:'shutdown'});console.error('Herbie shutdown failed; inspect durable state before restarting work.');process.exitCode=1;});};
     process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);
   }catch(error){
     startup.failure(error);

@@ -1,3 +1,4 @@
+import {registerDiagnosticSecret} from './diagnostic-log.js';
 import { Daytona } from '@daytona/sdk';
 import { runDaytonaAttempt } from '@herbie/loop/daytona-attempt';
 import { publishTestedPatch } from '@herbie/loop/publish-patch';
@@ -10,6 +11,7 @@ export interface LiveConfig {
   openaiSecretName:string; snapshot?:string; domainAllowList?:string; outboundProxyUrl?:string;
 }
 export function createLiveAdapters(config:LiveConfig|undefined,github:Github,auth:Pick<Auth,'userToken'>):Adapters {
+  registerDiagnosticSecret(config?.apiKey);
   if (config&&(!config.apiKey.trim() || !config.openaiSecretName.trim())) throw new Error('Live mode requires Daytona API key and an existing OpenAI Daytona secret name');
   if (config?.apiUrl) {
     const url = new URL(config.apiUrl);
@@ -21,21 +23,15 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
     async authorize(userId,repository) { return github.authorize(await auth.userToken(userId),repository); },
     reconciliationRepository:repository=>github.reconciliationRepository(repository),
     async attempt(execution,report) {
+      registerDiagnosticSecret(execution.goal.prompt);
       if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
       const daytona = new Daytona({apiKey:config.apiKey,apiUrl:config.apiUrl,target:config.target,requestTimeoutMs:30_000});
-      let pending = Promise.resolve();
-      let reportError:unknown;
       const changes = await runDaytonaAttempt((params,options)=>daytona.create(params,options), {
         repoUrl:`https://github.com/${execution.repository.repository}.git`,goal:execution.goal.prompt,
         testCommand:execution.goal.testCommand,testTimeoutMs:60_000,
         secrets:{OPENAI_API_KEY:config.openaiSecretName},
         snapshot:config.snapshot,domainAllowList:config.domainAllowList,outboundProxyUrl:config.outboundProxyUrl,
-      },message=>{
-        // Preserve event order without letting an event-storage outage bypass sandbox cleanup.
-        pending = pending.then(()=>report(message)).catch(error=>{reportError=error;});
-      });
-      await pending;
-      if (reportError) throw new Error('Attempt events could not be persisted');
+      },report);
       return changes;
     },
     async publish(execution,changes,requireLease,reportPhase) {

@@ -23,5 +23,5 @@ test('readiness reports a database failure without exposing connection details',
   await store.close();closed=true;
   const unhealthy=await fetch(url);
   assert.equal(unhealthy.status,503);
-  assert.deepEqual(await unhealthy.json(),{error:'Database unavailable'});
+  const failure=await unhealthy.json();assert.equal(failure.error,'Database unavailable');assert.match(failure.errorId,/^[0-9a-f-]{36}$/);
 });

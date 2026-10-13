@@ -21,7 +21,7 @@ const request = {
   repoUrl: 'https://github.com/example/repo.git', commit: '0123456789abcdef',
   goal: 'Fix addition; $(do-not-execute) `nor-this` \'quoted\'\nsecond line',
 };
-const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits'];
+const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits', 'diagnostic-log'];
 const privilegedVerification = (() => {
   if (process.getuid?.() !== 0) return false;
   try {
@@ -55,7 +55,7 @@ async function fixture(t: TestContext) {
   const create = mock.fn<Create>(async () => sandbox);
   const reports: string[] = [];
   const report = (message: string) => { reports.push(message); };
-  const run = (options: Partial<Parameters<typeof runDaytonaAttempt>[1]> = {}) => runDaytonaAttempt(create, { ...request, ...options }, report, pathToFileURL(directory + '/'));
+  const run = (options: Partial<Parameters<typeof runDaytonaAttempt>[1]> = {}, reporter:Parameters<typeof runDaytonaAttempt>[2]=report) => runDaytonaAttempt(create, { ...request, ...options }, reporter, pathToFileURL(directory + '/'));
   return { directory, sandbox, create, reports, run };
 }
 
@@ -545,4 +545,97 @@ test('coding and test users cannot modify the supervisor or its result channel',
   `] });
   assert.equal(result.testResult?.stdout, 'protected');
   assert.ok(result.verification);
+});
+
+
+for(const point of ['creation','preparation','folder','upload','clone','preparation-exit'] as const)test(`safe diagnostics identify ${point} and cleanup without exposing SDK details`,async t=>{
+  const {sandbox,create,run,reports}=await fixture(t);
+  const secret='DO-NOT-LOG-secret-command-output-account-id';
+  const fail=async()=>{throw Object.assign(new Error(secret),{name:'DaytonaTimeoutError',statusCode:504,config:{headers:{authorization:secret}},response:{data:secret}});};
+  if(point==='creation')create.mock.mockImplementation(fail);
+  if(point==='preparation')sandbox.process.executeCommand.mock.mockImplementationOnce(fail,0);
+  if(point==='folder')sandbox.fs.createFolder.mock.mockImplementationOnce(fail,0);
+  if(point==='upload')sandbox.fs.uploadFile.mock.mockImplementationOnce(fail,0);
+  if(point==='clone')sandbox.git.clone.mock.mockImplementationOnce(fail,0);
+  if(point==='preparation-exit')sandbox.process.executeCommand.mock.mockImplementationOnce(async()=>({exitCode:23,result:secret}),0);
+  const stage=point==='creation'?'sandbox_creation':point==='clone'?'repository_clone':['folder','upload'].includes(point)?'runtime_upload':'runtime_preparation';
+  await assert.rejects(run(),error=>{
+    assert.ok(error instanceof DaytonaAttemptError);
+    assert.deepEqual(error.diagnostics,[point==='preparation-exit'?{stage,cause:'command_failed',exitCode:23}:{stage,cause:'timeout',httpStatus:504}]);
+    assert.equal(error.cleanup,point==='creation'?'unconfirmed':'confirmed');
+    assert.match(error.safeMessage(),new RegExp(stage));
+    assert.doesNotMatch(error.safeMessage(),/DO-NOT-LOG|attempt-sandbox|https/);
+    return true;
+  });
+  assert.equal(create.mock.callCount(),1);assert.equal(sandbox.delete.mock.callCount(),point==='creation'?0:1);
+  assert.ok(reports.includes('Attempt stage: '+stage));
+  assert.ok(!reports.some(message=>message.startsWith('Running goal')));
+});
+
+test('stage persistence is awaited before starting runtime preparation',async t=>{
+  const {sandbox,run}=await fixture(t);const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const result=run({},async message=>{if(message==='Attempt stage: runtime_preparation'){entered.resolve();await release.promise;}});
+  await entered.promise;assert.equal(sandbox.process.executeCommand.mock.callCount(),0);
+  release.resolve();await result;
+});
+
+test('failed stage persistence still deletes the sandbox and reports confirmed cleanup',async t=>{
+  const {sandbox,run}=await fixture(t);
+  await assert.rejects(run({},async message=>{if(message.startsWith('Attempt stage:')&&!message.endsWith('sandbox_creation'))throw new Error('private database detail');}),error=>{
+    assert.ok(error instanceof DaytonaAttemptError);assert.equal(error.cleanup,'confirmed');
+    assert.equal(error.diagnostics[0]?.cause,'event_persistence_failed');assert.doesNotMatch(error.safeMessage(),/private/);return true;
+  });
+  assert.equal(sandbox.process.executeCommand.mock.callCount(),0);assert.equal(sandbox.delete.mock.callCount(),1);
+});
+
+test('a deletion failure retains the setup cause and marks cleanup unconfirmed',async t=>{
+  const {sandbox,run}=await fixture(t);
+  sandbox.git.clone.mock.mockImplementation(async()=>{throw Object.assign(new Error('secret URL'),{statusCode:403});});
+  sandbox.delete.mock.mockImplementation(async()=>{throw Object.assign(new Error('secret deletion details'),{name:'TimeoutError'});});
+  await assert.rejects(run(),error=>{
+    assert.ok(error instanceof DaytonaAttemptError);assert.equal(error.cleanup,'unconfirmed');
+    assert.deepEqual(error.diagnostics,[{stage:'repository_clone',cause:'http_error',httpStatus:403},{stage:'sandbox_deletion',cause:'timeout'}]);
+    assert.doesNotMatch(error.safeMessage(),/secret/);return true;
+  });
+});
+
+test('runner transports nested original failures to the host with sandbox credentials and prompt redacted',async t=>{
+  const {directory}=await fixture(t);
+  const cwd=join(directory,'runner-repo');createArithmeticFixture(cwd);
+  const prompt='private-prompt-fixture-do-not-log';
+  const secret='opaque-openai-fixture-do-not-log';
+  await writeFile(join(directory,'attempt.json'),JSON.stringify({cwd,goal:prompt}));
+  await writeFile(join(directory,'codex-process.js'),`export async function runCodexAttempt(_bin,_args,{goal}) { throw new Error('adapter failed '+goal,{cause:Object.assign(new Error('original RPC failure '+process.env.OPENAI_API_KEY),{stderr:'useful runner failure context',signal:'SIGTERM'})}); }`);
+  let output='';
+  try{await promisify(execFile)(process.execPath,[join(directory,'daytona-runner.js')],{env:{PATH:process.env.PATH,OPENAI_API_KEY:secret}});assert.fail('Runner should fail');}
+  catch(error){assert.ok(error instanceof Error&&'stdout' in error);output=String(error.stdout);}
+  assert.match(output,/herbie-sandbox-failure:/);assert.match(output,/original RPC failure/);assert.match(output,/daytona-runner.js/);
+  assert.ok(!output.includes(secret));assert.ok(!output.includes(prompt));assert.ok(Buffer.byteLength(output)<32_800);
+  const {AttemptCommandError}=await import('../src/attempt-diagnostics.js');
+  const {diagnosticRecord}=await import('../src/diagnostic-log.js');
+  const transported=new DaytonaAttemptError([new Error('Attempt failed',{cause:new AttemptCommandError(1,output)})],'Attempt wrapper');
+  const host=JSON.stringify(diagnosticRecord(transported,{component:'attempt',stage:'model_execution'}));
+  assert.match(host,/original RPC failure/);assert.match(host,/useful runner failure context/);assert.match(host,/SIGTERM/);assert.match(host,/stack/);
+  assert.ok(!host.includes(secret));assert.ok(!host.includes(prompt));
+});
+
+test('verification runner transports its actual supervisor failure instead of a generic line',async t=>{
+  const {directory}=await fixture(t);
+  // No test input exists: non-root fails its guard, root fails reading test.json.
+  await assert.rejects(promisify(execFile)(process.execPath,[join(directory,'daytona-test-runner.js')],{env:{PATH:process.env.PATH,OPENAI_API_KEY:'verification-secret-fixture'}}),error=>{
+    assert.ok(error instanceof Error&&'stdout' in error);
+    const output=String(error.stdout);assert.match(output,/herbie-sandbox-failure:/);assert.match(output,/sandbox-test-runner/);assert.match(output,/stack/);assert.match(output,/requires root|ENOENT/);assert.ok(!output.includes('verification-secret-fixture'));return true;
+  });
+});
+
+test('stdout-only test assertion evidence and stderr survive only in private diagnostic causes',async t=>{
+  const {sandbox,run}=await fixture(t);
+  sandbox.process.executeCommand.mock.mockImplementationOnce(async()=>({exitCode:0,result:'herbie-tests-completed\n'}),2);
+  sandbox.fs.downloadFileStream.mock.mockImplementationOnce(async()=>Readable.from([Buffer.from(JSON.stringify({exitCode:1,stdout:'AssertionError: expected 4, received 5',stderr:''}))]),1);
+  await assert.rejects(run({testCommand:['node','--test']}),error=>{
+    assert.ok(error instanceof DaytonaAttemptError);
+    const cause=error.errors[0]?.cause;
+    assert.equal(cause.stdout,'AssertionError: expected 4, received 5');assert.equal(cause.stderr,'');
+    assert.doesNotMatch(error.safeMessage(),/expected 4/);assert.equal(error.cleanup,'confirmed');return true;
+  });
 });

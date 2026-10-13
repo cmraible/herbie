@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import pg from 'pg';
 import {safeStartupCauses,type StartupProgress} from './startup-progress.js';
 import {StartupConfigurationError,startupDiagnostic} from './startup-diagnostic.js';
@@ -22,7 +23,7 @@ export async function createRuntime(startup?:StartupProgress){
     }catch(error){throw new StartupConfigurationError(error);}
   })();
   const pool=new pg.Pool(poolConfig);
-  pool.on('error',error=>console.error(`Herbie database pool error: ${startupDiagnostic(error)} causes=${safeStartupCauses(error)}.`));
+  pool.on('error',error=>{logFailure(error,{component:'database-pool'});console.error(`Herbie database pool error: ${startupDiagnostic(error)} causes=${safeStartupCauses(error)}.`);});
   const store=new Store(pool);
   try {
     startup?.begin('database-connect');
@@ -39,7 +40,7 @@ export async function createRuntime(startup?:StartupProgress){
     return {config,store,auth,adapters,github};
   }catch(error){
     startup?.failure(error);startup?.begin('database-cleanup');
-    try{await pool.end();}catch{/* Preserve the original startup failure. */}
+    try{await pool.end();}catch(error){logFailure(error,{component:'startup-cleanup'});}
     throw error;
   }
 }

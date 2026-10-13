@@ -1,3 +1,4 @@
+import {registerDiagnosticSecret,logFailure} from './diagnostic-log.js';
 import { createHmac, createSign, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { Repository } from '@herbie/contracts';
@@ -26,6 +27,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
   const api = testEndpoints?.api ?? 'https://api.github.com';
   const oauth = testEndpoints?.oauth ?? 'https://github.com';
   async function request(path:string, token:string, body?:unknown):Promise<unknown> {
+    registerDiagnosticSecret(token);
     const response = await fetch(`${api}${path}`, {
       method:body === undefined ? 'GET' : 'POST', redirect:'error', signal:AbortSignal.timeout(30_000),
       headers:{accept:'application/vnd.github+json',authorization:`Bearer ${token}`,'X-GitHub-Api-Version':'2022-11-28','content-type':'application/json'},
@@ -137,6 +139,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
         const pr = pullSchema.parse(await request(`/repos/${input.repository}/pulls`,token,{base:input.base,head:input.head,title:input.title,body:input.body,draft:true}));
         return {url:pr.html_url,number:pr.number,branch:input.head,state:pr.merged_at ? 'merged' : pr.state};
       } catch (error) {
+        logFailure(error,{component:'github-publication-response'});
         // Lost successful response or duplicate request: read the unique attempt branch.
         const recovered = await findPullRequest(token,input.repository,input.head);
         if (recovered) return recovered;

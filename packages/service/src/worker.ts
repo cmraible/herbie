@@ -1,3 +1,5 @@
+import {logFailure} from './diagnostic-log.js';
+import {DaytonaAttemptError} from '@herbie/loop/daytona-attempt';
 import { setTimeout as delay } from 'node:timers/promises';
 import { KnownAttemptFailure, type Adapters, type Execution } from './adapters.js';
 import type { Job } from './store.js';
@@ -22,7 +24,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     if (renewing) return;
     renewing = true;
     void store.heartbeat(job.id,workerId,leaseMs).then(owned => { if (!owned) leaseLost = true; })
-      .catch(() => { leaseLost = true; }).finally(() => { renewing = false; });
+      .catch(error => { leaseLost = true; logFailure(error,{component:'worker-heartbeat',goalId:job.goal.id,jobId:job.id}); }).finally(() => { renewing = false; });
   },heartbeatMs);
   const requireLease = async (): Promise<void> => {
     if (leaseLost) throw new StoreError(409,'Worker lease lost');
@@ -75,11 +77,16 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     await store.completePublication(job.id,workerId,result);
     if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);
   } catch (error) {
-    // Error text from SDKs can contain credentials, URLs or generated output. Store a safe summary.
+    const errorId=logFailure(error,{component:publishing?'publication':'attempt',goalId:job.goal.id,jobId:job.id,stage:publishing?publicationPhase:error instanceof DaytonaAttemptError?error.diagnostics[0]?.stage:undefined});
+    // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
     try {
-      if (publishing) await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)));
-      else await store.fail(job.id,workerId,error instanceof KnownAttemptFailure ? error.message : 'Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal.',!(error instanceof KnownAttemptFailure));
+      if (publishing) {
+        await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)));
+        await store.appendEvent(job.goal.id,'diagnostic_reference',`Failure reference: ${errorId}`);
+      }
+      else await store.fail(job.id,workerId,error instanceof KnownAttemptFailure ? error.message : error instanceof DaytonaAttemptError ? `${error.safeMessage()} Reference: ${errorId}` : `Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal. Reference: ${errorId}`,!(error instanceof KnownAttemptFailure));
     } catch (saveError) {
+      logFailure(saveError,{component:'failure-persistence',goalId:job.goal.id,jobId:job.id});
       // A stale worker must not overwrite the new owner's recovery decision.
       if (!(saveError instanceof StoreError && saveError.status === 409)) throw saveError;
     }
@@ -94,7 +101,8 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
     try {
       const current = await adapters.reconcile(await executionFor(adapters,job,true));
       if (current && current.state !== 'open') await store.reconcile(job.id,current.state);
-    } catch {
+    } catch(error) {
+      logFailure(error,{component:'review-reconciliation',goalId:job.goal.id,jobId:job.id});
       // Transient GitHub failures do not change the durable review state. Poll again later.
     }
   }
@@ -109,7 +117,8 @@ export async function runWorker(store: Store, adapters: Adapters, workerId: stri
         nextReconciliation = Date.now()+30_000;
       }
       if (!signal.aborted) await runWorkerOnce(store,adapters,workerId);
-    } catch {
+    } catch(error) {
+      logFailure(error,{component:'worker-tick'});
       // Database interruptions leave leases to expire safely; keep the daemon alive.
       console.error('Worker tick unavailable; retrying after backoff. No external operation is automatically replayed.');
       await delay(4000,undefined,{signal}).catch(() => undefined);

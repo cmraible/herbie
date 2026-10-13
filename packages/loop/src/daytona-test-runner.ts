@@ -1,3 +1,4 @@
+import {sandboxFailureOutput} from './diagnostic-log.js';
 import { execFile } from 'node:child_process';
 import { chmod, chown, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +31,7 @@ try {
   // The freshly cloned checkout has never been accessible to the coding user.
   await run('/usr/bin/chown', ['-R', '--no-dereference', `${uid}:${gid}`, checkout]);
   await chmod(checkout, 0o700);
-  for (const name of ['daytona-test-runner.js', 'artifact-limits.js', 'test.json']) {
+  for (const name of ['daytona-test-runner.js', 'artifact-limits.js', 'diagnostic-log.js', 'test.json']) {
     await chmod(new URL(`./${name}`, import.meta.url), 0o600);
   }
   await chmod(new URL('./package.json', import.meta.url), 0o444);
@@ -69,7 +70,7 @@ try {
   }
   await writeFile(new URL('./test-result.json', import.meta.url), JSON.stringify(result), { mode: 0o600, flag: 'wx' });
   process.stdout.write('herbie-tests-completed\n');
-} catch {
-  console.error('Sandbox patch verification failed');
+} catch(error) {
+  process.stdout.write(sandboxFailureOutput(error,'sandbox-test-runner'));
   process.exitCode = 1;
 }

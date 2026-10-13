@@ -50,3 +50,21 @@ test('merged demo work starts a distinct bounded attempt and a simulated failure
   assert.equal((await store.getGoal(failed.id))?.state,'failed');
   assert.equal((await store.getGoal(failed.id))?.pullRequest,null);
 });
+
+test('worker retains raw redacted causes privately and persists safe attempt reference without retry',async t=>{
+  const database=process.env.HERBIE_TEST_DATABASE_URL;if(!database)return t.skip('Set HERBIE_TEST_DATABASE_URL');
+  const {DaytonaAttemptError}=await import('@herbie/loop/daytona-attempt');
+  const schema='diagnostic_'+randomUUID().replaceAll('-','');const admin=new pg.Pool({connectionString:database});await admin.query('CREATE SCHEMA '+schema);
+  const store=new Store(new pg.Pool({connectionString:database,options:'-c search_path='+schema}));
+  t.after(async()=>{await store.close();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();});await store.migrate();
+  const {goal}=await store.createGoal('fixture-user',{repository:'demo/example',prompt:'Fixture',testCommand:['true'],maxAttempts:1},'demo',randomUUID());
+  const output:string[]=[];t.mock.method(console,'error',(line:string)=>output.push(line));
+  const error=new DaytonaAttemptError([Object.assign(new Error('setup failed'),{stderr:'useful synthetic failure',authorization:'hidden-fixture-token'})],'wrapped failure');
+  error.diagnostics=[{stage:'repository_clone',cause:'http_error',httpStatus:503}];error.cleanup='confirmed';
+  let attempts=0;const adapters={...createDemoAdapters(),async attempt(){attempts++;throw error;}};
+  await runWorkerOnce(store,adapters,'fixture-worker');
+  const saved=await store.getGoal(goal.id);assert.equal(saved?.state,'needs_attention');assert.match(saved?.error??'',/repository_clone: http_error; HTTP 503/);assert.match(saved?.error??'',/Sandbox deletion confirmed/);
+  const record=JSON.parse(output.find(line=>line.includes('herbie_failure'))!);assert.ok(saved?.error?.includes(record.errorId));assert.equal(record.context.goalId,goal.id);
+  assert.match(JSON.stringify(record),/useful synthetic failure/);assert.ok(!JSON.stringify(record).includes('hidden-fixture-token'));assert.ok(!saved?.error?.includes('useful synthetic failure'));
+  assert.equal(await runWorkerOnce(store,adapters,'fixture-worker'),false);assert.equal(attempts,1);
+});

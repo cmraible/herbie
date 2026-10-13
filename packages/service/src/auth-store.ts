@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import type { Pool } from 'pg';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
@@ -30,7 +31,7 @@ export async function migrateAuth(pool:Pool) {
       CREATE INDEX IF NOT EXISTS auth_install_flows_expiry ON auth_install_flows(expires_at);
     `);
     await client.query('COMMIT');
-  } catch(error) {try{await client.query('ROLLBACK');}catch{/* Preserve the migration failure. */}throw error;} finally {client.release();}
+  } catch(error) {try{await client.query('ROLLBACK');}catch(error){logFailure(error,{component:'auth-migration-rollback'});}throw error;} finally {client.release();}
 }
 const flowSchema = z.object({state_hash:z.string(),poll_hash:z.string().nullable(),browser_hash:z.string().nullable(),user_code_hash:z.string().nullable(),client:z.enum(['web','cli']),expires_at:z.date(),verifier:z.string()});
 const pendingSchema = z.object({approval_hash:z.string(),poll_hash:z.string(),user_code_hash:z.string(),csrf_token:z.string(),
@@ -59,7 +60,7 @@ export class PgAuthStore implements AuthStore {
       await client.query('INSERT INTO auth_flows(state_hash,poll_hash,browser_hash,client,expires_at,verifier,user_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7)',[flow.stateHash,flow.pollHash,flow.browserHash,flow.client,flow.expiresAt,flow.verifier,flow.userCodeHash]);
       if(flow.pollHash) await client.query('INSERT INTO auth_polls(poll_hash,expires_at,consent_version) VALUES($1,$2,1)',[flow.pollHash,flow.expiresAt]);
       await client.query('COMMIT');
-    } catch(error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+    } catch(error) {try{await client.query('ROLLBACK');}catch(rollbackError){logFailure(rollbackError,{component:'auth-rollback'});}throw error;} finally {client.release();}
   }
   async putInstallationFlow(stateHash:string,sessionHash:string,expiresAt:Date) {
     await this.pool.query('DELETE FROM auth_install_flows WHERE expires_at <= now()');
@@ -110,7 +111,7 @@ export class PgAuthStore implements AuthStore {
       await client.query("INSERT INTO auth_sessions(token_hash,user_id,expires_at,mode) VALUES($1,$2,$3,'live')",[decision.session.tokenHash,pending.user.id,pending.credentialExpiresAt]);
       await client.query('UPDATE auth_polls SET encrypted_token=$2 WHERE poll_hash=$1',[pending.pollHash,decision.session.encryptedToken]);
       await client.query('COMMIT');return 'approved';
-    } catch(error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+    } catch(error) {try{await client.query('ROLLBACK');}catch(rollbackError){logFailure(rollbackError,{component:'auth-rollback'});}throw error;} finally {client.release();}
   }
   async takePoll(pollHash:string):Promise<{status:'pending'|'expired'|'rejected'}|{status:'complete';encryptedToken:string}> {
     const client = await this.pool.connect();
@@ -127,7 +128,7 @@ export class PgAuthStore implements AuthStore {
       if (row.encrypted_token) await client.query('DELETE FROM auth_polls WHERE poll_hash=$1',[pollHash]);
       await client.query('COMMIT');
       return row.encrypted_token ? {status:'complete',encryptedToken:row.encrypted_token} : {status:'pending'};
-    } catch(error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+    } catch(error) {try{await client.query('ROLLBACK');}catch(rollbackError){logFailure(rollbackError,{component:'auth-rollback'});}throw error;} finally {client.release();}
   }
   async putCredential(user:User,encryptedToken:string,expiresAt:Date) {
     await this.pool.query('INSERT INTO auth_users(id,login,encrypted_token,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET login=EXCLUDED.login, encrypted_token=EXCLUDED.encrypted_token, expires_at=EXCLUDED.expires_at',[user.id,user.login,encryptedToken,expiresAt]);

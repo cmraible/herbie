@@ -36,7 +36,7 @@ async function fixture(t: TestContext, extraFiles = false) {
   const patch = await readFile(patchFile);
   const runtime = join(directory, 'runtime');
   await mkdir(runtime);
-  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits']) {
+  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits', 'diagnostic-log']) {
     await writeFile(join(runtime, `${name}.js`), '');
   }
   const changes = await runDaytonaAttempt(async () => ({

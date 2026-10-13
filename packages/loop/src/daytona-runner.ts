@@ -1,3 +1,4 @@
+import {sandboxFailureOutput,registerDiagnosticSecret} from './diagnostic-log.js';
 import { execFile } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ try {
   if (typeof input !== 'object' || input === null
     || !('cwd' in input) || typeof input.cwd !== 'string'
     || !('goal' in input) || typeof input.goal !== 'string') throw new Error('Invalid attempt input');
+  registerDiagnosticSecret(input.goal);
   const cwd = input.cwd;
   const git = async (...args: string[]) => (await promisify(execFile)('git', args, { cwd, timeout: 30_000 })).stdout;
   const baseCommit = (await git('rev-parse', 'HEAD')).trim();
@@ -23,7 +25,7 @@ try {
     baseCommit, patchBase64: (await readFile(patchFile)).toString('base64'),
   }));
   process.stdout.write('herbie-attempt-completed\n');
-} catch {
-  console.error('Sandbox Codex attempt failed');
+} catch(error) {
+  process.stdout.write(sandboxFailureOutput(error,'sandbox-codex-runner'));
   process.exitCode = 1;
 }

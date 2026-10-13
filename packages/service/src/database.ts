@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import type {StartupPhase} from './startup-progress.js';
 import { X509Certificate } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -11,7 +12,7 @@ type DatabaseConfig = {databaseUrl:string;mode:'demo'|'live';ca?:string;caFile?:
 export async function createDatabasePoolConfig(config: DatabaseConfig): Promise<PoolConfig> {
   let url: URL;
   try { url = new URL(config.databaseUrl); }
-  catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL'); }
+  catch(cause) { throw new Error('DATABASE_URL must be a valid PostgreSQL URL',{cause}); }
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.username || !url.pathname.slice(1) || url.hash) {
     throw new Error('DATABASE_URL must identify a PostgreSQL host, user, and database');
   }
@@ -29,7 +30,7 @@ export async function createDatabasePoolConfig(config: DatabaseConfig): Promise<
   const ca = config.ca ?? (config.caFile === undefined ? undefined : await readFile(config.caFile, 'utf8'));
   if (ca !== undefined) {
     try { new X509Certificate(ca); }
-    catch { throw new Error('Database CA must be a PEM-encoded X.509 certificate'); }
+    catch(cause) { throw new Error('Database CA must be a PEM-encoded X.509 certificate',{cause}); }
   }
   const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
   const tls = config.mode === 'live' && !loopback || verifiedHint || ca !== undefined;
@@ -85,7 +86,7 @@ async function protectPrivateSchema(pool: Pool): Promise<void> {
     const reachable = await client.query<Record<string, unknown>>("SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role') AND has_schema_privilege(oid,'herbie','USAGE,CREATE')");
     if (reachable.rows.length) throw Object.assign(new Error('A Data API role still has private-schema access; use a dedicated trusted database owner'),{code:'HERBIE_PRIVATE_SCHEMA_ACCESS'});
     await client.query('COMMIT');
-  } catch (error) { try{await client.query('ROLLBACK');}catch{/* Preserve the original failure. */} throw error; }
+  } catch (error) { try{await client.query('ROLLBACK');}catch(error){logFailure(error,{component:'database-rollback'});} throw error; }
   finally { client.release(); }
 }
 
