@@ -78,6 +78,15 @@ an integrated paid attempt. Before using live mode:
    read/write**, and **Metadata: read**. Use callback
    `https://YOUR-HOST/api/auth/callback`, webhook
    `https://YOUR-HOST/api/webhooks/github`, and subscribe to Pull request events.
+   Set the App's **Setup URL** to
+   `https://YOUR-HOST/api/auth/installation/callback`. The authenticated web UI
+   derives the App slug from GitHub's `/app` metadata and starts installation
+   with a short-lived state value. The setup callback checks that the returned
+   installation is accessible to the same signed-in GitHub user and has the
+   required write permissions. This setup URL is needed for the Connect
+   repositories return flow; no additional Herbie secret or app ID setting is
+   required. Enable **Redirect on update** so repeat installations and
+   permission updates return to Herbie through the same route.
    Set `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
    `GITHUB_PRIVATE_KEY_FILE` (or inline `GITHUB_PRIVATE_KEY`), and
    `GITHUB_WEBHOOK_SECRET` on the trusted service.

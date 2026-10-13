@@ -12,7 +12,7 @@ import { goalSchema } from '@herbie/contracts';
 
 export async function githubFixture(t: TestContext) {
   const requests: {path: string; authorization: string; body: unknown}[] = [];
-  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', pr: false, losePrResponse:false };
+  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, pr: false, losePrResponse:false };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -25,7 +25,8 @@ export async function githubFixture(t: TestContext) {
     if (path === '/login/oauth/access_token') res.end(JSON.stringify({access_token:'ghu_fixture',expires_in:28800}));
     else if (path === '/user') res.end(JSON.stringify({id:7,login:'alice'}));
     else if (path.startsWith('/user/installations/11/repositories')) res.end(JSON.stringify({repositories:[repository]}));
-    else if (path.startsWith('/user/installations')) res.end(JSON.stringify({installations:[{id:11,permissions:{contents:fixture.contents,pull_requests:fixture.pullRequests}}]}));
+    else if (path.startsWith('/user/installations')) res.end(JSON.stringify({installations:[{id:fixture.installationId,permissions:{contents:fixture.contents,pull_requests:fixture.pullRequests}}]}));
+    else if (path === '/app') res.end(JSON.stringify({slug:'herbie-fixture'}));
     else if (path === '/repos/alice/project/installation') res.end(JSON.stringify({id:11,permissions:{contents:fixture.contents,pull_requests:fixture.pullRequests}}));
     else if (path === '/repos/alice/project') res.end(JSON.stringify(repository));
     else if (path === '/app/installations/11/access_tokens') res.end(JSON.stringify({token:'ghs_fixture',expires_at:new Date(Date.now()+3600000).toISOString()}));
@@ -91,6 +92,19 @@ test('authorizes only the intersection of public user-writable and installed app
   await assert.rejects(github.authorize('ghu_fixture','alice/project'), /public/i);
   fixture.private=false; fixture.contents='read';
   await assert.rejects(github.authorize('ghu_fixture','alice/project'), /permission|access/i);
+});
+
+test('installation onboarding derives the app slug and accepts only the signed-in user’s installation',async t=>{
+  const {github,fixture,requests}=await githubFixture(t);
+  const state='S'.repeat(43);
+  const url=new URL(await github.installationUrl(state));
+  assert.equal(url.pathname,'/apps/herbie-fixture/installations/new');
+  assert.equal(url.searchParams.get('state'),state);
+  assert.match(requests.find(request=>request.path==='/app')?.authorization??'',/^Bearer [A-Za-z0-9_.-]+$/);
+  assert.equal(await github.verifyUserInstallation('ghu_fixture',11),'ready');
+  assert.equal(await github.verifyUserInstallation('ghu_fixture',12),'missing');
+  fixture.contents='read';
+  assert.equal(await github.verifyUserInstallation('ghu_fixture',11),'permissions');
 });
 
 test('recovers a successful PR creation with a lost response and never duplicates it',async t=>{
@@ -174,6 +188,30 @@ test('durable OAuth binds web callbacks to the browser and CLI tokens are delive
   const demo = createAuth({...config,mode:'demo',publicUrl:'http://127.0.0.1:3000'},new PgAuthStore(pool));
   const demoSession = await demo.demoLogin();
   assert.equal(await auth.session(demoSession.token),null,'A demo session must never become a live session when using the same database');
+});
+
+test('installation return is one-use, session-bound, and verified against the user access token',{skip:!process.env.HERBIE_TEST_DATABASE_URL},async t=>{
+  const {auth}=await authFixture(t);
+  const login=await auth.start('web');
+  const loginState=new URL(login.url).searchParams.get('state');assert.ok(loginState);
+  const signedIn=await auth.callback('code',loginState,login.browserState);assert.equal(signedIn.client,'web');
+  const secondLogin=await auth.start('web');
+  const secondLoginState=new URL(secondLogin.url).searchParams.get('state');assert.ok(secondLoginState);
+  const secondSession=await auth.callback('code',secondLoginState,secondLogin.browserState);assert.equal(secondSession.client,'web');
+  const start=await auth.startInstallation(signedIn.token);
+  const state=new URL(start.url).searchParams.get('state');assert.ok(state);
+  await assert.rejects(auth.finishInstallation(state,'11','install',secondSession.token),error=>error instanceof AuthError&&error.status===400);
+  await assert.rejects(auth.finishInstallation(state,'11','install',signedIn.token),error=>error instanceof AuthError&&error.status===400);
+  const verified=await auth.startInstallation(signedIn.token);
+  const verifiedState=new URL(verified.url).searchParams.get('state');assert.ok(verifiedState);
+  assert.deepEqual(await auth.finishInstallation(verifiedState,'11','install',signedIn.token),{status:'connected'});
+  await assert.rejects(auth.finishInstallation(verifiedState,'11','install',signedIn.token),error=>error instanceof AuthError&&error.status===400);
+  const cancel=await auth.startInstallation(signedIn.token);
+  const cancelState=new URL(cancel.url).searchParams.get('state');assert.ok(cancelState);
+  assert.deepEqual(await auth.finishInstallation(cancelState,null,'cancel',signedIn.token),{status:'cancelled'});
+  const wrongInstallation=await auth.startInstallation(signedIn.token);
+  const wrongState=new URL(wrongInstallation.url).searchParams.get('state');assert.ok(wrongState);
+  assert.deepEqual(await auth.finishInstallation(wrongState,'12','install',signedIn.token),{status:'failed'});
 });
 
 for (const decision of ['reject','wrong-code']) {

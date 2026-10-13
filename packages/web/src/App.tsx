@@ -27,6 +27,7 @@ export function App() {
   const [creating,setCreating] = useState(false);
   const [draft,setDraft] = useState<Draft>(initialDraft);
   const [formError,setFormError] = useState<string|null>(null);
+  const [installationNotice,setInstallationNotice] = useState<string|null>(null);
   const goal = goals.find(item => item.id === selected) ?? null;
   const active = goals.filter(item => !terminal.has(item.state)).length;
 
@@ -41,6 +42,12 @@ export function App() {
     }
     void initialize(); return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    const result=new URL(location.href).searchParams.get('installation');
+    if(result)setInstallationNotice(result);
+    if(result)history.replaceState(null,'',location.pathname+location.hash);
+  },[]);
 
   useEffect(() => {
     if (!session) return;
@@ -81,6 +88,14 @@ export function App() {
   },[session,repositoryRefresh]);
 
   useEffect(() => {
+    const restoreRepositories=(event:PageTransitionEvent)=>{
+      if(event.persisted||performance.getEntriesByType('navigation').some(entry=>(entry as PerformanceNavigationTiming).type==='back_forward'))setRepositoryRefresh(current=>current+1);
+    };
+    window.addEventListener('pageshow',restoreRepositories);
+    return()=>window.removeEventListener('pageshow',restoreRepositories);
+  },[session]);
+
+  useEffect(() => {
     history.replaceState(null,'',selected ? `#${selected}` : location.pathname);
     setEvents([]);
     if (!selected || !session) return;
@@ -115,6 +130,11 @@ export function App() {
     try { await api.logout(); setSession(null); setGoals([]); setSelected(null); }
     catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
+  }
+  async function connectRepositories() {
+    setBusy(true);setError(null);
+    try { const result=await api.installationStart();location.assign(result.url); }
+    catch(failure) { setError(message(failure));setBusy(false); }
   }
   function edit(change: Partial<Draft>) { setDraft(current => ({...current,...change,requestId:crypto.randomUUID()})); setFormError(null); }
   function openCreate() {
@@ -155,7 +175,12 @@ export function App() {
         <div className="welcome-mark" aria-hidden="true">✳</div><div className="eyebrow">SMALL GOALS. STEADY PROGRESS.</div><h1>Give your next idea<br/>a place to grow.</h1><p>Set a coding goal. Herbie runs a bounded attempt in an isolated environment and brings the result back for your review.</p>
         {mode === 'demo' ? <><button className="primary large" onClick={() => { void login(true); }} disabled={busy}>Enter local demo <span aria-hidden="true">↗</span></button><p className="fineprint">Deterministic sample work. No GitHub changes, model calls, or coding sandbox runs.</p></> : <><button className="primary large" onClick={() => { void login(false); }} disabled={busy}>Continue with GitHub <span aria-hidden="true">↗</span></button><p className="fineprint">Your GitHub login and repository installation permissions are checked separately.</p></>}
       </section> : <div className="workspace">
-        <section className="page-heading"><div><div className="eyebrow">MAKE ROOM FOR WHAT’S NEXT</div><h1>Your coding goals<span className="heading-dot">.</span></h1><p>A clear brief. A bounded run. A pull request you can review.</p></div><button className="primary" onClick={openCreate}>+ New goal</button></section>
+        <section className="page-heading"><div><div className="eyebrow">MAKE ROOM FOR WHAT’S NEXT</div><h1>Your coding goals<span className="heading-dot">.</span></h1><p>A clear brief. A bounded run. A pull request you can review.</p></div><div className="heading-actions">{mode==='live'&&<button onClick={()=>{void connectRepositories();}} disabled={busy}>Connect repositories</button>}<button className="primary" onClick={openCreate}>+ New goal</button></div></section>
+        {installationNotice==='connected'&&<div className="installation-notice" role="status">GitHub installation verified. Your public repositories are refreshing.</div>}
+        {installationNotice==='permissions'&&<div className="notice" role="status">The app is installed, but it needs Contents and Pull requests write permissions. Update its permissions in GitHub, then connect again.</div>}
+        {installationNotice==='cancelled'&&<div className="notice" role="status">GitHub installation was cancelled. You can connect repositories whenever you’re ready.</div>}
+        {installationNotice==='expired'&&<div className="notice" role="status">That installation link expired or this browser session changed. Start again with Connect repositories.</div>}
+        {installationNotice==='failed'&&<div className="notice" role="status">Herbie couldn’t verify that installation for this GitHub account. Refresh repositories or connect again.</div>}
         {mode === 'demo' && <div className="demo-notice"><span aria-hidden="true">◇</span><div><strong>You’re exploring the local demo.</strong> Jobs persist in Postgres; attempts and pull requests are simulated. No live work is performed.</div></div>}
         <div className="stats"><div><span className="stat-number">{active.toString().padStart(2,'0')}</span><span>Active goals</span></div><div><span className="stat-number">{goals.filter(item => item.state === 'awaiting_review').length.toString().padStart(2,'0')}</span><span>Ready for review</span></div><div><span className="stat-number">{goals.filter(item => item.state === 'completed').length.toString().padStart(2,'0')}</span><span>Completed</span></div><div className="stats-note"><span className="pulse"/> Updates every few seconds</div></div>
         <div className="goal-workspace">
@@ -168,6 +193,6 @@ export function App() {
         </div><footer>BUILT FOR MOMENTUM <span>Isolated execution <span aria-hidden="true">·</span> Durable progress <span aria-hidden="true">·</span> Human review</span></footer>
       </div>}
     </main>
-    {creating && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="dialog-heading"><div><div className="eyebrow">LET’S MAKE PROGRESS</div><h2 id="create-title">Start a new goal</h2></div><button className="icon-button" aria-label="Close new goal" disabled={busy} onClick={() => setCreating(false)}>×</button></div><form onSubmit={event => { void createGoal(event); }}><label>Repository<select autoFocus required value={draft.repository} onChange={event => edit({repository:event.target.value})}><option value="" disabled>Choose a repository</option>{repositories.map(repo => <option key={repo.fullName}>{repo.fullName}</option>)}</select><span className="field-hint">One active goal per repository. Finish or cancel existing work first.</span></label><div className="repository-discovery"><span>{repositoryLoading ? 'Checking repository access…' : 'Repository access is checked when you start a goal.'}</span><button type="button" disabled={repositoryLoading || busy} onClick={() => setRepositoryRefresh(current => current+1)}>Refresh repositories</button></div>{repositoryError && <div className="inline-error" role="alert">{repositoryError} Existing goal progress remains available.</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <p className="notice">No repositories available. Install the GitHub App on a public repository you can access, then refresh.</p>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label><label>Test command <span className="optional">JSON argument array</span><input required className="mono-input" value={draft.test} onChange={event => edit({test:event.target.value})}/><span className="field-hint">Arguments run in the isolated coding environment.</span></label><label>Maximum attempts<select value={draft.maxAttempts} onChange={event => edit({maxAttempts:event.target.value})}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'attempt' : 'attempts'}</option>)}</select><span className="field-hint">Each merge can start the next attempt, up to this limit.</span></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure <small>Demo only; useful for exploring error recovery.</small></span></label>}{formError && <div className="inline-error" role="alert">{formError}</div>}<div className="dialog-footer"><button type="button" onClick={() => setCreating(false)} disabled={busy}>Keep as draft</button><button className="primary" type="submit" disabled={busy || repositories.length === 0}>{busy ? 'Starting…' : 'Start goal'} <span aria-hidden="true">↗</span></button></div><p className="fineprint">Closing the page won’t stop your goal. Failed submissions keep the same request ID for safe retries.</p></form></section></div>}
+    {creating && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="dialog-heading"><div><div className="eyebrow">LET’S MAKE PROGRESS</div><h2 id="create-title">Start a new goal</h2></div><button className="icon-button" aria-label="Close new goal" disabled={busy} onClick={() => setCreating(false)}>×</button></div><form onSubmit={event => { void createGoal(event); }}><label>Repository<select autoFocus required value={draft.repository} onChange={event => edit({repository:event.target.value})}><option value="" disabled>Choose a repository</option>{repositories.map(repo => <option key={repo.fullName}>{repo.fullName}</option>)}</select><span className="field-hint">One active goal per repository. Finish or cancel existing work first.</span></label><div className="repository-discovery"><span>{repositoryLoading ? 'Checking repository access…' : 'Repository access is checked when you start a goal.'}</span><button type="button" disabled={repositoryLoading || busy} onClick={() => setRepositoryRefresh(current => current+1)}>Refresh repositories</button></div>{repositoryError && <div className="inline-error" role="alert">{repositoryError} Existing goal progress remains available.</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="notice">No repositories available. Connect the GitHub App to a public repository you can access. {mode==='live'&&<button type="button" disabled={busy} onClick={()=>{void connectRepositories();}}>Connect repositories</button>}</div>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label><label>Test command <span className="optional">JSON argument array</span><input required className="mono-input" value={draft.test} onChange={event => edit({test:event.target.value})}/><span className="field-hint">Arguments run in the isolated coding environment.</span></label><label>Maximum attempts<select value={draft.maxAttempts} onChange={event => edit({maxAttempts:event.target.value})}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'attempt' : 'attempts'}</option>)}</select><span className="field-hint">Each merge can start the next attempt, up to this limit.</span></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure <small>Demo only; useful for exploring error recovery.</small></span></label>}{formError && <div className="inline-error" role="alert">{formError}</div>}<div className="dialog-footer"><button type="button" onClick={() => setCreating(false)} disabled={busy}>Keep as draft</button><button className="primary" type="submit" disabled={busy || repositories.length === 0}>{busy ? 'Starting…' : 'Start goal'} <span aria-hidden="true">↗</span></button></div><p className="fineprint">Closing the page won’t stop your goal. Failed submissions keep the same request ID for safe retries.</p></form></section></div>}
   </div>;
 }

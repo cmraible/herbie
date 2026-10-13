@@ -17,6 +17,7 @@ export const eventSchema = z.object({id:z.number().int(), goalId:z.string().uuid
 export const sessionSchema = z.object({user:z.object({id:z.string(),login:z.string()}),mode:z.enum(['demo','live'])});
 export const repositorySchema = z.object({fullName:z.string(),defaultBranch:z.string(),installationId:z.number().int()});
 export const authStartSchema = z.object({url:z.string().url(),pollToken:z.string().optional(),userCode:z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/).optional()});
+export const installationStartSchema = z.object({url:z.string().url()});
 export const authPollSchema = z.object({status:z.enum(['pending','complete','expired','rejected']),token:z.string().optional()});
 export const actionSchema = z.enum(['pause','resume','cancel']);
 export type Goal = z.infer<typeof goalSchema>;

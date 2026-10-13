@@ -6,3 +6,6 @@
 @media(min-width:851px){.goal-list{max-height:740px;overflow-y:auto;padding-right:4px;scrollbar-width:thin;scrollbar-color:#d4dfc8 transparent}.goal-detail{align-self:start}}
 
 .repository-discovery{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}.repository-discovery>span{font-size:9px;color:#9ba78f}.repository-discovery button{font-size:9px;padding:4px 7px;flex-shrink:0}
+.heading-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.installation-notice{background:#eaf4e7;border:1px solid #d4e5cc;padding:11px 13px;border-radius:7px;font-size:11px;color:#577a4f;margin:0 0 16px}
+@media(max-width:540px){.heading-actions{gap:6px}.heading-actions button{font-size:9px;padding:8px 9px}.page-heading{flex-wrap:wrap}.page-heading>.heading-actions{margin-left:auto}}
