@@ -42,11 +42,18 @@ try{
   if(controller.signal.aborted||deadline.expired())throw new Error('Deployment interrupted');
   phase='Worker and container deployment';
   console.log(`Deploying the verified main revision with live execution ${prepared.executionEnabled?'enabled':'disabled'}.`);
-  await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
-    {cwd:directory,signal:controller.signal,report:message=>console.log(message),logPath:join(temporary,'wrangler.log'),env:{...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
-      DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')}});
+  const healthController=new AbortController();
+  const healthSignal=AbortSignal.any([controller.signal,healthController.signal]);
+  const health=waitForDeployment(prepared.origin,prepared.revision,{executionEnabled:prepared.executionEnabled,signal:healthSignal,timeoutMs:deadline.remaining(),report:message=>console.log(message)})
+    .then(()=>({ok:true as const}),error=>({ok:false as const,error}));
+  try{
+    await runDeploymentCommand('pnpm',['exec','wrangler','deploy','--config',configPath,'--secrets-file',secretsPath,'--containers-rollout=immediate'],
+      {cwd:directory,signal:controller.signal,report:message=>console.log(message),logPath:join(temporary,'wrangler.log'),env:{...childEnvironment,CLOUDFLARE_API_TOKEN:process.env.CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,
+        DOCKER_CONFIG:join(temporary,'docker'),WRANGLER_LOG_PATH:join(temporary,'wrangler.log')}});
+  }catch(error){healthController.abort();await health;throw error;}
   phase='new-container health verification';
-  await waitForDeployment(prepared.origin,prepared.revision,{executionEnabled:prepared.executionEnabled,signal:controller.signal,timeoutMs:deadline.remaining(),report:message=>console.log(message)});
+  const verification=await health;
+  if(!verification.ok)throw verification.error;
   console.log(`Verified production release ${prepared.revision}.`);
 }catch(error){
   if(deadline.expired())console.error('Deployment exceeded the shared 180-second deadline; subprocess groups were terminated (up to 2 seconds termination grace).');
