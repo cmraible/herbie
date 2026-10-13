@@ -29,6 +29,7 @@ export interface Adapters {
   attempt(execution: Execution, report: (message: string) => Promise<void>): Promise<DaytonaAttemptChanges>;
   // Recheck ownership after awaited preparation and immediately before each remote write.
   publish(execution: Execution, changes: DaytonaAttemptChanges, requireLease: () => Promise<void>, reportPhase?: (phase: PublicationPhase) => Promise<void>): Promise<Omit<PullRequest, 'state'>>;
+  checkUnpublished?(execution:Execution):Promise<'absent'|'pull_request_exists'|'branch_exists'>;
   checkPublicationRetry?(execution:Execution,changes:DaytonaAttemptChanges):Promise<PublicationRetryCheck>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
 }
