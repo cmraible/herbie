@@ -147,6 +147,8 @@ if (!response.ok || health.mode !== 'demo' || health.executionEnabled !== true) 
 JS
 }
 run_build() {
+  # Check the production asset build before other builds can supply its inputs.
+  run_step deployment-assets pnpm build:deploy
   run_step build pnpm build
   run_step typecheck pnpm typecheck
 }
