@@ -23,5 +23,5 @@ export function containerEnvironment(serialized:string,origin:string,enabled:boo
 
 export function executionEnabled(value:string):boolean{return value==='true';}
 export function blocksExecution(method:string,path:string,enabled:boolean):boolean{
-  return !enabled&&method==='POST'&&(path==='/api/goals'||/^\/api\/goals\/[^/]+\/resume$/.test(path));
+  return !enabled&&method==='POST'&&(path==='/api/goals'||/^\/api\/goals\/[^/]+\/(?:resume|retry-publication)$/.test(path));
 }
