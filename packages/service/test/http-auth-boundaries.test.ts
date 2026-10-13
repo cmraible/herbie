@@ -96,6 +96,11 @@ test('HTTP reports expired GitHub login, denied repository permission, and inval
   const callback = await fetch(`${base}/api/auth/callback?code=expired&state=unknown`);
   assert.equal(callback.status, 400);
   assert.deepEqual(await callback.json(), { error: 'Authorization is expired or invalid; start login again' });
+  for(const query of ['', '?state=']){
+    const installation=await fetch(`${base}/api/auth/installation/callback${query}`,{redirect:'manual'});
+    assert.equal(installation.status,303);
+    assert.equal(installation.headers.get('location'),'/?installation=expired');
+  }
 });
 
 
