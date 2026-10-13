@@ -22,7 +22,7 @@ const context={HERBIE_ALLOWED_GITHUB_USER_ID:'7',HERBIE_DEPLOY_REPOSITORY:'examp
   HERBIE_GITHUB_CLIENT_SECRET:'test-only-client-secret',HERBIE_GITHUB_PRIVATE_KEY:privateKey,HERBIE_GITHUB_WEBHOOK_SECRET:'test-only-webhook-secret'};
 const config={name:'herbie-service',main:'src/index.ts',
   vars:{HERBIE_PUBLIC_URL:'https://herbie.example.invalid',HERBIE_EXECUTION_ENABLED:'false'},
-  assets:{directory:'../web/dist'},containers:[{image:'../../Dockerfile',image_build_context:'../..',instance_type:'basic',max_instances:1}]};
+  assets:{directory:'../web/dist'},containers:[{image:'../../Dockerfile',image_build_context:'../..',instance_type:'basic',max_instances:1},{class_name:'ReleaseContainer',scheduling_policy:'durable_object',images:{release:{dockerfile:'../../Dockerfile',build_context:'../..'}}}]};
 
 test('configuration failures report every missing or malformed field without echoing supplied values',()=>{
   assert.throws(()=>prepareDeployment({...context,CLOUDFLARE_API_TOKEN:'',HERBIE_GITHUB_CLIENT_SECRET:undefined,
@@ -90,7 +90,7 @@ test('approved preparation bundles only runtime secrets and forces a unique disa
   assert.equal(prepared.origin,context.HERBIE_PUBLIC_URL);
   assert.equal(prepared.config.vars.HERBIE_EXECUTION_ENABLED,'false');
   assert.equal(prepared.config.vars.HERBIE_DEPLOYMENT_ID,prepared.revision);
-  assert.equal(prepared.config.containers[0]?.image_vars.HERBIE_RUNTIME_REVISION,prepared.revision);
+  assert.equal(prepared.config.containers[0]?.image_vars?.HERBIE_RUNTIME_REVISION,prepared.revision);
   assert.equal(prepared.config.containers[0]?.image,'/repo/Dockerfile');
   assert.equal(prepared.config.containers[0]?.image_build_context,'/repo');
   assert.ok(!JSON.stringify(prepared.config).includes('test-only-password'));
@@ -107,7 +107,7 @@ test('deployment rejects incomplete secrets, another account or project, and uns
     });
   }
   assert.throws(()=>prepareDeployment(context,{...config,vars:{...config.vars,HERBIE_EXECUTION_ENABLED:'true'}},'/repo/packages/cloudflare'));
-  assert.throws(()=>prepareDeployment(context,{...config,containers:[{...config.containers[0],max_instances:2}]},'/repo/packages/cloudflare'));
+  assert.throws(()=>prepareDeployment(context,{...config,containers:[{...config.containers[0],max_instances:2},config.containers[1]]},'/repo/packages/cloudflare'));
 });
 
 

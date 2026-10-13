@@ -19,9 +19,9 @@ test('local Worker denies new execution, resume, and saved-publication retry whi
   assert.equal(health.status,503);
   assert.deepEqual(await health.json(),{error:'Herbie service is unavailable. Check operator configuration and supervisor logs.'});
 });
-test('disabled local scheduled handler completes without starting a container or requiring execution secrets',async()=>{
+test('local scheduled handler reports an unavailable serving container even with execution disabled',async()=>{
   const scheduled=await fetch(`${origin}/cdn-cgi/local/scheduled?cron=${encodeURIComponent('* * * * *')}`);
-  assert.equal(scheduled.status,200);
+  assert.equal(scheduled.status,500);
 });
 
 test('enabled local supervisor reports an unavailable container as a failed scheduled invocation',async t=>{

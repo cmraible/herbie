@@ -177,12 +177,20 @@ release does not need a separate desktop secret-upload command.
 
 The workflow follows Cloudflare's standard `wrangler deploy` flow. Wrangler builds
 the configured Dockerfile, authenticates to the registry, publishes the image,
-and starts the container rollout in the same command that deploys the Worker.
+and prepares a named container image in the same command that deploys the Worker.
 There are no separate Buildx, image push, or Docker cache export steps. The helper
 starts checking the public health endpoint while Wrangler deploys and only reports
 success when the runtime startup revision, image revision, and execution mode
-match the requested release. Cloudflare rollout time still contributes to the
-deployment duration; command success alone does not prove that rollout finished.
+match the requested release. A durable router keeps the previous API serving
+while the new release starts, then switches only after readiness. Per-release
+containers do not participate in application-wide stop/start rollouts. The helper
+pins the legacy application's current digest so the migration also preserves its
+serving process. Image preparation and candidate startup still contribute to the
+deployment duration; command success alone does not prove that handoff finished.
+The active API stays warm even with execution disabled. The new scheduling policy
+is a Cloudflare beta and requires `standard-1` instead of `basic`, increasing
+instance cost; review the existing hosting budget before merging the migration.
+See [deployment lifecycle](cloudflare-deployment.md) for retirement and rollback.
 
 The host-side asset build uses `pnpm build:deploy`, which builds the loop package
 before typechecking and building the web assets. Web types reference service types
