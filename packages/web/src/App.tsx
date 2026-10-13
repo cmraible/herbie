@@ -3,6 +3,8 @@ import { createClient, ApiError } from '@herbie/contracts/client';
 import { type Goal, type GoalEvent, type GoalAction, type Repository, type Session } from '@herbie/contracts';
 import { draftSchema, newDraft, parseDraft, type Draft } from './draft.js';
 
+import {sortRepositories} from './repositories.js';
+
 const api = createClient();
 const terminal = new Set(['completed','cancelled','failed']);
 const labels: Record<Goal['state'], string> = {queued:'Queued',running:'Running',paused:'Paused',awaiting_review:'Ready for review',completed:'Completed',cancelled:'Cancelled',failed:'Failed',needs_attention:'Needs attention'};
@@ -111,7 +113,7 @@ export function App() {
     setRepositoryLoading(true); setRepositoriesResolved(false); setRepositoryError(null);
     async function discover() {
       try {
-        const list = await api.repositories();
+        const list = sortRepositories(await api.repositories());
         if (!alive) return;
         setRepositories(list); setRepositoriesResolved(true);
         setDraft(current => list.some(repository => repository.fullName === current.repository)
