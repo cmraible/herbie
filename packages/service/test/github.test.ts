@@ -12,7 +12,7 @@ import { goalSchema } from '@herbie/contracts';
 
 export async function githubFixture(t: TestContext) {
   const requests: {path: string; authorization: string; body: unknown}[] = [];
-  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, installationToken:'ghs_fixture', pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
+  const fixture = { private: false, archived:false, disabled:false, push: true, contents: 'write', pullRequests: 'write', installationId:11, installationToken:'ghs_fixture', pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -21,7 +21,7 @@ export async function githubFixture(t: TestContext) {
     const path = req.url ?? '';
     requests.push({path, authorization: req.headers.authorization ?? '', body});
     res.setHeader('content-type', 'application/json');
-    const repository = {id: 42, full_name: 'alice/project', private: fixture.private, default_branch: 'main', permissions: {push: fixture.push}};
+    const repository = {id: 42, full_name: 'alice/project', private: fixture.private, archived:fixture.archived, disabled:fixture.disabled, default_branch: 'main', permissions: {push: fixture.push}};
     if (path === '/login/oauth/access_token') res.end(JSON.stringify({access_token:'ghu_fixture',expires_in:28800}));
     else if (path === '/user') res.end(JSON.stringify({id:7,login:'alice'}));
     else if (path.startsWith('/user/installations/11/repositories')) res.end(JSON.stringify({repositories:[repository]}));
@@ -99,6 +99,20 @@ test('authorizes only the intersection of public user-writable and installed app
   await assert.rejects(github.authorize('ghu_fixture','alice/project'), /permission|access/i);
 });
 
+test('archived and disabled repositories cannot start work but remain readable for reconciliation', async t => {
+  const {github,fixture,requests}=await githubFixture(t);
+  for(const flag of ['archived','disabled'] as const){
+    fixture[flag]=true;
+    assert.deepEqual(await github.repositories('ghu_fixture'),[]);
+    const before=requests.length;
+    await assert.rejects(github.authorize('ghu_fixture','alice/project'),error=>error instanceof GithubError&&error.status===403&&/archived or disabled/.test(error.message));
+    assert.equal(requests.length,before+1,'reject before requesting installation credentials');
+    assert.equal((await github.reconciliationRepository('alice/project')).repository,'alice/project');
+    fixture[flag]=false;
+  }
+  assert.equal((await github.repositories('ghu_fixture')).length,1);
+});
+
 test('installation onboarding derives the app slug and accepts only the signed-in user’s installation',async t=>{
   const {github,fixture,requests}=await githubFixture(t);
   const state='S'.repeat(43);
@@ -151,6 +165,21 @@ test('publication recovery checks all-state PR, exact branch and pinned base usi
   assert.equal(await live.checkPublicationRetry?.(execution,changes),'pull_request_exists');
   fixture.pr=false;fixture.branchHeads.set('main','2'.repeat(40));
   assert.equal(await live.checkPublicationRetry?.(execution,changes),'base_changed');
+});
+
+test('cancellation absence checks use read-only reconciliation access after archival',async t=>{
+  const {github,fixture,requests}=await githubFixture(t);
+  fixture.archived=true;
+  const live=createLiveAdapters(undefined,github,{userToken:async()=>{throw new Error('Read-only cancellation must not require write authorization');}});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',testCommand:['node','--test'],maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
+  const execution={goal,repository:await live.reconciliationRepository(goal.repository),attemptId:randomUUID(),branch:'herbie/attempt-1'};
+  assert.equal(await live.checkUnpublished?.(execution),'absent');
+  fixture.branchHeads.set(execution.branch,'1'.repeat(40));
+  assert.equal(await live.checkUnpublished?.(execution),'branch_exists');
+  fixture.pr=true;
+  assert.equal(await live.checkUnpublished?.(execution),'pull_request_exists');
+  assert.ok(requests.filter(request=>request.path.endsWith('/access_tokens')).every(request=>JSON.stringify(request.body)===JSON.stringify({repositories:['project'],permissions:{contents:'read',pull_requests:'read'}})));
+  assert.ok(!requests.some(request=>request.path.startsWith('/user/installations')));
 });
 
 test('checks webhook raw bytes and rejects malformed signatures', async t => {

@@ -9,7 +9,7 @@ export interface GithubConfig {
   callbackUrl: string; webhookSecret: string;
 }
 export class GithubError extends Error {constructor(readonly status:number,message:string){super(message);}}
-const repositorySchema = z.object({id:z.number().int(),full_name:z.string(),private:z.boolean(),default_branch:z.string(),permissions:z.object({push:z.boolean().optional()}).optional()});
+const repositorySchema = z.object({id:z.number().int(),full_name:z.string(),private:z.boolean(),archived:z.boolean().default(false),disabled:z.boolean().default(false),default_branch:z.string(),permissions:z.object({push:z.boolean().optional()}).optional()});
 const installationSchema = z.object({id:z.number().int(),permissions:z.object({contents:z.string().optional(),pull_requests:z.string().optional()})});
 const branchSchema=z.object({commit:z.object({sha:z.string().regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/)})});
 const appSchema = z.object({slug:z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/)});
@@ -50,7 +50,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
         if (installation.permissions.contents !== 'write' || installation.permissions.pull_requests !== 'write') continue;
         for (let repoPage=1;repoPage<=100;repoPage++) {
           const repos = z.object({repositories:z.array(repositorySchema)}).parse(await request(`/user/installations/${installation.id}/repositories?per_page=100&page=${repoPage}`,token)).repositories;
-          for (const repo of repos) if (!repo.private && repo.permissions?.push) result.push({fullName:repo.full_name,defaultBranch:repo.default_branch,installationId:installation.id});
+          for (const repo of repos) if (!repo.private && !repo.archived && !repo.disabled && repo.permissions?.push) result.push({fullName:repo.full_name,defaultBranch:repo.default_branch,installationId:installation.id});
           if (repos.length<100) break;
           if (repoPage===100) throw new Error('Repository listing exceeds supported limit');
         }
@@ -63,6 +63,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400,'Invalid repository');
     const repo = repositorySchema.parse(await request(`/repos/${repository}`,token));
     if (repo.private) throw new GithubError(403,'Only public repositories are supported');
+    if (repo.archived || repo.disabled) throw new GithubError(403,'Repository is archived or disabled; new work cannot be published');
     if (!repo.permissions?.push) throw new GithubError(403,'User write permission is required');
     const accessible = (await repositories(token)).find(item=>item.fullName.toLowerCase()===repository.toLowerCase());
     if (!accessible) throw new GithubError(403,'An installation with contents and pull request write permissions is required');
