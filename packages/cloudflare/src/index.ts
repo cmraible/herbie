@@ -1,6 +1,7 @@
 import {DurableObject} from 'cloudflare:workers';
 import {scheduler} from 'node:timers/promises';
 import {blocksExecution,containerEnvironment,executionEnabled} from './configuration.js';
+import {ensureContainerRevision} from './container-revision.js';
 
 const port=8787;
 const inactivityMs=10*60*1000;
@@ -20,21 +21,23 @@ export class HerbieContainer extends DurableObject<Env>{
   private async startAndWait():Promise<void>{
     const container=this.ctx.container;
     if(!container)throw new Error('Container binding unavailable');
-    if(!container.running){
+    // A running process keeps the environment from its last start, even after a Worker deploy.
+    await ensureContainerRevision(container,this.ctx.storage,this.env.HERBIE_DEPLOYMENT_ID,()=>{
       const env=containerEnvironment(this.env.HERBIE_RUNTIME_SECRETS,this.env.HERBIE_PUBLIC_URL,executionEnabled(this.env.HERBIE_EXECUTION_ENABLED),this.env.HERBIE_DEPLOYMENT_ID);
       container.start({env,enableInternet:true});
-    }
-    await container.setInactivityTimeout(inactivityMs);
-    const deadline=Date.now()+30_000;
-    while(Date.now()<deadline){
-      try{
-        const health=await container.getTcpPort(port).fetch('http://container/api/health',{signal:AbortSignal.timeout(5000)});
-        if(health.ok){await health.body?.cancel();return;}
-        await health.body?.cancel();
-      }catch{/* Startup is asynchronous; never log raw network/configuration errors. */}
-      await scheduler.wait(500);
-    }
-    throw new Error('Container readiness timed out');
+    },async()=>{
+      await container.setInactivityTimeout(inactivityMs);
+      const deadline=Date.now()+30_000;
+      while(Date.now()<deadline){
+        try{
+          const health=await container.getTcpPort(port).fetch('http://container/api/health',{signal:AbortSignal.timeout(5000)});
+          if(health.ok){await health.body?.cancel();return;}
+          await health.body?.cancel();
+        }catch{/* Startup is asynchronous; never log raw network/configuration errors. */}
+        await scheduler.wait(500);
+      }
+      throw new Error('Container readiness timed out');
+    });
   }
   async fetch(request:Request):Promise<Response>{
     await this.ensureRunning();
