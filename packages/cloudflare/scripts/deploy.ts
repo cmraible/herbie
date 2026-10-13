@@ -56,7 +56,7 @@ try{
   if(!verification.ok)throw verification.error;
   console.log(`Verified production release ${prepared.revision}.`);
 }catch(error){
-  if(deadline.expired())console.error('Deployment exceeded the shared 180-second deadline; subprocess groups were terminated (up to 2 seconds termination grace).');
+  if(deadline.expired())console.error('Deployment exceeded the shared 20-minute deadline; subprocess groups were terminated (up to 2 seconds termination grace).');
   if(error instanceof DeploymentCommandError)console.error(error.message);
   if(error instanceof DeploymentConfigurationError||error instanceof DeploymentHealthError)console.error(error.message);
   console.error(`Production ${phase} failed or was refused. Check approved inputs, current main and Cloudflare deployment state. No raw tool output was logged.`);

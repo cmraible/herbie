@@ -353,6 +353,6 @@ jobs:
       - name: Build deployment assets and their type dependencies
         run: pnpm build:deploy
       - name: Deploy current main and verify the new container revision
-        timeout-minutes: 4
+        timeout-minutes: 22
         run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
         env: *deployment_inputs
