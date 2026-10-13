@@ -19,8 +19,11 @@ token, GCP identity, registry secret, or Kubernetes pull secret is needed.
 Keep the `homelab-image` environment's intended approval/main-branch restrictions.
 If a package with this name already exists, verify this repository has Actions
 write access to it. The source/revision OCI labels link the image to its public
-source. Image publication does not apply infrastructure or replace the existing
-production workflow; merging still follows that workflow's deployment policy.
+source. Image publication does not apply infrastructure. The Cloudflare deployment job
+is explicitly paused during migration, so merging cannot redeploy the old
+coordinator. The existing service continues running until the coordinated drain.
+Re-enabling Cloudflare deployments requires a reviewed workflow change after
+confirming the k3s coordinator is stopped.
 
 **Public visibility is a separate operator step.** GHCR packages are private when
 first published, even from a public repository. After the separately approved

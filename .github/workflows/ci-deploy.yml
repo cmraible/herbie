@@ -298,11 +298,11 @@ jobs:
           exit "$failed"
 
   deploy:
-    name: Deploy configured production service
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
-      vars.HERBIE_DEPLOY_MODE == 'automatic'
+    name: Cloudflare deployment paused for k3s migration
+    # Keep the existing service running, but never redeploy it on migration merges.
+    # Re-enabling this rollback path requires a reviewed workflow change after
+    # confirming the k3s coordinator is stopped.
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment:
