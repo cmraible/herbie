@@ -9,8 +9,8 @@ test('local Worker serves the built React application without starting its unava
   assert.equal(response.status,200);
   assert.match(await response.text(),/Herbie/);
 });
-test('local Worker denies new execution and resume while preserving a safe unavailable-backend response',async()=>{
-  for(const path of ['/api/goals','/api/goals/00000000-0000-4000-8000-000000000001/resume']){
+test('local Worker denies new execution, resume, and saved-publication retry while preserving a safe unavailable-backend response',async()=>{
+  for(const path of ['/api/goals','/api/goals/00000000-0000-4000-8000-000000000001/resume','/api/goals/00000000-0000-4000-8000-000000000001/retry-publication']){
     const response=await fetch(`${origin}${path}`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
     assert.equal(response.status,503);
     assert.deepEqual(await response.json(),{error:'Live execution is disabled by the operator'});

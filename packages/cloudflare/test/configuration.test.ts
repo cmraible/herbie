@@ -22,10 +22,12 @@ test('execution opt-in requires exact true and the execution credentials',()=>{
   assert.equal(containerEnvironment(JSON.stringify({...credentials,DAYTONA_API_KEY:'fixture',HERBIE_DAYTONA_OPENAI_SECRET:'fixture-name'}),'https://herbie.example',true).HERBIE_EXECUTION_ENABLED,'true');
 });
 
-test('edge gate blocks new goals and resume even while an old container has its previous environment',()=>{
+test('edge gate blocks new goals, resume, and saved-publication retry while an old container has its previous environment',()=>{
   assert.equal(blocksExecution('POST','/api/goals',false),true);
   assert.equal(blocksExecution('POST','/api/goals/goal-id/resume',false),true);
+  assert.equal(blocksExecution('POST','/api/goals/goal-id/retry-publication',false),true);
   assert.equal(blocksExecution('POST','/api/goals/goal-id/cancel',false),false);
   assert.equal(blocksExecution('GET','/api/goals',false),false);
   assert.equal(blocksExecution('POST','/api/goals',true),false);
+  assert.equal(blocksExecution('POST','/api/goals/goal-id/retry-publication',true),false);
 });
