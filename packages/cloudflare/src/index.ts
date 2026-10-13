@@ -12,6 +12,11 @@ type Retired={revision:string;signalAt:number;destroyAt:number};
 /** Retained during migration. Its image is pinned by the deployment helper. */
 export class HerbieContainer extends DurableObject<Env>{
   private starting:Promise<void>|undefined;
+  constructor(ctx:DurableObjectState,env:Env){
+    super(ctx,env);
+    const container=ctx.container;
+    if(container?.running)void ctx.blockConcurrencyWhile(()=>container.setInactivityTimeout(inactivityMs));
+  }
   async ensureRunning():Promise<void>{
     if(await this.ctx.storage.get<boolean>('retired'))throw new Error('Release retired');
     this.starting??=this.startAndWait().finally(()=>{this.starting=undefined;});
@@ -99,13 +104,25 @@ export class ReleaseRouter extends DurableObject<Env>{
     const revision=this.env.HERBIE_DEPLOYMENT_ID;
     const expectedPrevious=await this.ctx.storage.get<string>('active');
     if(expectedPrevious===revision)return;
+    // Persist cleanup before startup: even an interrupted or superseded
+    // preparation must eventually release its instance and launch credentials.
+    await this.ctx.storage.transaction(async storage=>{
+      const retired=await storage.get<Retired[]>('retired')??[];
+      if(!retired.some(candidate=>candidate.revision===revision)){
+        retired.push({revision,signalAt:Date.now()+25*60_000,destroyAt:Date.now()+40*60_000});
+        await storage.put('retired',retired);
+      }
+      const alarm=await storage.getAlarm();
+      const next=Math.min(...retired.map(candidate=>Math.max(Date.now()+1000,candidate.signalAt>Date.now()?candidate.signalAt:candidate.destroyAt)));
+      if(alarm===null||alarm>next)await storage.setAlarm(next);
+    });
     await this.env.RELEASES.getByName(revision).prepare(revision);
     // Storage transaction commits the route and cleanup schedule together. No
     // network call holds the storage lock or pauses reads of the old route.
     const promoted=await this.ctx.storage.transaction(async storage=>{
       const previous=await storage.get<string>('active');
       if(previous===revision||previous!==expectedPrevious)return false;
-      const retired=await storage.get<Retired[]>('retired')??[];
+      const retired=(await storage.get<Retired[]>('retired')??[]).filter(candidate=>candidate.revision!==revision);
       retired.push({revision:previous??'legacy',signalAt:Date.now()+60_000,destroyAt:Date.now()+16*60_000});
       await storage.put('retired',retired);
       await storage.put('active',revision);
@@ -124,6 +141,8 @@ export class ReleaseRouter extends DurableObject<Env>{
     else await this.env.HERBIE.getByName('herbie').ensureRunning();
   }
   async alarm():Promise<void>{
+    // Finish an in-progress readiness decision before retiring a candidate.
+    await this.promoting?.catch(()=>undefined);
     const retired=await this.ctx.storage.get<Retired[]>('retired')??[];
     const remaining:Retired[]=[];
     for(const release of retired){

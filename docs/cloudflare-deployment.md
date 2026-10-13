@@ -49,6 +49,11 @@ instance, a candidate during startup, and retired instances during shutdown.
 This is deployment availability, not host-failure replication or a per-user fleet.
 Postgres remains the source of truth for all goals, leases and publication intent.
 
+Candidate cleanup is recorded durably before preparation begins. Candidates that
+never promote receive SIGTERM after 25 minutes and are forcefully retired after
+another 15 minutes, including deletion of stored launch credentials. Restarted
+Durable Objects restore the serving container inactivity timeout immediately.
+
 After promotion, the old release remains untouched for one minute to allow
 requests that already selected it to finish. A persistent alarm then sends SIGTERM,
 which stops new claims and HTTP acceptance while active work drains. After another
