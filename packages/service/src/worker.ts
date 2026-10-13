@@ -2,6 +2,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { KnownAttemptFailure, type Adapters, type Execution } from './adapters.js';
 import type { Job } from './store.js';
 import { Store, StoreError } from './store.js';
+import {publicationDiagnostic,publicationDiagnosticMessage} from './publication-diagnostics.js';
+import type {PublicationPhase} from './adapters.js';
 
 async function executionFor(adapters: Adapters, job: Job, readOnly = false): Promise<Execution> {
   const repository = readOnly ? await adapters.reconciliationRepository(job.goal.repository) : await adapters.authorize(job.goal.ownerId, job.goal.repository);
@@ -31,13 +33,20 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     }
   };
   let publishing = job.stage === 'publishing';
+  let publicationPhase:PublicationPhase='preflight_reconciliation';
+  const reportPublicationPhase=async(phase:PublicationPhase):Promise<void>=>{
+    publicationPhase=phase;
+    await store.recordPublicationPhase(job.id,workerId,phase);
+  };
   try {
     const execution = await executionFor(adapters,job,publishing);
     if (publishing) {
       // No effectful replay after a crash or ambiguous publication response.
+      await reportPublicationPhase('preflight_reconciliation');
       const existing = await adapters.reconcile(execution);
-      if (!existing) await store.publicationUncertain(job.id,workerId,'Publication outcome unknown; inspect the attempt branch on GitHub.');
+      if (!existing) await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
       else {
+        await reportPublicationPhase('state_persistence');
         await store.completePublication(job.id,workerId,{url:existing.url,number:existing.number,branch:existing.branch});
         if (existing.state !== 'open') await store.reconcile(job.id,existing.state);
       }
@@ -56,16 +65,19 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     if (leaseLost) throw new Error('Worker lease lost');
     if (!await store.beginPublication(job.id,workerId)) return true;
     publishing = true;
+    await reportPublicationPhase('preflight_reconciliation');
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
     if (!existing) await requireLease();
-    const result = existing ?? await adapters.publish(execution,changes,requireLease);
+    if(existing)await reportPublicationPhase('state_persistence');
+    const result = existing ?? await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
+    if(!existing)await reportPublicationPhase('state_persistence');
     await store.completePublication(job.id,workerId,result);
     if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);
   } catch (error) {
     // Error text from SDKs can contain credentials, URLs or generated output. Store a safe summary.
     try {
-      if (publishing) await store.publicationUncertain(job.id,workerId,'Publication could not be confirmed; reconciliation will check GitHub.');
+      if (publishing) await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)));
       else await store.fail(job.id,workerId,error instanceof KnownAttemptFailure ? error.message : 'Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal.',!(error instanceof KnownAttemptFailure));
     } catch (saveError) {
       // A stale worker must not overwrite the new owner's recovery decision.

@@ -4,6 +4,7 @@ import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
 import {actionSchema,goalInput} from '@herbie/contracts';
+import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {Store,StoreError} from './store.js';
 import {AuthError,type createAuth} from './auth.js';
 import {GithubError} from './github.js';
@@ -131,13 +132,29 @@ export function createApiServer(options:ApiOptions){
         await adapters.authorize(userId,input.repository);
         const result=await store.createGoal(userId,input,adapters.mode,key);json(response,result.created?201:200,result.goal);return;
       }
-      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel))?$/);
+      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry-publication))?$/);
       if(goalPath){
         const id=z.string().uuid().parse(goalPath[1]);const goal=await store.getGoal(id,userId);
         if(!goal)throw new HttpError(404,'Goal not found');
         if(method==='GET'&&!goalPath[2]){json(response,200,goal);return;}
         if(method==='GET'&&goalPath[2]==='events'){const after=z.coerce.number().int().min(0).safe().parse(url.searchParams.get('after')??0);json(response,200,await store.events(id,after));return;}
         if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){
+          if(goalPath[2]==='retry-publication'){
+            requireExecution();
+            if(adapters.mode!=='live'||!adapters.checkPublicationRetry)throw new HttpError(404,'Not found');
+            const candidate=await store.publicationRetryCandidate(id,userId);
+            if(!candidate)throw new HttpError(404,'Goal not found');
+            if(candidate.kind==='already_queued'||candidate.kind==='in_progress'){json(response,200,candidate.goal);return;}
+            if(candidate.kind!=='retryable')throw new HttpError(409,'No saved publication is eligible for a safe retry.');
+            const job=candidate.job;
+            if(!job.artifact||!hasValidPublicationEvidence(job.goal.repository,job.artifact))throw new HttpError(409,'The saved artifact does not meet publication verification requirements.');
+            const repository=await adapters.reconciliationRepository(job.goal.repository);
+            const check=await adapters.checkPublicationRetry({goal:job.goal,repository,attemptId:job.attemptId,branch:job.branch},job.artifact);
+            if(check==='pull_request_exists')throw new HttpError(409,'A pull request already exists; reconciliation will check GitHub.');
+            if(check==='branch_exists')throw new HttpError(409,'The exact attempt branch already exists; automatic retry was refused.');
+            if(check==='base_changed')throw new HttpError(409,'The repository base changed; the saved artifact cannot be published without retesting.');
+            json(response,200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
+          }
           const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();
           json(response,200,await store.control(id,userId,action));return;
         }
