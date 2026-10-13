@@ -81,7 +81,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
   }
   async function installationToken(installationId:number, repository:string,permission:'read'|'write'='write') {
     if (!Number.isSafeInteger(installationId) || installationId<1 || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository installation');
-    const value = z.object({token:z.string().regex(/^[A-Za-z0-9_]+$/),expires_at:z.string()}).parse(await request(`/app/installations/${installationId}/access_tokens`,jwt(),{repositories:[repository.split('/')[1]],permissions:{contents:permission,pull_requests:permission}}));
+    // Installation tokens can be stateless ghs_APPID_JWT values (base64url + dots).
+    // Accept bearer-token characters without assuming GitHub's opaque token layout.
+    const value = z.object({token:z.string().regex(/^[A-Za-z0-9._~+\/-]+=*$/),expires_at:z.string()}).parse(await request(`/app/installations/${installationId}/access_tokens`,jwt(),{repositories:[repository.split('/')[1]],permissions:{contents:permission,pull_requests:permission}}));
     if (!(Date.parse(value.expires_at)>Date.now()+30_000)) throw new Error('GitHub installation token expired');
     return value.token;
   }

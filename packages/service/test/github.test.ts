@@ -12,7 +12,7 @@ import { goalSchema } from '@herbie/contracts';
 
 export async function githubFixture(t: TestContext) {
   const requests: {path: string; authorization: string; body: unknown}[] = [];
-  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
+  const fixture = { private: false, push: true, contents: 'write', pullRequests: 'write', installationId:11, installationToken:'ghs_fixture', pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -34,7 +34,7 @@ export async function githubFixture(t: TestContext) {
       const sha=fixture.branchHeads.get(name);
       if(sha)res.end(JSON.stringify({commit:{sha}}));else{res.statusCode=404;res.end('{}');}
     }
-    else if (path === '/app/installations/11/access_tokens') res.end(JSON.stringify({token:'ghs_fixture',expires_at:new Date(Date.now()+3600000).toISOString()}));
+    else if (path === '/app/installations/11/access_tokens') res.end(JSON.stringify({token:fixture.installationToken,expires_at:new Date(Date.now()+3600000).toISOString()}));
     else if (path.startsWith('/repos/alice/project/pulls')) {
       const pr = {number:8,html_url:'https://github.com/alice/project/pull/8',state:'open',merged_at:null,head:{ref:fixture.prBranch},base:{ref:'main'}};
       if(req.method==='POST') {
@@ -316,3 +316,29 @@ test('owner policy rejects OAuth and pending CLI grants and invalidates existing
   await pool.query("UPDATE auth_users SET login='renamed-owner' WHERE id='7'");
   assert.equal((await auth.session(callback.token))?.user.login,'renamed-owner');
 });
+
+// GitHub now returns ghs_APPID_JWT installation tokens. This is synthetic,
+// includes base64url punctuation, and is intentionally not a signed credential.
+test('reconciliation accepts stateless installation tokens before looking up the attempt PR',async t=>{
+  const {github,fixture,requests}=await githubFixture(t);
+  fixture.installationToken=`ghs_123_eyJhbGciOiJSUzI1NiJ9.${'cGF5bG9hZA'.repeat(40)}.signature-with_hyphen`;
+  const live=createLiveAdapters(undefined,github,{userToken:async()=>{throw new Error('Reconciliation must not need a user token');}});
+  const repository=await live.reconciliationRepository('alice/project');
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',testCommand:['node','--test'],maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
+  const execution={goal,repository,attemptId:randomUUID(),branch:'herbie/attempt-1'};
+  assert.equal(await live.reconcile(execution),null);
+  fixture.pr=true;
+  assert.equal((await live.reconcile(execution))?.state,'open');
+  const lookups=requests.filter(request=>request.path.startsWith('/repos/alice/project/pulls'));
+  assert.equal(lookups.length,2);
+  assert.ok(lookups.every(request=>request.authorization===`Bearer ${fixture.installationToken}`));
+  assert.ok(requests.filter(request=>request.path.endsWith('/access_tokens')).every(request=>JSON.stringify(request.body)===JSON.stringify({repositories:['project'],permissions:{contents:'read',pull_requests:'read'}})));
+});
+
+for(const token of ['', 'with space', 'with\nnewline', 'with\rreturn', 'with\0nul']){
+  test(`rejects malformed installation token ${JSON.stringify(token)}`,async t=>{
+    const {github,fixture}=await githubFixture(t);
+    fixture.installationToken=token;
+    await assert.rejects(github.installationToken(11,'alice/project','read'));
+  });
+}
