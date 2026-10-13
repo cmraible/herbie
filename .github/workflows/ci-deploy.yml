@@ -9,50 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  preflight:
-    name: Deployment configuration preflight
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      vars.HERBIE_DEPLOY_MODE == 'automatic'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    environment:
-      name: production
-    steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: '24.19.0'
-          package-manager-cache: false
-      - name: Validate deployment configuration before verification
-        run: node packages/cloudflare/scripts/preflight.ts
-        env: &deployment_inputs
-          HERBIE_DEPLOY_ENABLED: 'true'
-          HERBIE_EXECUTION_ENABLED: ${{ vars.HERBIE_EXECUTION_ENABLED || 'false' }}
-          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-          HERBIE_DAYTONA_OPENAI_SECRET: ${{ secrets.HERBIE_DAYTONA_OPENAI_SECRET }}
-          DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
-          HERBIE_DAYTONA_SNAPSHOT: ${{ secrets.HERBIE_DAYTONA_SNAPSHOT }}
-          HERBIE_DEPLOY_REPOSITORY: ${{ secrets.HERBIE_DEPLOY_REPOSITORY }}
-          HERBIE_PUBLIC_URL: ${{ secrets.HERBIE_PUBLIC_URL }}
-          HERBIE_SUPABASE_PROJECT_REF: ${{ secrets.HERBIE_SUPABASE_PROJECT_REF }}
-          HERBIE_SUPABASE_POOLER_HOST: ${{ secrets.HERBIE_SUPABASE_POOLER_HOST }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          HERBIE_GITHUB_APP_ID: ${{ secrets.HERBIE_GITHUB_APP_ID }}
-          HERBIE_GITHUB_CLIENT_ID: ${{ secrets.HERBIE_GITHUB_CLIENT_ID }}
-          HERBIE_DATABASE_URL: ${{ secrets.HERBIE_DATABASE_URL }}
-          HERBIE_CREDENTIAL_KEY: ${{ secrets.HERBIE_CREDENTIAL_KEY }}
-          HERBIE_GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}
-          HERBIE_GITHUB_PRIVATE_KEY: ${{ secrets.HERBIE_GITHUB_PRIVATE_KEY }}
-          HERBIE_GITHUB_WEBHOOK_SECRET: ${{ secrets.HERBIE_GITHUB_WEBHOOK_SECRET }}
-          HERBIE_ALLOWED_GITHUB_USER_ID: ${{ secrets.HERBIE_ALLOWED_GITHUB_USER_ID }}
-          HERBIE_DATABASE_CA: ${{ secrets.HERBIE_DATABASE_CA }}
-
   verify:
     name: Verify
     if: github.event_name == 'pull_request'
@@ -343,9 +299,7 @@ jobs:
 
   deploy:
     name: Deploy configured production service
-    needs: [preflight]
     if: >-
-      needs.preflight.result == 'success' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       vars.HERBIE_DEPLOY_MODE == 'automatic'
@@ -365,9 +319,30 @@ jobs:
         with:
           node-version: '24.19.0'
           package-manager-cache: false
-      - name: Revalidate current deployment configuration before installation
+      - name: Validate deployment configuration before installation
         run: node packages/cloudflare/scripts/preflight.ts
-        env: *deployment_inputs
+        env: &deployment_inputs
+          HERBIE_DEPLOY_ENABLED: 'true'
+          HERBIE_EXECUTION_ENABLED: ${{ vars.HERBIE_EXECUTION_ENABLED || 'false' }}
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          HERBIE_DAYTONA_OPENAI_SECRET: ${{ secrets.HERBIE_DAYTONA_OPENAI_SECRET }}
+          DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
+          HERBIE_DAYTONA_SNAPSHOT: ${{ secrets.HERBIE_DAYTONA_SNAPSHOT }}
+          HERBIE_DEPLOY_REPOSITORY: ${{ secrets.HERBIE_DEPLOY_REPOSITORY }}
+          HERBIE_PUBLIC_URL: ${{ secrets.HERBIE_PUBLIC_URL }}
+          HERBIE_SUPABASE_PROJECT_REF: ${{ secrets.HERBIE_SUPABASE_PROJECT_REF }}
+          HERBIE_SUPABASE_POOLER_HOST: ${{ secrets.HERBIE_SUPABASE_POOLER_HOST }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          HERBIE_GITHUB_APP_ID: ${{ secrets.HERBIE_GITHUB_APP_ID }}
+          HERBIE_GITHUB_CLIENT_ID: ${{ secrets.HERBIE_GITHUB_CLIENT_ID }}
+          HERBIE_DATABASE_URL: ${{ secrets.HERBIE_DATABASE_URL }}
+          HERBIE_CREDENTIAL_KEY: ${{ secrets.HERBIE_CREDENTIAL_KEY }}
+          HERBIE_GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}
+          HERBIE_GITHUB_PRIVATE_KEY: ${{ secrets.HERBIE_GITHUB_PRIVATE_KEY }}
+          HERBIE_GITHUB_WEBHOOK_SECRET: ${{ secrets.HERBIE_GITHUB_WEBHOOK_SECRET }}
+          HERBIE_ALLOWED_GITHUB_USER_ID: ${{ secrets.HERBIE_ALLOWED_GITHUB_USER_ID }}
+          HERBIE_DATABASE_CA: ${{ secrets.HERBIE_DATABASE_CA }}
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: 10.34.6
@@ -377,25 +352,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build deployment assets and their type dependencies
         run: pnpm build:deploy
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Build and cache the revision-tagged container image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: herbie:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          build-args: |
-            HERBIE_RUNTIME_REVISION=${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=gha,scope=herbie-production
-          cache-to: type=gha,scope=herbie-production,mode=max
-      - name: Publish the container image through Wrangler
-        run: pnpm --filter @herbie/cloudflare exec wrangler containers push "herbie:$HERBIE_IMAGE_TAG" --config wrangler.jsonc
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          HERBIE_IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Deploy current main and verify the new container revision
         timeout-minutes: 4
         run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
