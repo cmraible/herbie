@@ -368,6 +368,29 @@ jobs:
       - name: Revalidate current deployment configuration before installation
         run: node packages/cloudflare/scripts/preflight.ts
         env: *deployment_inputs
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to Cloudflare's container registry
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$CLOUDFLARE_API_TOKEN" | docker login registry.cloudflare.com --username "$CLOUDFLARE_ACCOUNT_ID" --password-stdin
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DOCKER_CONFIG: ${{ runner.temp }}/herbie-docker
+      - name: Build and cache the revision-tagged container image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: registry.cloudflare.com/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/herbie:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          build-args: |
+            HERBIE_RUNTIME_REVISION=${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-from: type=gha,scope=herbie-production
+          cache-to: type=gha,scope=herbie-production,mode=max
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/herbie-docker
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: 10.34.6
@@ -375,8 +398,11 @@ jobs:
           cache: true
           cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - run: pnpm --filter @herbie/web build
       - name: Deploy current main and verify the new container revision
         timeout-minutes: 4
         run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
         env: *deployment_inputs
+      - name: Remove temporary registry credentials
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/herbie-docker"
