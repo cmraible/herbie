@@ -1,7 +1,7 @@
 import {DurableObject} from 'cloudflare:workers';
 import {scheduler} from 'node:timers/promises';
 import {blocksExecution,containerEnvironment,executionEnabled} from './configuration.js';
-import {ensureContainerRevision} from './container-revision.js';
+import {containerHealthMatchesRevision,ensureContainerRevision} from './container-revision.js';
 
 const port=8787;
 const inactivityMs=10*60*1000;
@@ -31,7 +31,7 @@ export class HerbieContainer extends DurableObject<Env>{
       while(Date.now()<deadline){
         try{
           const health=await container.getTcpPort(port).fetch('http://container/api/health',{signal:AbortSignal.timeout(5000)});
-          if(health.ok){await health.body?.cancel();return;}
+          if(health.ok&&containerHealthMatchesRevision(await health.json(),this.env.HERBIE_DEPLOYMENT_ID))return;
           await health.body?.cancel();
         }catch{/* Startup is asynchronous; never log raw network/configuration errors. */}
         await scheduler.wait(500);
