@@ -63,9 +63,9 @@ test('subprocess progress succeeds without publishing raw stdout or stderr',asyn
 test('one deadline spans phases and kills a subprocess group that ignores termination',async t=>{
   const directory=mkdtempSync(join(tmpdir(),'herbie-deadline-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
   const pidPath=join(directory,'child.pid');
-  const deadline=deploymentDeadline(250);t.after(()=>deadline.dispose());
+  const deadline=deploymentDeadline(1000);t.after(()=>deadline.dispose());
   await new Promise(resolve=>setTimeout(resolve,25));
-  assert.ok(deadline.remaining()<240);
+  assert.ok(deadline.remaining()<990);
   const start=performance.now();const output:string[]=[];
   await assert.rejects(runDeploymentCommand(process.execPath,['-e',`
     const {spawn}=require('node:child_process');const {writeFileSync}=require('node:fs');

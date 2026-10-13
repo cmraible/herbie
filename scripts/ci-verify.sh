@@ -153,7 +153,7 @@ run_build() {
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
   # avoids serializing the package test scripts behind the longest suite.
-  run_step unit-tests pnpm -r --parallel test
+  run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
   run_step build pnpm build
