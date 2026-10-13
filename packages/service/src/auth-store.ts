@@ -22,10 +22,12 @@ export async function migrateAuth(pool:Pool) {
         csrf_token text NOT NULL, user_id text NOT NULL, login text NOT NULL, encrypted_credential text NOT NULL,
         credential_expires_at timestamptz NOT NULL, expires_at timestamptz NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS auth_install_flows (state_hash text PRIMARY KEY, session_hash text NOT NULL, expires_at timestamptz NOT NULL);
       CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
       CREATE INDEX IF NOT EXISTS auth_flows_expiry ON auth_flows(expires_at);
       CREATE INDEX IF NOT EXISTS auth_polls_expiry ON auth_polls(expires_at);
       CREATE INDEX IF NOT EXISTS auth_pending_cli_expiry ON auth_pending_cli(expires_at);
+      CREATE INDEX IF NOT EXISTS auth_install_flows_expiry ON auth_install_flows(expires_at);
     `);
     await client.query('COMMIT');
   } catch(error) {try{await client.query('ROLLBACK');}catch{/* Preserve the migration failure. */}throw error;} finally {client.release();}
@@ -53,10 +55,21 @@ export class PgAuthStore implements AuthStore {
       await client.query('DELETE FROM auth_polls WHERE expires_at <= now()');
       await client.query('DELETE FROM auth_sessions WHERE expires_at <= now()');
       await client.query('DELETE FROM auth_pending_cli WHERE expires_at <= now()');
+      await client.query('DELETE FROM auth_install_flows WHERE expires_at <= now()');
       await client.query('INSERT INTO auth_flows(state_hash,poll_hash,browser_hash,client,expires_at,verifier,user_code_hash) VALUES($1,$2,$3,$4,$5,$6,$7)',[flow.stateHash,flow.pollHash,flow.browserHash,flow.client,flow.expiresAt,flow.verifier,flow.userCodeHash]);
       if(flow.pollHash) await client.query('INSERT INTO auth_polls(poll_hash,expires_at,consent_version) VALUES($1,$2,1)',[flow.pollHash,flow.expiresAt]);
       await client.query('COMMIT');
     } catch(error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+  }
+  async putInstallationFlow(stateHash:string,sessionHash:string,expiresAt:Date) {
+    await this.pool.query('DELETE FROM auth_install_flows WHERE expires_at <= now()');
+    await this.pool.query('INSERT INTO auth_install_flows(state_hash,session_hash,expires_at) VALUES($1,$2,$3)',[stateHash,sessionHash,expiresAt]);
+  }
+  async takeInstallationFlow(stateHash:string):Promise<{sessionHash:string;expiresAt:Date}|null> {
+    const result=await this.pool.query('DELETE FROM auth_install_flows WHERE state_hash=$1 RETURNING session_hash,expires_at',[stateHash]);
+    if(!result.rows.length)return null;
+    const row=z.object({session_hash:z.string(),expires_at:z.date()}).parse(result.rows[0]);
+    return {sessionHash:row.session_hash,expiresAt:row.expires_at};
   }
   async takeFlow(stateHash:string):Promise<AuthFlow|null> {
     const result = await this.pool.query('DELETE FROM auth_flows WHERE state_hash=$1 RETURNING *',[stateHash]);

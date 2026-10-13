@@ -71,6 +71,16 @@ export function createApiServer(options:ApiOptions){
       if(result.client==='web'){response.setHeader('set-cookie',[sessionCookie(result.token),`herbie_auth=; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=0${secure}`]);response.writeHead(303,{location:'/'});response.end();}
       else {response.setHeader('set-cookie',approvalCookie(result.approvalToken));response.writeHead(303,{location:'/api/auth/cli'});response.end();}return;
     }
+    if(method==='GET'&&url.pathname==='/api/auth/installation/callback'){
+      const token=cookie(request,'herbie_session')??'';
+      const state=z.string().min(1).max(200).parse(url.searchParams.get('state'));
+      let status:'connected'|'permissions'|'cancelled'|'expired'|'failed';
+      try{status=(await auth.finishInstallation(state,url.searchParams.get('installation_id'),url.searchParams.get('setup_action'),token)).status;}
+      catch(error){if(error instanceof AuthError&&(error.status===400||error.status===401))status='expired';else if(error instanceof GithubError&&(error.status===401||error.status===403||error.status===404))status='failed';else throw error;}
+      response.setHeader('cache-control','no-store');
+      const destination=status==='connected'?'/?installation=connected':status==='permissions'?'/?installation=permissions':status==='cancelled'?'/?installation=cancelled':status==='expired'?'/?installation=expired':'/?installation=failed';
+      response.writeHead(303,{location:destination});response.end();return;
+    }
     if(url.pathname==='/api/auth/cli'&&(method==='GET'||method==='POST')){
       const approvalToken=cookie(request,'herbie_cli_approval')??'';
       let html:string;
@@ -107,6 +117,7 @@ export function createApiServer(options:ApiOptions){
       const token=bearer??cookie(request,'herbie_session');const session=token?await auth.session(token):null;
       if(!session)throw new HttpError(401,'Login required');
       const userId=session.user.id;
+      if(method==='POST'&&url.pathname==='/api/auth/install/start'){json(response,200,await auth.startInstallation(token??''));return;}
       if(method==='GET'&&url.pathname==='/api/session'){json(response,200,session);return;}
       if(method==='POST'&&url.pathname==='/api/auth/logout'){if(token)await auth.logout(token);response.setHeader('set-cookie',`herbie_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);json(response,200,{ok:true});return;}
       if(method==='GET'&&url.pathname==='/api/repositories'){json(response,200,await adapters.repositories(userId));return;}

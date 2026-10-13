@@ -10,6 +10,7 @@ export interface GithubConfig {
 export class GithubError extends Error {constructor(readonly status:number,message:string){super(message);}}
 const repositorySchema = z.object({id:z.number().int(),full_name:z.string(),private:z.boolean(),default_branch:z.string(),permissions:z.object({push:z.boolean().optional()}).optional()});
 const installationSchema = z.object({id:z.number().int(),permissions:z.object({contents:z.string().optional(),pull_requests:z.string().optional()})});
+const appSchema = z.object({slug:z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/)});
 const pullSchema = z.object({number:z.number().int(),html_url:z.string().url(),state:z.enum(['open','closed']),merged_at:z.string().nullable(),head:z.object({ref:z.string()}),base:z.object({ref:z.string()})});
 const tokenSchema = z.object({access_token:z.string().min(1),expires_in:z.number().positive().optional()});
 
@@ -80,6 +81,23 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
   }
   return {
     repositories, authorize, findPullRequest, installationToken,
+    async installationUrl(state:string) {
+      if(!/^[A-Za-z0-9_-]{43}$/.test(state))throw new Error('Invalid installation state');
+      const app=appSchema.parse(await request('/app',jwt()));
+      const url=new URL(`/apps/${app.slug}/installations/new`,oauth);
+      url.searchParams.set('state',state);
+      return url.href;
+    },
+    async verifyUserInstallation(token:string,installationId:number):Promise<'ready'|'permissions'|'missing'> {
+      if(!Number.isSafeInteger(installationId)||installationId<1)throw new GithubError(400,'Invalid GitHub installation');
+      for(let page=1;page<=100;page++){
+        const installations=z.object({installations:z.array(installationSchema)}).parse(await request(`/user/installations?per_page=100&page=${page}`,token)).installations;
+        const installation=installations.find(item=>item.id===installationId);
+        if(installation)return installation.permissions.contents==='write'&&installation.permissions.pull_requests==='write'?'ready':'permissions';
+        if(installations.length<100)return 'missing';
+      }
+      throw new Error('Installation listing exceeds supported limit');
+    },
     async reconciliationRepository(repository:string):Promise<RepositoryAccess> {
       if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400,'Invalid repository');
       const installation = installationSchema.parse(await request(`/repos/${repository}/installation`,jwt()));

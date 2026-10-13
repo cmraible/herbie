@@ -27,6 +27,8 @@ export interface AuthStore {
   createSession(session:{tokenHash:string;userId:string;expiresAt:Date;mode:'demo'|'live'}):Promise<void>;
   session(tokenHash:string):Promise<{user:User;expiresAt:Date;mode:'demo'|'live'}|null>;
   deleteSession(tokenHash:string):Promise<void>;
+  putInstallationFlow(stateHash:string,sessionHash:string,expiresAt:Date):Promise<void>;
+  takeInstallationFlow(stateHash:string):Promise<{sessionHash:string;expiresAt:Date}|null>;
 }
 export interface AuthConfig {mode:'demo'|'live';publicUrl:string;credentialKey:string;allowedGithubUserId?:string}
 export class AuthError extends Error {constructor(readonly status:number,message:string){super(message);}}
@@ -77,6 +79,29 @@ export function createAuth(config:AuthConfig,store:AuthStore,github?:Github) {
       const browserState = client==='web' ? secret() : undefined;
       await store.putFlow({stateHash:hash(state),pollHash:pollToken ? hash(pollToken) : null,browserHash:browserState ? hash(browserState) : null,userCodeHash:code ? hash(code) : null,client,expiresAt:new Date(Date.now()+600_000),verifier});
       return {url:github.authorizationUrl(state,createHash('sha256').update(verifier).digest('base64url')),pollToken,browserState,...(code ? {userCode:code} : {})};
+    },
+    async startInstallation(sessionToken:string) {
+      if (!github || config.mode!=='live') throw new AuthError(400,'GitHub App installation is available only in live mode');
+      const current=await this.session(sessionToken);
+      if(!current)throw new AuthError(401,'Login required');
+      await this.userToken(current.user.id);
+      const state=secret();
+      const url=await github.installationUrl(state);
+      await store.putInstallationFlow(hash(state),hash(sessionToken),new Date(Date.now()+600_000));
+      return {url};
+    },
+    async finishInstallation(state:string,installationId:string|null,setupAction:string|null,sessionToken:string) {
+      if (!github || config.mode!=='live' || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw new AuthError(400,'Installation flow is expired or invalid; try again');
+      const flow=await store.takeInstallationFlow(hash(state));
+      if(!flow||flow.expiresAt.getTime()<=Date.now()||flow.sessionHash!==hash(sessionToken))throw new AuthError(400,'Installation flow is expired or invalid; try again');
+      const current=await this.session(sessionToken);
+      if(!current)throw new AuthError(401,'Login required');
+      const token=await this.userToken(current.user.id);
+      if(setupAction==='cancel')return {status:'cancelled' as const};
+      if(setupAction!=='install'&&setupAction!=='update')throw new AuthError(400,'GitHub did not complete the installation; try again');
+      if(!installationId||!/^[1-9][0-9]*$/.test(installationId)||!Number.isSafeInteger(Number(installationId)))throw new AuthError(400,'GitHub did not return a valid installation; try again');
+      const verified=await github.verifyUserInstallation(token,Number(installationId));
+      return {status:verified==='ready'?'connected' as const:verified==='permissions'?'permissions' as const:'failed' as const};
     },
     async callback(code:string,state:string,browserState?:string):Promise<{client:'web';token:string;session:Session}|{client:'cli';approvalToken:string}> {
       if (!github || config.mode!=='live' || !code || !state) throw new AuthError(400,'Invalid authorization callback');

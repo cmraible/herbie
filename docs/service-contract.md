@@ -3,6 +3,7 @@
 HTTP JSON on the same origin as web. Contracts in @herbie/contracts (Zod, source exports). API accepts bearer session or HttpOnly same-site cookie. Mutations with cookie require exact trusted Origin. CLI always bearer. Errors `{error: string}` with 400/401/403/404/409/500. `/api/health` GET unauthenticated returns `{mode:'demo'|'live'}`. No actual credentials in client contracts.
 
 - GET /api/session -> Session; GET /api/repositories -> Repository[]
+- POST /api/auth/install/start (signed-in browser) -> GitHub App installation URL; GitHub returns to `/api/auth/installation/callback` with one-use state and an untrusted installation ID that the service verifies against the signed-in user's installations.
 - GET /api/goals -> Goal[] (owned only)
 - POST /api/goals (GoalInput, Idempotency-Key header UUID) -> Goal, 201 or 200 on replay
 - GET /api/goals/:id -> Goal; GET /api/goals/:id/events?after=0 -> GoalEvent[]

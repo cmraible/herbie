@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { goalInput, goalSchema, eventSchema, sessionSchema, repositorySchema, authStartSchema, authPollSchema, actionSchema, type GoalInput, type GoalAction } from './index.js';
+import { goalInput, goalSchema, eventSchema, sessionSchema, repositorySchema, authStartSchema, installationStartSchema, authPollSchema, actionSchema, type GoalInput, type GoalAction } from './index.js';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
@@ -38,6 +38,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     events: (id: string, after = 0) => request(`${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`, z.array(eventSchema)),
     action: (id: string, action: GoalAction) => request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
     authStart: (client: 'cli'|'web') => request('/api/auth/start', authStartSchema, {client}),
+    installationStart: () => request('/api/auth/install/start', installationStartSchema, {}),
     authPoll: (token: string) => request(`/api/auth/poll?token=${encodeURIComponent(token)}`, authPollSchema),
     demoLogin: () => request('/api/demo/login', sessionSchema, {client: 'web'}),
     demoCliLogin: () => request('/api/demo/login', z.object({token: z.string().min(1), session: sessionSchema}), {client: 'cli'}),
