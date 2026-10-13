@@ -89,7 +89,10 @@ export function App() {
 
   useEffect(() => {
     const restoreRepositories=(event:PageTransitionEvent)=>{
-      if(event.persisted||performance.getEntriesByType('navigation').some(entry=>(entry as PerformanceNavigationTiming).type==='back_forward'))setRepositoryRefresh(current=>current+1);
+      if(event.persisted||performance.getEntriesByType('navigation').some(entry=>(entry as PerformanceNavigationTiming).type==='back_forward')){
+        setBusy(false);
+        setRepositoryRefresh(current=>current+1);
+      }
     };
     window.addEventListener('pageshow',restoreRepositories);
     return()=>window.removeEventListener('pageshow',restoreRepositories);
