@@ -91,9 +91,8 @@ test('approved preparation bundles only runtime secrets and forces a unique disa
   assert.equal(prepared.config.vars.HERBIE_EXECUTION_ENABLED,'false');
   assert.equal(prepared.config.vars.HERBIE_DEPLOYMENT_ID,prepared.revision);
   assert.equal(prepared.config.containers[0]?.image_vars.HERBIE_RUNTIME_REVISION,prepared.revision);
-  assert.equal(prepared.config.containers[0]?.image,
-    `registry.cloudflare.com/${context.CLOUDFLARE_ACCOUNT_ID}/herbie:${prepared.revision}`);
-  assert.ok(!('image_build_context' in (prepared.config.containers[0]??{})));
+  assert.equal(prepared.config.containers[0]?.image,'/repo/Dockerfile');
+  assert.equal(prepared.config.containers[0]?.image_build_context,'/repo');
   assert.ok(!JSON.stringify(prepared.config).includes('test-only-password'));
 });
 

@@ -73,13 +73,11 @@ export function prepareDeployment(environment:Environment,input:unknown,director
     ...(executionEnabled?{DAYTONA_API_KEY:required(environment,'DAYTONA_API_KEY'),HERBIE_DAYTONA_OPENAI_SECRET:required(environment,'HERBIE_DAYTONA_OPENAI_SECRET'),
       ...(environment.DAYTONA_API_URL?{DAYTONA_API_URL:environment.DAYTONA_API_URL}:{}),
       ...(environment.HERBIE_DAYTONA_SNAPSHOT?{HERBIE_DAYTONA_SNAPSHOT:environment.HERBIE_DAYTONA_SNAPSHOT}:{})}:{})};
-  const containerConfig={...container};
-  delete containerConfig.image_build_context;
   return {revision,origin,executionEnabled,repositoryUrl:`https://github.com/${repository}.git`,secrets:JSON.stringify({HERBIE_RUNTIME_SECRETS:JSON.stringify(runtime)}),
     config:{...config,account_id:account,main:resolve(directory,required(config,'main')),
       vars:{...vars,HERBIE_PUBLIC_URL:origin,HERBIE_EXECUTION_ENABLED:String(executionEnabled),HERBIE_DEPLOYMENT_ID:revision},
       assets:{...assets,directory:resolve(directory,required(assets,'directory'))},
-      containers:[{...containerConfig,image:`registry.cloudflare.com/${account}/herbie:${revision}`,
+      containers:[{...container,image:resolve(directory,required(container,'image')),image_build_context:resolve(directory,required(container,'image_build_context')),
         image_vars:{HERBIE_RUNTIME_REVISION:revision}}]}};
 }
 

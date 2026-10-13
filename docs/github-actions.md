@@ -32,7 +32,7 @@ Repository variable `HERBIE_DEPLOY_MODE` controls deployment:
 | --- | --- |
 | Missing or invalid | PRs still verify; pushes to `main` skip deployment |
 | `disabled` | PRs verify; pushes to `main` skip deployment |
-| `automatic` | Pushes to `main` run preflight and deploy; PRs run all verification jobs |
+| `automatic` | Pushes to `main` validate settings and deploy in one job; PRs run all verification jobs |
 
 There is no manual dispatch. This keeps PR verification scoped to the proposed
 commit and avoids rerunning it on the merge commit. Set the variable to
@@ -48,9 +48,10 @@ diagnostics contain field names and sanitized reasons only. A failed preflight
 prevents deployment. PRs skip preflight and retain ordinary Verify checks without
 production secrets.
 
-Preflight uses the protected `production` environment, so its approval must happen
-before GitHub releases environment secrets. The later deployment job may require
-its own approval. Event-triggered workflows cannot declare environment secrets
+The deployment job uses the protected `production` environment, so its approval
+must happen before GitHub releases environment secrets. Preflight is the first
+validation step in that job. Event-triggered workflows cannot declare environment
+secrets
 as required inputs; preflight provides that runtime check. It validates shape,
 template configuration and internal consistency only. Opaque tokens receive
 nonempty, single-line format checks, not authentication. Preflight makes no
@@ -62,7 +63,7 @@ Production additionally requires current `main`, the `production` environment's
 approval/protection rules, and an exact repository match with the private
 `HERBIE_DEPLOY_REPOSITORY` secret. PRs, tags and other branches cannot deploy;
 forks do not inherit the production environment secrets. The job uses a separate
-clean runner, no PR artifacts or dependency caches, and a read-only `GITHUB_TOKEN`.
+clean runner, no PR build artifacts, and a read-only `GITHUB_TOKEN`.
 There is no `pull_request_target`, `workflow_run`, `id-token: write`, repository
 write permission or raw OpenAI credential in the workflow.
 
@@ -146,8 +147,7 @@ GitHub stores sensitive values separately so its masking does not depend on a
 single structured JSON secret. Only the preflight and deployment steps receive
 them; a shared step-level YAML mapping keeps their inputs identical. Neither
 job-wide environments, outputs nor artifacts carry production secrets. The
-deployment job reruns preflight with fresh secrets before installing dependencies
-or building, because settings may have changed since the first approval. The
+deployment job runs preflight before installing dependencies or building. The
 actual deployment helper validates the same inputs again before any Cloudflare
 write. It checks the running repository against `HERBIE_DEPLOY_REPOSITORY`,
 the expected Worker name `herbie-service` against `HERBIE_PUBLIC_URL`, the database username against
@@ -167,20 +167,20 @@ artifacts or previously published copies. Historical cleanup remains a separate
 operator decision.
 
 After permissions, inputs and protections are ready, set the **repository** variable
-`HERBIE_DEPLOY_MODE=automatic`. Merge a PR after **Verify** passes, then approve
-the preflight environment access and deployment environment job when requested.
+`HERBIE_DEPLOY_MODE=automatic`. Merge a PR after **All tests passed** succeeds,
+then approve the deployment environment job when requested.
 The helper supplies
 the bundle through pinned Wrangler's `deploy --secrets-file` support, so the first
 release does not need a separate desktop secret-upload command.
 
-Before deployment, the workflow builds the container once with Buildx and publishes
-an immutable image tagged with the commit and workflow run. GitHub's Actions cache
-retains Docker build layers between production releases; Wrangler publishes the
-locally loaded image to Cloudflare's registry using the existing API token.
-Wrangler deploys that published image instead of rebuilding the Dockerfile. The
-helper starts checking the public health endpoint while Wrangler deploys and only
-reports success when the Worker and container both report the requested revision
-and execution mode.
+The workflow follows Cloudflare's standard `wrangler deploy` flow. Wrangler builds
+the configured Dockerfile, authenticates to the registry, publishes the image,
+and starts the container rollout in the same command that deploys the Worker.
+There are no separate Buildx, image push, or Docker cache export steps. The helper
+starts checking the public health endpoint while Wrangler deploys and only reports
+success when the runtime startup revision, image revision, and execution mode
+match the requested release. Cloudflare rollout time still contributes to the
+deployment duration; command success alone does not prove that rollout finished.
 
 The host-side asset build uses `pnpm build:deploy`, which builds the loop package
 before typechecking and building the web assets. Web types reference service types
