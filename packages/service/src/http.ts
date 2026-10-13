@@ -57,6 +57,8 @@ export function createApiServer(options:ApiOptions){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
       if(request.headers.origin!==origin)throw new HttpError(403,'Request origin is not allowed');
     }
+    // Process liveness must not restart healthy workers during a database outage.
+    if(method==='GET'&&url.pathname==='/api/live'){json(response,200,{alive:true});return;}
     if(method==='GET'&&url.pathname==='/api/health'){
       try{await store.pool.query('SELECT 1');}
       catch(error){const errorId=logFailure(error,{component:'health-database'});json(response,503,{error:'Database unavailable',errorId});return;}
