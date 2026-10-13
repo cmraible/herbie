@@ -151,3 +151,25 @@ test('mobile loading and repeated refresh clicks remain within the viewport',asy
   expect(requests).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
 });
+
+test('repository refresh keeps alphabetical order and the current selection',async({page})=>{
+  await routeSignedIn(page,[]);
+  const names=['zebra/App','alpha/zebra','Beta/repo','alpha/Repo','Alpha/repo','alpha/apple'];
+  let requests=0;
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>{
+    const list=requests++===0?names:[...names].reverse();
+    return json(route,list.map(fullName=>({fullName,defaultBranch:'main',installationId:1})));
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'+ New goal'}).click();
+  const select=page.getByRole('combobox',{name:/^Repository/});
+  const expected=['Choose a repository','alpha/apple','Alpha/repo','alpha/Repo','alpha/zebra','Beta/repo','zebra/App'];
+  await expect(select.locator('option')).toHaveText(expected);
+  await select.selectOption('Beta/repo');
+  await page.getByRole('button',{name:'Refresh repositories',exact:true}).click();
+  await expect.poll(()=>requests).toBe(2);
+  await expect(select).toBeEnabled();
+  await expect(select.locator('option')).toHaveText(expected);
+  await expect(select).toHaveValue('Beta/repo');
+});
