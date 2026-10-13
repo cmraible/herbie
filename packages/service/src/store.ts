@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
@@ -69,7 +70,7 @@ export class Store {
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try { await client.query('BEGIN'); const result = await work(client); await client.query('COMMIT'); return result; }
-    catch (error) { try{await client.query('ROLLBACK');}catch{/* Preserve the original failure. */} throw error; }
+    catch (error) { try{await client.query('ROLLBACK');}catch(error){logFailure(error,{component:'store-rollback'});} throw error; }
     finally { client.release(); }
   }
   async migrate(): Promise<void> {

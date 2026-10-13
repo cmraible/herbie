@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import {startupDiagnostic} from './startup-diagnostic.js';
 
 export type StartupPhase='configuration'|'database-connect'|'schema-protection'|'application-migrations'|'auth-migrations'|'schema-verification'|'auth-setup'|'adapter-setup'|'http-listen'|'database-cleanup';
@@ -36,6 +37,7 @@ export class StartupProgress {
   failure(error:unknown){
     if(this.failed)return;
     this.failed=true;
+    logFailure(error,{component:'startup',stage:this.phase});
     const diagnostic=this.phase==='database-connect'?startupDiagnostic(error).replace('category=unknown','category=database-connection'):startupDiagnostic(error);
     this.report(`Herbie startup failed: ${this.summary()}; ${diagnostic} causes=${safeStartupCauses(error)}.`);
   }

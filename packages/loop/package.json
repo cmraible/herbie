@@ -21,6 +21,7 @@
   },
   "exports": {
     "./daytona-attempt": "./dist/daytona-attempt.js",
-    "./publish-patch": "./dist/publish-patch.js"
+    "./publish-patch": "./dist/publish-patch.js",
+    "./diagnostic-log": "./dist/diagnostic-log.js"
   }
 }

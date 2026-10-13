@@ -1,3 +1,4 @@
+import {logFailure} from './diagnostic-log.js';
 import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
@@ -58,7 +59,7 @@ export function createApiServer(options:ApiOptions){
     }
     if(method==='GET'&&url.pathname==='/api/health'){
       try{await store.pool.query('SELECT 1');}
-      catch{json(response,503,{error:'Database unavailable'});return;}
+      catch(error){const errorId=logFailure(error,{component:'health-database'});json(response,503,{error:'Database unavailable',errorId});return;}
       json(response,200,{mode:adapters.mode,executionEnabled,deploymentId:options.deploymentId,imageRevision:options.imageRevision});return;
     }
     if(method==='POST'&&url.pathname==='/api/auth/start'){
@@ -177,14 +178,15 @@ export function createApiServer(options:ApiOptions){
     const file=resolve(web,pathname.replace(/^\/+/,''));
     if(!file.startsWith(`${resolve(web)}/`)&&file!==resolve(web))throw new HttpError(404,'Not found');
     const requested=extname(file)?file:resolve(web,'index.html');
-    let data:Buffer;try{data=await readFile(requested);}catch{throw new HttpError(404,'Web UI not built. Run pnpm build.');}
+    let data:Buffer;try{data=await readFile(requested);}catch(error){logFailure(error,{component:'web-file-read'});throw new HttpError(404,'Web UI not built. Run pnpm build.');}
     const mime:Record<string,string>={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'};
     response.writeHead(200,{'content-type':`${mime[extname(requested)]??'application/octet-stream'}; charset=utf-8`,'cache-control':'no-cache'});response.end(method==='HEAD'?undefined:data);
   }
   return createServer((request,response)=>{void handle(request,response).catch(error=>{
+    const errorId=logFailure(error,{component:'http-request'});
     if(response.headersSent){response.destroy();return;}
     if(error instanceof HttpError||error instanceof StoreError||error instanceof AuthError||error instanceof GithubError)json(response,error.status,{error:error.message});
     else if(error instanceof z.ZodError||error instanceof URIError)json(response,400,{error:'Invalid request'});
-    else json(response,500,{error:'Request failed. Check service configuration and try again.'});
+    else json(response,500,{error:`Request failed. Reference: ${errorId}`});
   });});
 }

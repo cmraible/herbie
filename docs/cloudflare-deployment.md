@@ -228,3 +228,43 @@ summary every ten seconds. If startup or failed-start cleanup stalls, it reports
 pending phase and exits nonzero, closing database sockets so uncommitted transactions
 can roll back. This does not replace or extend the deployment script's shared 180-second
 deadline. The watchdog is removed once the HTTP service is ready.
+
+### Restricted runtime failure details
+
+Service failures emit a structured `herbie_failure` record to container stderr.
+In the Cloudflare dashboard, use the application's container/runtime logs (Workers
+Observability, `containers` dataset) and search for the reference UUID shown in the
+goal error or `diagnostic_reference` event. The record correlates component, goal,
+job, and stage with the original error stack, nested causes, aggregate failures,
+and available command output, exit code, signal, or HTTP status. These records are
+not returned by the API or written to deployment/GitHub Actions logs by the service.
+Local development writes the same records to its service terminal. Both uploaded
+sandbox runners share this redactor and send a bounded failure record through the
+command result to the host logger, preserving nested causes even when SDK stderr
+is unavailable. Sandbox environment credentials (including OPENAI_API_KEY) and
+the supplied goal text are redacted before transport; the host redacts again.
+Completed test failures retain both stdout and stderr in restricted diagnostics.
+
+Known configured credentials and encountered GitHub tokens are redacted, along
+with authorization/cookie fields, PEM material, credential assignments, token
+patterns, URL credentials and URL queries. Full environment, request, configuration,
+and header objects are omitted. Logs have bounded depth, item counts, field lengths,
+and a 32 KiB record limit. Treat retained logs as restricted operational data: they
+can still contain repository paths and redacted command output. Existing provider
+access controls and retention apply; this change configures neither export nor a
+new retention period. Do not paste production records into public issues or CI logs.
+
+Attempt stages are persisted before sandbox setup, uploads, cloning, model execution,
+testing, downloads, and deletion. Stage reporting has a five-second ceiling; a
+reporting failure aborts further attempt work but cannot bypass deletion. The safe
+goal error identifies the failed stage, fixed error category, optional numeric
+HTTP/exit status, cleanup confirmation, and log reference. Original sandbox/model
+operation deadlines and no-retry behavior remain unchanged. Historical failures
+whose causes were discarded cannot be reconstructed by these new diagnostics.
+
+The catch-boundary audit covers worker/heartbeat/reconciliation/publication failures,
+HTTP and health errors, startup/pool/shutdown errors, and discarded rollback/cleanup
+errors. Publication aggregate causes already retain Git stderr and signal metadata;
+the worker now logs them through the same redactor. Expected control flow (invalid
+client JSON, missing GitHub branches, and aborted polling delays) remains distinct
+from an unexpected service failure.
