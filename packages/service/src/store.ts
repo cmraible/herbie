@@ -1,3 +1,4 @@
+import {publicationBackoffMs} from './publication-backoff.js';
 import {logFailure} from './diagnostic-log.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -22,6 +23,7 @@ const jobRow = z.object({
   stage: z.enum(['queued','running','ready','publishing','awaiting_review','completed','cancelled','failed','needs_attention']),
   artifact: artifactSchema.nullable(), lease_owner: z.string().nullable(),
   lease_expires_at: z.date().nullable(), lease_valid: z.boolean(),
+  publication_retry_count: z.number().int().nonnegative(), publication_blocked: z.boolean(),
 });
 export interface Job {
   id: string; attemptId: string; goal: Goal; branch: string;
@@ -66,7 +68,7 @@ async function insertJob(client: PoolClient, goalId: string, cycle: number): Pro
 }
 
 export class Store {
-  constructor(readonly pool: Pool) {}
+  constructor(readonly pool: Pool, private readonly retryRandom:()=>number=Math.random) {}
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try { await client.query('BEGIN'); const result = await work(client); await client.query('COMMIT'); return result; }
@@ -196,6 +198,7 @@ export class Store {
     return this.transaction(async client => {
       const selected = await client.query<Record<string, unknown>>(`SELECT j.id FROM jobs j JOIN goals g ON g.id=j.goal_id
         WHERE j.stage IN ('queued','ready','publishing') AND j.eligible_at<=clock_timestamp() AND ($1::text IS NULL OR g.mode=$1)
+        AND NOT j.publication_blocked AND g.stop_requested IS NULL
         AND (j.lease_owner IS NULL OR j.lease_expires_at<=clock_timestamp())
         AND (g.state IN ('queued','running') OR (j.stage='publishing' AND g.state='needs_attention'))
         ORDER BY j.created_at LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`, [mode ?? null]);
@@ -258,7 +261,7 @@ export class Store {
     return this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId, workerId);
       if (row.stage !== 'publishing' || pr.branch !== row.branch || pr.state !== 'open') throw conflict('Publication does not match the expected attempt branch');
-      await client.query("UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [jobId]);
+      await client.query("UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=0,publication_blocked=false WHERE id=$1", [jobId]);
       await client.query("UPDATE goals SET state='awaiting_review',pull_request=$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, JSON.stringify(pr)]);
       await addEvent(client, goal.id, 'pull_request_opened', `Pull request #${pr.number} awaits review: ${pr.url}`);
       const updated = await goalFrom(client, goal.id);
@@ -271,9 +274,22 @@ export class Store {
     await this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId, workerId);
       if (row.stage !== 'publishing') throw conflict('Only a started publication can have an uncertain outcome');
-      await client.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp()+interval '60 seconds' WHERE id=$1", [jobId]);
-      await client.query("UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1", [goal.id, error]);
-      if(goal.error!==error)await addEvent(client, goal.id, 'publication_uncertain', error);
+      const count=row.publication_retry_count+1;
+      const delayMs=publicationBackoffMs(count,this.retryRandom);
+      const scheduled=await client.query<{eligible_at:Date}>("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=$2,eligible_at=clock_timestamp()+$3*interval '1 millisecond' WHERE id=$1 RETURNING eligible_at",[jobId,count,delayMs]);
+      const message=`${error} Automatic publication recovery #${count} scheduled for ${scheduled.rows[0]!.eligible_at.toISOString()}. Saved work retained; no new model attempt.`;
+      await client.query("UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1", [goal.id, message]);
+      await addEvent(client, goal.id, 'publication_uncertain', message);
+    });
+  }
+  async blockPublication(jobId:string,workerId:string,reason:string):Promise<void>{
+    await this.transaction(async client=>{
+      const {row,goal}=await lockJob(client,jobId,workerId);
+      if(row.stage!=='publishing')throw conflict('Only publication may be blocked');
+      await client.query("UPDATE jobs SET publication_blocked=true,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",[jobId]);
+      const message=`Automatic publication recovery stopped: ${reason}. Saved work retained; no new model attempt. Resolve the safety conflict before retrying publication.`;
+      await client.query("UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1",[goal.id,message]);
+      await addEvent(client,goal.id,'publication_blocked',message);
     });
   }
   async queueSavedPublication(jobId:string,ownerId:string,expectedBranch:string,expectedBaseCommit:string):Promise<Goal>{
@@ -285,7 +301,7 @@ export class Store {
       if(goal.mode!=='live'||row.stage!=='publishing'||row.lease_valid||!['needs_attention','running'].includes(goal.state)||goal.stopRequested
         ||!job.artifact||row.branch!==expectedBranch||job.artifact.baseCommit!==expectedBaseCommit
         ||!hasValidPublicationEvidence(goal.repository,job.artifact))throw conflict('Saved publication is no longer eligible for a safe retry');
-      await client.query("UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1",[jobId]);
+      await client.query("UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,publication_blocked=false,eligible_at=clock_timestamp() WHERE id=$1",[jobId]);
       await client.query("UPDATE goals SET state='queued',error=NULL,updated_at=clock_timestamp() WHERE id=$1",[goal.id]);
       await addEvent(client,goal.id,'publication_retry_queued','Queued the saved tested artifact for publication; no new attempt will run.');
       const updated=await goalFrom(client,goal.id);

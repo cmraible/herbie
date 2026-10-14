@@ -48,3 +48,6 @@ CREATE INDEX IF NOT EXISTS goal_events_goal ON goal_events(goal_id, id);
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS cleanup_status text NOT NULL DEFAULT 'not_required' CHECK (cleanup_status IN ('not_required','pending','complete','needs_attention'));
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancelled_worker text;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_cleanup_deadline timestamptz;
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_retry_count integer NOT NULL DEFAULT 0 CHECK (publication_retry_count >= 0);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_blocked boolean NOT NULL DEFAULT false;

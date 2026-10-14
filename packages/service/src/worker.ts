@@ -1,3 +1,4 @@
+import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {logFailure} from './diagnostic-log.js';
 import {DaytonaAttemptError} from '@herbie/loop/daytona-attempt';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,7 +13,7 @@ async function executionFor(adapters: Adapters, job: Job, readOnly = false): Pro
   return {goal:job.goal, repository, attemptId:job.attemptId, branch:job.branch};
 }
 
-// One claim per tick. Leases fence database writes; uncertain external effects never retry.
+// One claim per tick. Saved publication retries require lease and remote-state checks.
 export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: string, timing = {leaseMs:30_000,heartbeatMs:5_000}): Promise<boolean> {
   const {leaseMs,heartbeatMs} = timing;
   await store.recoverExpired();
@@ -36,7 +37,8 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
       throw new StoreError(409,'Worker lease lost');
     }
   };
-  let publishing = job.stage === 'publishing';
+  const recoveringPublication = job.stage === 'publishing';
+  let publishing = recoveringPublication;
   let publicationPhase:PublicationPhase='preflight_reconciliation';
   const reportPublicationPhase=async(phase:PublicationPhase):Promise<void>=>{
     publicationPhase=phase;
@@ -46,14 +48,42 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
   let published: {url:string;number:number;branch:string}|undefined;
   try {
     await requireLease();
+    // A recovered ready artifact must enter publication before authorization can fail;
+    // otherwise an auth outage would strand saved work as an attempt failure.
+    if(changes&&!publishing){
+      if(!await store.beginPublication(job.id,workerId))return true;
+      publishing=true;
+    }
     const execution = {...await executionFor(adapters,job,publishing),signal:controller.signal};
     await requireLease();
-    if (publishing) {
-      // No effectful replay after a crash or ambiguous publication response.
+    if (recoveringPublication) {
+      // Reconcile first, including after a crash or ambiguous remote write.
       await reportPublicationPhase('preflight_reconciliation');
       const existing = await adapters.reconcile(execution);
-      if (!existing) await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
-      else {
+      if (!existing) {
+        if(!changes||!hasValidPublicationEvidence(job.goal.repository,changes)){
+          await store.blockPublication(job.id,workerId,'saved artifact lacks matching test and cleanup evidence');
+          return true;
+        }
+        if(!adapters.checkPublicationRetry){
+          await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
+          return true;
+        }
+        const check=await adapters.checkPublicationRetry(execution,changes);
+        await requireLease();
+        if(check==='branch_exists'||check==='base_changed'){
+          await store.blockPublication(job.id,workerId,check==='branch_exists'?'the attempt branch exists without a confirmed pull request; it will not be overwritten':'repository history no longer contains the tested base');
+          return true;
+        }
+        if(check==='pull_request_exists'){
+          await store.publicationUncertain(job.id,workerId,'A pull request appeared during the safety check; reconciliation will confirm it.');
+          return true;
+        }
+        published=await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
+        await requireLease();
+        await reportPublicationPhase('state_persistence');
+        await store.completePublication(job.id,workerId,published);
+      } else {
         published = existing;
         await reportPublicationPhase('state_persistence');
         await store.completePublication(job.id,workerId,{url:existing.url,number:existing.number,branch:existing.branch});
@@ -72,7 +102,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
       await store.saveArtifact(job.id,workerId,changes);
     }
     if (leaseLost) throw new Error('Worker lease lost');
-    if (!await store.beginPublication(job.id,workerId)) {
+    if (!publishing && !await store.beginPublication(job.id,workerId)) {
       await store.finishCancelled(job.id,workerId,changes?.verification?.sandboxDeleted?'complete':'needs_attention',changes??undefined);
       return true;
     }

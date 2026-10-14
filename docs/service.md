@@ -46,9 +46,19 @@ it cannot undo an external call already in flight.
 - An expired lease during sandbox execution becomes `needs_attention`. Herbie
   cannot prove that the remote work or cleanup finished, so it never repeats it.
 - Publication intent and its unique branch are durable before external writes.
-  Following a lost response or crash, the worker only looks up the existing PR.
-  It never blindly repeats publication. A found PR is adopted once; an uncertain
-  branch without a PR stays `needs_attention` and is checked again every minute.
+  Following a lost response or crash, the worker looks up the existing PR first.
+  A found PR is adopted once. If no PR or attempt branch exists, the worker checks
+  saved verification/cleanup evidence, current owner authorization, and tested-base
+  ancestry before retrying publication of the same artifact. It never reruns the
+  model or increments the paid attempt count for publication recovery.
+- Publication failures persist a retry counter and deadline in PostgreSQL. Equal
+  jitter starts at 30–60 seconds, doubles, and caps at 7.5–15 minutes. Worker restarts
+  preserve this schedule. The goal error and events show the reason and next retry
+  time. Existing stuck publication jobs enter this path without database edits.
+- An existing attempt branch without a confirmed PR, rewritten base history, or
+  invalid saved evidence blocks automatic writes with an explicit reason. The
+  branch is never overwritten. Transient network/authentication failures keep
+  backing off so fixing credentials can recover the saved work automatically.
 - Signed GitHub webhooks trigger read-only reconciliation; a 30-second worker poll
   handles missing, duplicate or out-of-order deliveries. Trusted GitHub API reads
   determine merge/close state. Read-only reconciliation uses the App installation
@@ -61,7 +71,8 @@ worker before manual database repair. Operator recovery tooling and recovering a
 pushed branch that has no PR are follow-up work. Do not use cancellation to imply
 that an uncertain external publication was undone.
 
-For an unpublished saved artifact, the authenticated CLI supports
+Automatic recovery is the normal path for an unpublished saved artifact. For
+operator-directed recovery after resolving a safety conflict, the authenticated CLI supports
 `retry-publication GOAL_ID`. The server checks verification evidence, ownership,
 the exact attempt PR and branch, and the original base commit's ancestry before queuing
 publication without another model run. An existing branch or rewritten base history returns
