@@ -131,13 +131,33 @@ test('publishes the checked bytes even if the caller mutates its buffer while pu
   assert.match(await git(remote, 'show', `${commit}:add.mjs`), /return a \+ b/);
 });
 
-for (const problem of ['existing branch', 'base drift', 'invalid patch']) {
+for (const overlapping of [false, true]) {
+  test(`publishes the exact tested tree when main advances with ${overlapping ? 'overlapping' : 'unrelated'} changes`, async t => {
+    const { repo, remote, changes, request, createPullRequest } = await fixture(t);
+    await git(repo, 'reset', '--hard', changes.baseCommit);
+    await writeFile(join(repo, overlapping ? 'add.mjs' : 'README.md'), overlapping
+      ? 'export function add(a, b) { return a * b; }\n' : 'Another developer changed main.\n');
+    await git(repo, 'add', '--all');
+    await git(repo, 'commit', '-m', 'Another developer advanced main');
+    await git(repo, 'push', remote, 'HEAD:refs/heads/main');
+    const advanced = await git(remote, 'rev-parse', 'main');
+    assert.notEqual(advanced, changes.baseCommit);
+    const result = await publishTestedPatch(createPullRequest, request);
+    assert.equal(await git(remote, 'rev-parse', `${result.commit}^`), changes.baseCommit);
+    assert.equal(await git(remote, 'show', `${result.commit}:add.mjs`), 'export function add(a, b) {\n  return a + b;\n}');
+    assert.equal(await git(remote, 'merge-base', 'main', result.commit), changes.baseCommit);
+    assert.equal(await git(remote, 'rev-parse', 'main'), advanced);
+    assert.equal(createPullRequest.mock.callCount(), 1);
+  });
+}
+
+for (const problem of ['existing branch', 'rewritten history', 'invalid patch']) {
   test(`rejects ${problem} before pushing or opening a PR`, async t => {
     const { changes, request, remote, scratch, createPullRequest, publish } = await fixture(t);
     if (problem === 'existing branch') await git(remote, 'update-ref', `refs/heads/${request.branch}`, changes.baseCommit);
-    if (problem === 'base drift') {
+    if (problem === 'rewritten history') {
       const tree = await git(remote, 'rev-parse', 'main^{tree}');
-      const next = await git(remote, 'commit-tree', tree, '-p', changes.baseCommit, '-m', 'Main advanced');
+      const next = await git(remote, 'commit-tree', tree, '-m', 'Main history replaced');
       await git(remote, 'update-ref', 'refs/heads/main', next);
     }
     if (problem === 'invalid patch') {

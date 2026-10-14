@@ -18,8 +18,8 @@ test('an invalid service response cannot masquerade as a valid session',async()=
 });
 
 test('HTTP failures preserve status and actionable service messages',async()=>{
-  await withServer((_request,response)=>{response.writeHead(409,{'content-type':'application/json'});response.end(JSON.stringify({error:'One active goal per repository'}));},async client=>{
-    await assert.rejects(client.goals(),error=>error instanceof ApiError&&error.status===409&&error.message==='One active goal per repository');
+  await withServer((_request,response)=>{response.writeHead(409,{'content-type':'application/json'});response.end(JSON.stringify({error:'Request conflict'}));},async client=>{
+    await assert.rejects(client.goals(),error=>error instanceof ApiError&&error.status===409&&error.message==='Request conflict');
   });
 });
 

@@ -78,7 +78,8 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     await git('remote', 'add', 'origin', remoteUrl);
     if (await git('ls-remote', '--heads', 'origin', headRef)) throw new Error('Publication branch already exists');
     await git('fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`);
-    if (await git('rev-parse', 'FETCH_HEAD^{commit}') !== baseCommit) throw new Error('Base branch changed; retest before publishing');
+    // Keep the exact tested tree and parent even when other work advances main.
+    await git('merge-base', '--is-ancestor', baseCommit, 'FETCH_HEAD');
     await git('read-tree', baseCommit);
     const patchFile = join(directory, 'changes.patch');
     await writeFile(patchFile, patch);

@@ -90,7 +90,7 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       if(await github.findPullRequest(token,access.repository,execution.branch))return 'pull_request_exists';
       if(await github.branchCommit(token,access.repository,execution.branch))return 'branch_exists';
       const head=await github.branchCommit(token,access.repository,access.defaultBranch);
-      if(!head||head!==changes.baseCommit)return 'base_changed';
+      if(!head||(head!==changes.baseCommit&&!await github.isAncestor(token,access.repository,changes.baseCommit,head)))return 'base_changed';
       return 'ready';
     },
   };

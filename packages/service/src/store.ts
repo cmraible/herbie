@@ -92,9 +92,6 @@ export class Store {
         if (!goal) throw new Error('Missing idempotent goal');
         return { goal, created: false };
       }
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`repository:${request.repository.toLowerCase()}`]);
-      const active = await client.query('SELECT 1 FROM goals WHERE lower(repository)=lower($1) AND state IN (\'queued\',\'running\',\'paused\',\'awaiting_review\',\'needs_attention\')', [request.repository]);
-      if (active.rowCount) throw conflict('Repository already has an active goal');
       const id = randomUUID();
       await client.query("INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, JSON.stringify(request.testCommand), request.maxAttempts, mode]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);

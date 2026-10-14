@@ -8,7 +8,12 @@ never a checkout, and never runs generated code or repository hooks.
 
 ## Behavior and recovery
 
-One active goal per repository is enforced globally by a database unique index.
+Multiple active goals may target the same repository.
+Goals execute independently and may have multiple PRs open at once. Publication
+preserves each artifact's tested tree and original base commit when the default
+branch advances. That base must remain in the default branch's history. Tests
+cover the published branch; integration with newer changes and any merge conflicts
+are handled through PR review and repository CI.
 Each goal allows 1–5 attempts. An attempt that creates a PR waits for review;
 merging it queues the next attempt up to the limit. Closing it without merging
 stops the goal. The final merge completes the goal. The service does not infer
@@ -58,8 +63,8 @@ that an uncertain external publication was undone.
 
 For an unpublished saved artifact, the authenticated CLI supports
 `retry-publication GOAL_ID`. The server checks verification evidence, ownership,
-the exact attempt PR and branch, and the original base commit before queuing
-publication without another model run. An existing branch or changed base returns
+the exact attempt PR and branch, and the original base commit's ancestry before queuing
+publication without another model run. An existing branch or rewritten base history returns
 a conflict; inspect `logs GOAL_ID` and the remote state before further recovery.
 This command does not retry sandbox execution or bypass publication checks.
 

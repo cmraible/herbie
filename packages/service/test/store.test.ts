@@ -38,7 +38,9 @@ integration('goals survive a new store and creation replay is scoped to owner an
   assert.equal(replay.created, false);
   assert.equal(replay.goal.id, first.goal.id);
   await assert.rejects(store.createGoal(owner, { ...request, prompt: 'different' }, 'demo', key), /different request/);
-  await assert.rejects(store.createGoal('another-owner', request, 'demo', key), /active goal/);
+  const concurrent = await store.createGoal('another-owner', request, 'demo', key);
+  assert.equal(concurrent.created, true);
+  assert.notEqual(concurrent.goal.id, first.goal.id);
   assert.equal((await store.events(first.goal.id)).length, 1);
 });
 
@@ -132,7 +134,7 @@ integration('merge advances once within the attempt budget and close unmerged st
   assert.equal(await store.claim('worker'), null);
 });
 
-integration('concurrent replay creates one goal and competing repository requests have one winner', async () => {
+integration('concurrent replay creates one goal and distinct requests share a repository', async () => {
   const owner = randomUUID();
   const request = input();
   const key = randomUUID();
@@ -143,12 +145,34 @@ integration('concurrent replay creates one goal and competing repository request
   assert.ok(first);
   assert.equal((await store.events(first.goal.id)).length, 1);
   const repository = input().repository;
-  const competing = await Promise.allSettled([
+  const competing = await Promise.all([
     store.createGoal('owner-a', { ...input(), repository }, 'demo', randomUUID()),
     store.createGoal('owner-b', { ...input(), repository: repository.toUpperCase() }, 'demo', randomUUID()),
   ]);
-  assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(competing.filter(result => result.status === 'rejected').length, 1);
+  assert.ok(competing.every(result => result.created));
+  assert.equal(new Set(competing.map(result => result.goal.id)).size, 2);
+});
+
+integration('same-repository goals execute independently and keep multiple pull requests open', async () => {
+  const owner = randomUUID();
+  const request = { ...input(), maxAttempts: 1 };
+  const { goal: first } = await store.createGoal(owner, request, 'demo', randomUUID());
+  const { goal: second } = await store.createGoal(owner, { ...request, repository: request.repository.toUpperCase() }, 'demo', randomUUID());
+  const workers = ['worker-a', 'worker-b'];
+  const claimed = await Promise.all(workers.map(worker => store.claim(worker)));
+  assert.deepEqual(new Set(claimed.map(job => job?.goal.id)), new Set([first.id, second.id]));
+  for (const [index, job] of claimed.entries()) {
+    assert.ok(job);
+    const worker = workers[index]!;
+    await store.saveArtifact(job.id, worker, { baseCommit: 'abc', patch: Buffer.from('tested') });
+    await store.beginPublication(job.id, worker);
+    await store.completePublication(job.id, worker, { url: `https://github.com/example/repo/pull/${index+1}`, number: index+1, branch: job.branch });
+  }
+  assert.equal((await store.reviewJobs()).length, 2);
+  const firstJob = claimed.find(job => job?.goal.id === first.id);
+  assert.ok(firstJob);
+  await store.reconcile(firstJob.id, 'merged');
+  assert.equal((await store.getGoal(second.id))?.state, 'awaiting_review');
 });
 
 integration('repeated cancellation fences an in-flight worker and retains its artifact separately', async () => {
