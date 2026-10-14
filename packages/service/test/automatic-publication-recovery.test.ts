@@ -121,3 +121,29 @@ test('corrupt saved evidence blocks recovery before any remote write',async t=>{
   await f.pool.query("UPDATE jobs SET artifact=jsonb_set(artifact,'{verification,patchSha256}','\"wrong\"') WHERE goal_id=$1",[f.goal.id]);
   await runWorkerOnce(f.store,f.adapters,'recover');assert.equal((await f.row()).publication_blocked,true);assert.equal(f.publishes,0);assert.equal(f.attempts,0);
 });
+
+
+test('identical capped retries update status without flooding the event feed; changed failures remain visible',async t=>{
+  const f=await fixture(t);if(!f)return;
+  f.adapters.reconcile=async()=>{throw new TypeError('fixture network failure');};
+  for(let i=0;i<10;i++){
+    await runWorkerOnce(new Store(f.pool,()=>0),f.adapters,'retry-'+i);await f.due();
+  }
+  const events=async()=> (await f.pool.query('SELECT type,message FROM goal_events WHERE goal_id=$1 ORDER BY id',[f.goal.id])).rows;
+  const before=await events();
+  assert.equal(before.filter(e=>e.type==='publication_uncertain').length,5);
+  assert.equal(before.filter(e=>e.type==='work_resumed'||e.type==='diagnostic_reference').length,0);
+  assert.equal(before.filter(e=>e.type==='publication_phase').length,1);
+  assert.match((await f.store.getGoal(f.goal.id))?.error??'',/recovery #10 scheduled for .*Failure reference:/);
+  assert.equal(f.attempts,1);assert.equal(f.publishes,0);
+  f.adapters.reconcile=async()=>null;
+  f.adapters.checkPublicationRetry=async()=>'pull_request_exists';
+  await runWorkerOnce(f.store,f.adapters,'changed-cause');
+  assert.equal((await events()).filter(e=>e.type==='publication_uncertain').length,6);
+  assert.match((await f.store.getGoal(f.goal.id))?.error??'',/pull request appeared.*recovery #11 scheduled for/);
+  const row=await f.row();
+  f.adapters.reconcile=async()=>({url:'https://github.com/alice/project/pull/2',number:2,branch:row.branch,state:'open'});
+  await f.due();await runWorkerOnce(f.store,f.adapters,'recovered');
+  assert.equal((await events()).filter(e=>e.type==='pull_request_opened').length,1);
+  assert.equal((await f.store.getGoal(f.goal.id))?.state,'awaiting_review');
+});

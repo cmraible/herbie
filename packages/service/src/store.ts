@@ -207,7 +207,7 @@ export class Store {
       const { row, goal } = await lockJob(client, id);
       await client.query("UPDATE jobs SET stage=CASE WHEN stage='queued' THEN 'running' ELSE stage END,lease_owner=$2,lease_expires_at=clock_timestamp()+$3*interval '1 millisecond' WHERE id=$1", [id, workerId, leaseMs]);
       if (row.stage !== 'publishing') await client.query("UPDATE goals SET state='running',attempt_count=attempt_count+$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, row.stage === 'queued' ? 1 : 0]);
-      await addEvent(client, goal.id, row.stage === 'queued' ? 'attempt_started' : 'work_resumed', row.stage === 'queued' ? `Attempt ${row.cycle} started` : row.stage === 'publishing' ? 'Reconciling interrupted publication' : 'Resuming tested artifact publication');
+      if(row.stage!=='publishing')await addEvent(client, goal.id, row.stage === 'queued' ? 'attempt_started' : 'work_resumed', row.stage === 'queued' ? `Attempt ${row.cycle} started` : 'Resuming tested artifact publication');
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing claimed goal');
       return decodeJob(await loadJob(client, id), updated);
@@ -270,16 +270,19 @@ export class Store {
     });
   }
 
-  async publicationUncertain(jobId: string, workerId: string, error: string): Promise<void> {
+  async publicationUncertain(jobId: string, workerId: string, error: string, diagnosticReference?:string): Promise<void> {
     await this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId, workerId);
       if (row.stage !== 'publishing') throw conflict('Only a started publication can have an uncertain outcome');
       const count=row.publication_retry_count+1;
       const delayMs=publicationBackoffMs(count,this.retryRandom);
       const scheduled=await client.query<{eligible_at:Date}>("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=$2,eligible_at=clock_timestamp()+$3*interval '1 millisecond' WHERE id=$1 RETURNING eligible_at",[jobId,count,delayMs]);
-      const message=`${error} Automatic publication recovery #${count} scheduled for ${scheduled.rows[0]!.eligible_at.toISOString()}. Saved work retained; no new model attempt.`;
+      const message=`${error} Automatic publication recovery #${count} scheduled for ${scheduled.rows[0]!.eligible_at.toISOString()}. Saved work retained; no new model attempt.${diagnosticReference?` Failure reference: ${diagnosticReference}`:''}`;
       await client.query("UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1", [goal.id, message]);
-      await addEvent(client, goal.id, 'publication_uncertain', message);
+      // The status always carries the latest deadline/reference. The feed records
+      // changed causes and increasing backoff tiers, not every identical capped retry.
+      const previousCause=goal.error?.split(' Automatic publication recovery #')[0];
+      if(count<=5||previousCause!==error)await addEvent(client, goal.id, 'publication_uncertain', message);
     });
   }
   async blockPublication(jobId:string,workerId:string,reason:string):Promise<void>{
