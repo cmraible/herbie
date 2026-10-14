@@ -1,0 +1,22 @@
+name: Portable container verification
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Portable container smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Verify release artifact metadata
+        run: node --test scripts/build-release-artifact.test.mjs
+      - name: Build and exercise the standalone container with an isolated database
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          docker build --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
+          bash scripts/test-portable-container.sh herbie:smoke "$REVISION"

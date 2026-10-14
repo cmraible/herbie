@@ -46,8 +46,8 @@ See [service operations and live setup](docs/service.md) for recovery behavior,
 testing, security boundaries, and the precise one-time GitHub App/Daytona setup.
 No live execution or public deployment is enabled by the demo configuration.
 
-The [Cloudflare and Supabase deployment runbook](docs/cloudflare-deployment.md)
-describes the hosted container, private database and required operator setup.
+The [portable deployment runbook](docs/portable-deployment.md) describes the
+Node container, private Supabase database, and automatic GHCR → Flux OCI → k3s delivery.
 Production releases use [GitHub Actions](docs/github-actions.md), with verification,
 environment approval and disabled execution until separately approved.
 

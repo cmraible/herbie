@@ -7,19 +7,16 @@ umask 077
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 stage="${1:-all}"
-case "$stage" in build|unit|cli|core|browser|edge|all) ;; *) printf 'Unknown CI verification stage: %s\n' "$stage" >&2; exit 2 ;; esac
+case "$stage" in build|unit|cli|core|browser|all) ;; *) printf 'Unknown CI verification stage: %s\n' "$stage" >&2; exit 2 ;; esac
 needs_database=false
-[[ "$stage" == build || "$stage" == edge ]] || needs_database=true
+[[ "$stage" == build ]] || needs_database=true
 if [[ "$needs_database" == true ]]; then
   : "${HERBIE_TEST_DATABASE_URL:?Set HERBIE_TEST_DATABASE_URL to a disposable loopback Postgres database}"
   export HERBIE_CI_DATABASE_URL="${HERBIE_CI_DATABASE_URL:-$HERBIE_TEST_DATABASE_URL}"
 fi
 export HERBIE_CI_PORT="${HERBIE_CI_PORT:-18787}"
-export HERBIE_EDGE_PORT="${HERBIE_EDGE_PORT:-18790}"
-export HERBIE_EDGE_ENABLED_PORT="${HERBIE_EDGE_ENABLED_PORT:-18791}"
 export HERBIE_CI_ARTIFACT_DIR="${HERBIE_CI_ARTIFACT_DIR:-$repo_dir/artifacts/ci}"
-export CI=true WRANGLER_SEND_METRICS=false
-export CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false CLOUDFLARE_INCLUDE_PROCESS_ENV=false
+export CI=true
 
 for executable in node pnpm curl setsid; do
   command -v "$executable" >/dev/null || { printf 'Missing required command: %s\n' "$executable" >&2; exit 1; }
@@ -36,7 +33,7 @@ if (process.env.HERBIE_REQUIRE_DATABASE === 'true') {
     }
   }
 }
-const ports = ['HERBIE_CI_PORT','HERBIE_EDGE_PORT','HERBIE_EDGE_ENABLED_PORT'].map(name => Number(process.env[name]));
+const ports = ['HERBIE_CI_PORT'].map(name => Number(process.env[name]));
 if (new Set(ports).size !== ports.length || ports.some(port => !Number.isInteger(port) || port < 1024 || port > 65535)) throw new Error('CI listener ports must be distinct integers from 1024 through 65535');
 for (const port of ports) {
   const server = createServer();
@@ -47,9 +44,6 @@ JS
 
 artifact_dir="$(node -e 'process.stdout.write(require("node:path").resolve(process.env.HERBIE_CI_ARTIFACT_DIR))')"
 mkdir -p "$artifact_dir"
-run_dir="$(mktemp -d "${TMPDIR:-/tmp}/herbie-ci.XXXXXX")"
-empty_env="$run_dir/empty.env"
-: > "$empty_env"
 processes=()
 playwright_install_pid=''
 cleanup() {
@@ -75,7 +69,6 @@ cleanup() {
     if kill -0 -- "-$pid" 2>/dev/null; then kill -KILL -- "-$pid" 2>/dev/null; fi
     wait "$pid" 2>/dev/null
   done
-  rm -rf -- "$run_dir"
   if [[ -d packages/web/test-results ]]; then
     mkdir -p "$artifact_dir/browser"
     cp -R packages/web/test-results/. "$artifact_dir/browser/"
@@ -147,14 +140,13 @@ if (!response.ok || health.mode !== 'demo' || health.executionEnabled !== true) 
 JS
 }
 run_build() {
-  # Check the production asset build before other builds can supply its inputs.
-  run_step deployment-assets pnpm build:deploy
   run_step build pnpm build
   run_step typecheck pnpm typecheck
 }
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
   # avoids serializing the package test scripts behind the longest suite.
+  run_step release-artifact node --test scripts/build-release-artifact.test.mjs
   run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
@@ -167,24 +159,6 @@ run_cli_e2e() {
 }
 run_browser() {
   run_step browser-e2e pnpm --filter @herbie/web test:e2e
-}
-run_edge() {
-  # Exercise the actual local Worker runtime without containers or paid execution.
-  export HERBIE_EDGE_TEST_URL="http://127.0.0.1:$HERBIE_EDGE_PORT"
-  export HERBIE_EDGE_ENABLED_TEST_URL="http://127.0.0.1:$HERBIE_EDGE_ENABLED_PORT"
-  start_server edge-disabled pnpm --filter @herbie/cloudflare exec wrangler dev \
-    --local --ip 127.0.0.1 --port "$HERBIE_EDGE_PORT" --inspector-port 0 \
-    --enable-containers=false --test-scheduled --show-interactive-dev-session=false \
-    --persist-to "$run_dir/edge-disabled" --env-file "$empty_env" \
-    --var HERBIE_EXECUTION_ENABLED:false --var 'HERBIE_RUNTIME_SECRETS:{}'
-  wait_http "$server_pid" "$HERBIE_EDGE_TEST_URL/" edge-disabled
-  start_server edge-enabled pnpm --filter @herbie/cloudflare exec wrangler dev \
-    --local --ip 127.0.0.1 --port "$HERBIE_EDGE_ENABLED_PORT" --inspector-port 0 \
-    --enable-containers=false --test-scheduled --show-interactive-dev-session=false \
-    --persist-to "$run_dir/edge-enabled" --env-file "$empty_env" \
-    --var HERBIE_EXECUTION_ENABLED:true --var 'HERBIE_RUNTIME_SECRETS:{}'
-  wait_http "$server_pid" "$HERBIE_EDGE_ENABLED_TEST_URL/" edge-enabled
-  run_step edge-e2e pnpm --filter @herbie/cloudflare test:e2e
 }
 
 case "$stage" in
@@ -210,9 +184,6 @@ case "$stage" in
     start_hosted_service
     run_browser
     ;;
-  edge)
-    run_edge
-    ;;
   all)
     start_browser_install
     run_build
@@ -220,7 +191,6 @@ case "$stage" in
     run_cli_e2e
     wait_browser_install
     run_browser
-    run_edge
     ;;
 esac
 

@@ -127,9 +127,9 @@ an integrated paid attempt. Before using live mode:
    Independently approve a small live test and its spend, then explicitly set
    `HERBIE_EXECUTION_ENABLED=true` and restart the service before starting it.
 
-For the Cloudflare container and private Supabase deployment, follow
-[the deployment runbook](cloudflare-deployment.md), including draining and rollout
-instructions for changes to environment variables.
+For the Node container and private Supabase deployment, follow
+[the portable deployment runbook](portable-deployment.md), including draining and
+rollout instructions for changes to environment variables.
 
 GitHub OAuth access tokens are encrypted in Postgres; session tokens are hashed.
 Sessions and user authorization expire within eight hours in this slice; login
