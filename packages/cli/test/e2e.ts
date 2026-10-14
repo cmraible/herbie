@@ -34,7 +34,7 @@ await test('real CLI processes share durable goals, preserve retry identity, and
     const existing=z.array(goalSchema).parse(await cli(['status']));
     for(const goal of existing){if(!['completed','cancelled','failed'].includes(goal.state))await cli(['cancel',goal.id]);}
     const requestId=randomUUID();
-    const args=['start','--repo','demo/example','--prompt','CLI process boundary smoke','--test','["npm","test"]','--request-id',requestId];
+    const args=['start','--repo','demo/example','--prompt','CLI process boundary smoke','--request-id',requestId];
     const started=goalSchema.parse(await cli(args));
     const repeated=goalSchema.parse(await cli(args));
     assert.equal(started.id,repeated.id);

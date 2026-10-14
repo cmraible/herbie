@@ -10,10 +10,9 @@ never a checkout, and never runs generated code or repository hooks.
 
 Multiple active goals may target the same repository.
 Goals execute independently and may have multiple PRs open at once. Publication
-preserves each artifact's tested tree and original base commit when the default
-branch advances. That base must remain in the default branch's history. Tests
-cover the published branch; integration with newer changes and any merge conflicts
-are handled through PR review and repository CI.
+preserves each artifact's captured tree and original base commit when the default
+branch advances. That base must remain in the default branch's history. Repository
+CI and PR review validate the changes and their integration with the current base.
 Each goal allows 1–5 attempts. An attempt that creates a PR waits for review;
 merging it queues the next attempt up to the limit. Closing it without merging
 stops the goal. The final merge completes the goal. The service does not infer
@@ -83,16 +82,18 @@ Demo rows and sessions are separate from live work by mode. Prefer a separate
 Postgres database for production; the sample password and fixed demo encryption
 key are only for local demo. Keep the database and encryption key together in
 backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters,
-commands to 30 arguments and attempts to five. Existing Daytona deadlines and
+attempts to five. Existing Daytona deadlines and
 cancellation protections remain in force. Herbie does not impose a dollar spending cap.
 
-Verification uses a fresh clone and a protected supervisor, separate from the coding
-user. Artifact downloads are bounded before parsing, patches are capped at 8 MiB,
-and each test output stream is capped at 1 MiB. New artifacts carry verification
-version 2. Before restarting workers on upgrade, cancel held goals with artifacts
-saved by the old verifier and start new attempts after checking sandbox cleanup.
-Old artifacts cannot be published by the new verifier contract.
-Already-published PRs can still be reconciled normally.
+The agent owns setup and testing in its coding checkout. Herbie captures the patch,
+confirms sandbox deletion, and opens a draft PR for repository CI and review; it
+runs no separate test command. Artifact downloads are bounded before parsing and
+patches are capped at 8 MiB. New artifacts carry version 3 completion and cleanup
+evidence, without claiming tests passed. Saved version 2 artifacts remain usable;
+artifacts without supported evidence remain ineligible for publication. The old
+`test_command` database column is retained as nullable for existing rows, but new
+goals no longer use it. The API field `testCommand` and CLI option `--test` have
+been removed. Already-published PRs reconcile normally.
 
 ## Live setup (operator approval required)
 
@@ -181,11 +182,8 @@ HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:55432/h
 ```
 
 The database integration suites create isolated schemas and remove them afterward.
-The loop's Unix permission tests require root with distinct non-root `compat` and
-`herbie-verify` users, and otherwise skip. Run them in a disposable Linux container
-with Node 24, Git, those users, and an init process that reaps orphaned children.
-They use local fixture repositories and a fake Codex process, without Daytona or
-model calls. Never run repository verification tests as root on a shared host.
+Loop tests use local fixture repositories and a fake Codex process, without
+Daytona or model calls.
 Without `HERBIE_TEST_DATABASE_URL`, database tests explicitly skip; that is not a
 full verification run. Browser E2E uses a dedicated demo service, cancels active
 demo goals to isolate scenarios, and saves screenshots in the web test-results

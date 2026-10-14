@@ -1,6 +1,6 @@
 import {parseSandboxFailure} from './diagnostic-log.js';
 
-export type AttemptStage = 'sandbox_creation'|'runtime_preparation'|'runtime_upload'|'repository_clone'|'model_execution'|'artifact_download'|'verification_setup'|'verification_clone'|'verification_upload'|'testing'|'test_result_download'|'sandbox_deletion';
+export type AttemptStage = 'sandbox_creation'|'runtime_preparation'|'runtime_upload'|'repository_clone'|'model_execution'|'artifact_download'|'sandbox_deletion';
 export interface AttemptDiagnostic {
   stage: AttemptStage;
   cause: 'timeout'|'http_error'|'network_failure'|'command_failed'|'invalid_result'|'event_persistence_failed'|'unexpected';

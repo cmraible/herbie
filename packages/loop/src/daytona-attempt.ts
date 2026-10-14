@@ -6,7 +6,7 @@ import type { CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, San
 import {AttemptCommandError,AttemptResultError,AttemptReportError,attemptDiagnostic,attemptDiagnosticMessage,type AttemptStage,type AttemptDiagnostic} from './attempt-diagnostics.js';
 
 import { installDaytonaRuntime, configureDaytonaRuntime } from './daytona-runtime.js';
-import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES, MAX_TEST_OUTPUT_BYTES, MAX_TEST_RESULT_BYTES } from './artifact-limits.js';
+import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from './artifact-limits.js';
 
 type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
   git: Pick<Sandbox['git'], 'clone'>;
@@ -21,34 +21,26 @@ type CreateSandbox = (params: CreateSandboxFromSnapshotParams | CreateSandboxFro
 type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyUrl'> & {
   signal?: AbortSignal;
   snapshot?: string; domainAllowList?: string; repoUrl: string; commit?: string; goal: string;
-  testCommand?: string[]; testTimeoutMs?: number;
 };
-
-export interface DaytonaTestResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
 
 export interface DaytonaAttemptChanges {
   baseCommit: string;
   patch: Buffer;
-  testResult?: DaytonaTestResult;
-  // Issued by the host only after the goal, tests, and sandbox deletion succeed.
+  // Issued by the host only after the goal and sandbox deletion succeed.
   verification?: {
-    // Missing on legacy artifacts, which the publisher must reject.
-    version?: 2;
+    // Version 2 also recorded tests; version 3 records completion and cleanup only.
+    // Unversioned legacy artifacts remain ineligible for publication.
+    version?: 2 | 3;
     repoUrl: string;
     baseCommit: string;
     patchSha256: string;
-    testCommand: string[];
     goalCompleted: true;
     sandboxDeleted: true;
   };
 }
 
 export class DaytonaAttemptError extends AggregateError {
-  // Keep retrieved changes available even if subsequent testing or deletion fails.
+  // Keep retrieved changes available even if subsequent deletion fails.
   changes?: DaytonaAttemptChanges;
   diagnostics: AttemptDiagnostic[] = [];
   cleanup: 'confirmed'|'unconfirmed' = 'unconfirmed';
@@ -101,17 +93,8 @@ export async function runDaytonaAttempt(
     || (request.domainAllowList !== undefined && !request.domainAllowList.trim()) || !request.goal.trim()) {
     throw new Error('Goal and any supplied snapshot or domain allowlist must not be empty');
   }
-  const testTimeoutMs = request.testTimeoutMs ?? 60_000;
-  if (request.testCommand !== undefined && (!Array.isArray(request.testCommand) || !request.testCommand.length
-    || request.testCommand.some(arg => typeof arg !== 'string' || arg.includes('\0')) || !request.testCommand[0].trim())) {
-    throw new Error('Test command must contain an executable followed by literal arguments');
-  }
-  if (!Number.isInteger(testTimeoutMs) || testTimeoutMs < 1 || testTimeoutMs > 60_000) {
-    throw new Error('Test timeout must be an integer from 1 to 60000 milliseconds');
-  }
-  const testCommand = request.testCommand?.slice();
   const runtime = await Promise.all([
-    'codex-initialize.js', 'codex-thread.js', 'codex-turn.js', 'codex-process.js', 'daytona-runner.js', 'daytona-test-runner.js', 'artifact-limits.js', 'diagnostic-log.js',
+    'codex-initialize.js', 'codex-thread.js', 'codex-turn.js', 'codex-process.js', 'daytona-runner.js', 'diagnostic-log.js',
   ].map(async name => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })));
   const name = `herbie-attempt-${randomUUID()}`;
   const directory = `/tmp/${name}`;
@@ -155,7 +138,7 @@ export async function runDaytonaAttempt(
     if (preflight.exitCode !== 0) throw new AttemptCommandError(preflight.exitCode,preflight.result);
     await begin('runtime_upload');
     await sandbox.fs.createFolder(directory, '700');
-    for (const file of runtime.filter(file => !['daytona-test-runner.js', 'artifact-limits.js'].includes(file.name))) {
+    for (const file of runtime) {
       await sandbox.fs.uploadFile(file.contents, `${directory}/${file.name}`, 30);
     }
     await sandbox.fs.uploadFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`, 30);
@@ -181,42 +164,6 @@ export async function runDaytonaAttempt(
     if (patch.toString('base64') !== artifact.patchBase64) throw new Error('Invalid repository patch encoding');
     changes = { baseCommit: artifact.baseCommit, patch };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
-    if (testCommand) {
-      // Never reuse agent-owned helpers, Git configuration, or working files. This
-      // root-owned sibling cannot be modified by the compat coding user.
-      await begin('verification_setup');
-      const verificationDirectory = `/tmp/herbie-verification-${randomUUID()}`;
-      await sandbox.fs.createFolder(verificationDirectory, '700');
-      for (const file of runtime.filter(file => ['daytona-test-runner.js', 'artifact-limits.js', 'diagnostic-log.js'].includes(file.name))) {
-        await sandbox.fs.uploadFile(file.contents, `${verificationDirectory}/${file.name}`, 30);
-      }
-      await sandbox.fs.uploadFile(Buffer.from('{"type":"module"}'), `${verificationDirectory}/package.json`, 30);
-      await begin('verification_clone');
-      await sandbox.git.clone(repo.href, `${verificationDirectory}/repo`, undefined, changes.baseCommit);
-      await begin('verification_upload');
-      await sandbox.fs.uploadFile(changes.patch, `${verificationDirectory}/recovered.patch`, 30);
-      await sandbox.fs.uploadFile(Buffer.from(JSON.stringify({
-        baseCommit: changes.baseCommit, command: testCommand, timeoutMs: testTimeoutMs,
-      })), `${verificationDirectory}/test.json`, 30);
-      await begin('testing');
-      await emit(`Testing recovered changes in sandbox ${sandbox.id}`);
-      // The supervisor runs as root; only Git and the test command drop privileges.
-      const verification = await sandbox.process.executeCommand(`/usr/local/bin/node ${verificationDirectory}/daytona-test-runner.js`, verificationDirectory, undefined, 150);
-      if(verification.exitCode!==0)throw new AttemptCommandError(verification.exitCode,verification.result);
-      if(verification.result!=='herbie-tests-completed\n')throw new AttemptResultError('Invalid test completion marker',verification.result);
-      await begin('test_result_download');
-      const outcome: unknown = JSON.parse((await downloadBounded(sandbox, `${verificationDirectory}/test-result.json`, MAX_TEST_RESULT_BYTES)).toString('utf8'));
-      if (typeof outcome !== 'object' || outcome === null
-        || !('exitCode' in outcome) || typeof outcome.exitCode !== 'number' || !Number.isInteger(outcome.exitCode) || outcome.exitCode < 0
-        || !('stdout' in outcome) || typeof outcome.stdout !== 'string'
-        || !('stderr' in outcome) || typeof outcome.stderr !== 'string') throw new Error('Invalid repository test result');
-      if (Buffer.byteLength(outcome.stdout) > MAX_TEST_OUTPUT_BYTES || Buffer.byteLength(outcome.stderr) > MAX_TEST_OUTPUT_BYTES) {
-        throw new Error('Repository test output exceeds its byte limit');
-      }
-      changes.testResult = { exitCode: outcome.exitCode, stdout: outcome.stdout, stderr: outcome.stderr };
-      if (outcome.exitCode !== 0) throw new AttemptCommandError(outcome.exitCode,outcome.stdout,outcome.stderr);
-      await emit(`Repository tests passed in sandbox ${sandbox.id}`);
-    }
   } catch (cause) {
     diagnostics.push(attemptDiagnostic(cause,stage));
     failures.push(new Error(`Attempt failed in sandbox ${sandbox.id}`, { cause }));
@@ -236,14 +183,12 @@ export async function runDaytonaAttempt(
   }
   request.signal?.removeEventListener('abort',abort);
   if (!failures.length && changes) {
-    if (testCommand && changes.testResult?.exitCode === 0) {
-      changes.verification = {
-        version: 2,
-        repoUrl: repo.href, baseCommit: changes.baseCommit,
-        patchSha256: createHash('sha256').update(changes.patch).digest('hex'),
-        testCommand, goalCompleted: true, sandboxDeleted: true,
-      };
-    }
+    changes.verification = {
+      version: 3,
+      repoUrl: repo.href, baseCommit: changes.baseCommit,
+      patchSha256: createHash('sha256').update(changes.patch).digest('hex'),
+      goalCompleted: true, sandboxDeleted: true,
+    };
     return changes;
   }
   const error = new DaytonaAttemptError(failures, failures.map(error => error.message).join('; '));

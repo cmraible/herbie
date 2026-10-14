@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { Pool } from 'pg';
 import { Store } from '../src/store.js';
+import { hasValidPublicationEvidence } from '@herbie/loop/publish-patch';
 
 const databaseUrl = process.env.HERBIE_TEST_DATABASE_URL;
 const admin = new Pool({ connectionString: databaseUrl });
@@ -22,7 +23,33 @@ afterEach(async () => {
 });
 after(async () => { await admin.end(); });
 const integration = (name: string, fn: () => Promise<void>) => test(name, { skip: !databaseUrl }, fn);
-const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: 'Fix arithmetic', testCommand: ['npm', 'test'], maxAttempts: 2 });
+const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: 'Fix arithmetic', maxAttempts: 2 });
+
+integration('migration preserves old goals and artifacts while new goals need no test command', async () => {
+  await store.pool.query('ALTER TABLE goals ALTER COLUMN test_command SET NOT NULL');
+  const id = randomUUID();
+  await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
+    VALUES($1,'owner','example/repo','Legacy goal','["npm","test"]',1,'live','queued')`, [id]);
+  await store.migrate();
+  await store.migrate();
+  const oldGoal = await store.getGoal(id);
+  assert.equal(oldGoal?.prompt, 'Legacy goal');
+  assert.ok(!('testCommand' in oldGoal!));
+  assert.ok((await store.createGoal('owner',input(),'live',randomUUID())).created);
+  assert.deepEqual((await store.pool.query('SELECT test_command FROM goals WHERE id=$1',[id])).rows[0].test_command,['npm','test']);
+
+  const baseCommit = 'a'.repeat(40), patch = Buffer.from('legacy patch');
+  const evidence = {version:2,repoUrl:'https://github.com/example/repo.git',baseCommit,
+    patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true,sandboxDeleted:true};
+  await store.pool.query("UPDATE goals SET state='needs_attention' WHERE id=$1",[id]);
+  await store.pool.query(`INSERT INTO jobs(id,goal_id,cycle,branch,stage,artifact) VALUES($1,$2,1,$3,'publishing',$4)`,
+    [randomUUID(),id,`herbie/${id}`,JSON.stringify({baseCommit,patchBase64:patch.toString('base64'),
+      testResult:{exitCode:0,stdout:'passed',stderr:''},verification:{...evidence,testCommand:['npm','test']}})]);
+  const candidate = await store.publicationRetryCandidate(id,'owner');
+  assert.ok(candidate && 'job' in candidate && candidate.job.artifact);
+  assert.deepEqual(candidate.job.artifact,{baseCommit,patch,verification:evidence});
+  assert.ok(hasValidPublicationEvidence('example/repo',candidate.job.artifact));
+});
 
 integration('goals survive a new store and creation replay is scoped to owner and exact payload', async () => {
   const owner = randomUUID();
@@ -55,7 +82,7 @@ integration('one worker claims work and a paused artifact resumes without repeat
   const worker = claimed[0] ? 'worker-a' : 'worker-b';
   const pausing = await store.control(goal.id, owner, 'pause');
   assert.equal(pausing.stopRequested, 'pause');
-  const changes = { baseCommit: 'abc', patch: Buffer.from('tested patch'), testResult: { exitCode: 0, stdout: 'tests passed', stderr: '' }, verification: { version: 2 as const, repoUrl: 'https://github.com/example/repo', baseCommit: 'abc', patchSha256: 'sha256', testCommand: ['npm', 'test'], goalCompleted: true, sandboxDeleted: true } };
+  const changes = { baseCommit: 'abc', patch: Buffer.from('tested patch'), verification: { version: 3 as const, repoUrl: 'https://github.com/example/repo', baseCommit: 'abc', patchSha256: 'sha256', goalCompleted: true, sandboxDeleted: true } };
   const held = await store.saveArtifact(job.id, worker, { ...changes, verification: { ...changes.verification, goalCompleted: true, sandboxDeleted: true } });
   assert.equal(held.goal.state, 'paused');
   assert.equal(await store.beginPublication(job.id, worker), false);

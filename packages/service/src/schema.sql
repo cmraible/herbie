@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS goals (
   owner_id text NOT NULL,
   repository text NOT NULL,
   prompt text NOT NULL,
-  test_command jsonb NOT NULL,
+  -- Retained for older deployments; new goals no longer supply a test command.
+  test_command jsonb,
   max_attempts integer NOT NULL CHECK (max_attempts BETWEEN 1 AND 5),
   attempt_count integer NOT NULL DEFAULT 0,
   mode text NOT NULL CHECK (mode IN ('demo', 'live')),
@@ -51,3 +52,4 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_cleanup_deadline timestamptz;
 
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_retry_count integer NOT NULL DEFAULT 0 CHECK (publication_retry_count >= 0);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_blocked boolean NOT NULL DEFAULT false;
+ALTER TABLE goals ALTER COLUMN test_command DROP NOT NULL;

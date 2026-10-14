@@ -17,9 +17,9 @@ async function fixture(t:TestContext){
   const store=new Store(pool,()=>0);await store.migrate();
   t.after(async()=>{await store.close();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();});
   t.mock.method(console,'error',()=>{});
-  const {goal}=await store.createGoal('owner',{repository:'alice/project',prompt:'Fixture only',testCommand:['true'],maxAttempts:1},'live',randomUUID());
+  const {goal}=await store.createGoal('owner',{repository:'alice/project',prompt:'Fixture only',maxAttempts:1},'live',randomUUID());
   const baseCommit='a'.repeat(40),patch=Buffer.from('verified fixture patch');
-  const artifact={baseCommit,patch,testResult:{exitCode:0,stdout:'passed',stderr:''},verification:{version:2 as const,repoUrl:'https://github.com/alice/project.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),testCommand:['true'],goalCompleted:true as const,sandboxDeleted:true as const}};
+  const artifact={baseCommit,patch,verification:{version:3 as const,repoUrl:'https://github.com/alice/project.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true as const,sandboxDeleted:true as const}};
   let attempts=0,publishes=0;let remote:PullRequest|null=null;let check:PublicationRetryCheck='ready';
   const access={repository:goal.repository,defaultBranch:'main',installationId:1};
   const adapters:Adapters={...createDemoAdapters(),mode:'live',

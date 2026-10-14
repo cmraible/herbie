@@ -38,15 +38,15 @@ export function hasValidPublicationEvidence(repository:string,changes:DaytonaAtt
   const remoteUrl=`https://github.com/${repository}.git`;
   const {verification,baseCommit}=changes;
   const patch=Buffer.from(changes.patch);
-  return changes.patch.length<=MAX_PATCH_BYTES&&!!verification&&verification.version===2&&verification.goalCompleted===true&&verification.sandboxDeleted===true
-    &&changes.testResult?.exitCode===0&&verification.testCommand.length>0&&verification.baseCommit===baseCommit
+  return changes.patch.length<=MAX_PATCH_BYTES&&!!verification&&(verification.version===2||verification.version===3)&&verification.goalCompleted===true&&verification.sandboxDeleted===true
+    &&verification.baseCommit===baseCommit
     &&/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(baseCommit)&&[remoteUrl,remoteUrl.slice(0,-4)].includes(verification.repoUrl)
     &&verification.patchSha256===createHash('sha256').update(patch).digest('hex');
 }
 
 // Host-only: use existing Git authentication and a caller-owned GitHub API client.
 // No checkout, repository scripts, dependency installation, or sandbox credentials.
-export async function publishTestedPatch(createPullRequest: CreatePullRequest, request: Request): Promise<{ url: string; branch: string; commit: string }> {
+export async function publishPatch(createPullRequest: CreatePullRequest, request: Request): Promise<{ url: string; branch: string; commit: string }> {
   const { repository, baseBranch, branch, title, body, changes } = request;
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !title.trim() || !branch || !baseBranch || branch === baseBranch) {
     throw new Error('Repository, distinct branch names, and a PR title are required');
@@ -56,7 +56,7 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
   const remoteUrl = `https://github.com/${repository}.git`;
   const { baseCommit } = changes;
   if (!hasValidPublicationEvidence(repository,changes)) {
-    throw new Error('Matching successful goal, test, and cleanup evidence is required for this patch');
+    throw new Error('Matching successful goal and cleanup evidence is required for this patch');
   }
   if (!patch.length) throw new Error('Cannot publish an empty patch');
 
@@ -78,7 +78,7 @@ export async function publishTestedPatch(createPullRequest: CreatePullRequest, r
     await git('remote', 'add', 'origin', remoteUrl);
     if (await git('ls-remote', '--heads', 'origin', headRef)) throw new Error('Publication branch already exists');
     await git('fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`);
-    // Keep the exact tested tree and parent even when other work advances main.
+    // Keep the exact captured tree and parent even when other work advances main.
     await git('merge-base', '--is-ancestor', baseCommit, 'FETCH_HEAD');
     await git('read-tree', baseCommit);
     const patchFile = join(directory, 'changes.patch');

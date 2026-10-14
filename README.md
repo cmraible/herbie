@@ -2,7 +2,7 @@
 
 Herbie runs bounded coding goals through a durable service. The React web UI and
 CLI use the same authenticated API; a separate worker continues after either client
-exits. Postgres owns goals, attempts, jobs, verified artifacts, PRs and events.
+exits. Postgres owns goals, attempts, jobs, captured artifacts, PRs and events.
 
 ## Service, web UI and CLI
 
@@ -27,7 +27,7 @@ Use another terminal for the same service:
 ```sh
 pnpm cli login --url http://127.0.0.1:8787 --demo
 pnpm cli repositories
-pnpm cli start --repo demo/example --prompt "Fix addition and test the change" --test '["node","--test"]' --max-attempts 2
+pnpm cli start --repo demo/example --prompt "Fix addition and test the change" --max-attempts 2
 pnpm cli status
 pnpm cli status GOAL_ID
 pnpm cli logs GOAL_ID
@@ -213,15 +213,12 @@ const changes = await runDaytonaAttempt((params, options) => daytona.create(para
   repoUrl: 'https://github.com/your-org/test-repo.git',
   // commit: 'full commit SHA', // optional; otherwise clones the default branch
   goal: 'Fix the failing addition test',
-  testCommand: ['node', '--test'], // optional; choose the repository's test command
-  // testTimeoutMs: 60_000, // optional; 1–60,000 ms, defaults to 60 seconds
   // Default organization networking is inherited; no network override is required.
   secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
   // outboundProxyUrl: 'http://approved-proxy:8080',
 }, console.log);
 // changes.baseCommit is the cloned HEAD; changes.patch is a Buffer to apply there.
-// changes.testResult contains exitCode/stdout/stderr when tests were requested.
-// Persist this returned artifact in the caller for later testing and PR publication.
+// Persist this returned artifact in the caller for PR publication.
 ```
 
 Without a snapshot, the adapter creates Ubuntu 22.04 with 1 CPU, 1 GiB RAM, and
@@ -230,10 +227,7 @@ sandbox. The Node/Codex archive digests are verified before extraction. This reu
 the runtime pins from the successful compatibility probe; it does not build a custom
 reusable snapshot or install repository dependencies. An optional snapshot must be
 a root-accessible Ubuntu-compatible runtime with Node 24+, Git, Codex and `runuser`.
-The adapter configures separate unprivileged users: `compat` for Codex and
-`herbie-verify` for repository verification. The verification supervisor runs as
-root with protected scripts, input and result files; it drops privileges for
-every Git operation and test command.
+The adapter runs Codex as the unprivileged `compat` user.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
@@ -283,35 +277,14 @@ fails, the adapter still rejects and exposes the retrieved artifact on
 artifacts. Goal, extraction, change-artifact download, or malformed-artifact failures
 reject and still attempt deletion; they do not provide a partial patch.
 
-With `testCommand`, the adapter uploads the recovered patch bytes into a new
-root-owned directory in the same sandbox. It independently clones the public
-repository at `baseCommit`, excluding the coding checkout's Git configuration,
-hooks and working files. A protected supervisor applies the patch and runs the
-supplied executable and literal arguments as `herbie-verify` in its private checkout,
-without an implicit shell. An empty patch tests the unchanged base. Repository code
-runs only in the disposable sandbox; the attempt adapter does not execute it on the host.
-The caller must choose the test command and ensure its dependencies are available;
-there is no automatic dependency installation or test discovery.
-
-Successful verification returns `testResult: { exitCode: 0, stdout, stderr }` alongside
-the changes. Omitting `testCommand` omits `testResult` and does not claim tests passed.
-A nonzero test exit rejects with the changes and completed result on
-`DaytonaAttemptError.changes`. Apply errors, missing executables, timeouts, and
-result-retrieval failures also reject while retaining the recovered changes. Test
-output is returned, not printed in phase reports. Each output stream has Node's
-1 MiB buffer limit; exceeding it fails verification. The host also bounds the
-streamed result JSON (including worst-case escaping) and validates decoded output
-sizes. The test process receives a private home and proxy/CA settings, without the
-coding process's OpenAI credential placeholder. The command deadline
-defaults to 60 seconds (configurable from 1–60,000 ms); the verifier has a 150-second
-sandbox execution deadline covering checkout, apply, and tests. Sandbox deletion
-still runs on every outcome and must be confirmed. Test-generated changes are not
-recaptured into the patch. After the goal, tests, and deletion all succeed, the host
-also attaches `verification` evidence binding the repository URL, base commit,
-SHA-256 of the patch bytes, and test command to confirmed goal completion and sandbox
-deletion. This evidence carries verification version 2; the publisher rejects
-older saved artifacts, which must be regenerated through protected verification.
-Untested attempts and recovered artifacts on errors lack this evidence.
+Herbie does not run a separate validation command after the agent finishes.
+The agent can install dependencies and run tests in its own checkout. Repository
+CI validates the draft PR; reviewers should check its results before merging.
+After goal completion and confirmed sandbox deletion, the host attaches
+`verification` evidence binding the repository URL, base commit and SHA-256 of
+the patch bytes to that attempt. Version 3 records completion and cleanup, not a
+test result. Saved version 2 evidence remains eligible for publication; artifacts
+without a supported version or from failed attempts do not.
 
 This preserves the final repository file state, not commit history or ignored files;
 submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
@@ -321,34 +294,34 @@ an approved public repo/commit and goal, and explicit authorization for sandbox 
 model spend. Creating/configuring account prerequisites needs separate authorization;
 the adapter does not provision secrets or change account settings.
 
-### Callable tested-patch publisher
+### Callable patch publisher
 
-After building, the host can publish a successfully verified attempt using
-`publishTestedPatch`. It is not wired into the CLI. Git authentication and the GitHub
+After building, the host can publish a successfully completed attempt using
+`publishPatch`. It is not wired into the CLI. Git authentication and the GitHub
 API client must already be configured on the host; neither is sent to the Codex
 sandbox. The caller supplies a narrow `createPullRequest` adapter for that client:
 
 ```js
-import { publishTestedPatch } from './packages/loop/dist/publish-patch.js';
+import { publishPatch } from './packages/loop/dist/publish-patch.js';
 
-// changes is the successful return from runDaytonaAttempt with testCommand.
+// changes is the successful return from runDaytonaAttempt.
 // github is an existing authenticated client; this example uses Octokit's shape.
-const published = await publishTestedPatch(async ({ repository, ...pull }) => {
+const published = await publishPatch(async ({ repository, ...pull }) => {
   const [owner, repo] = repository.split('/');
   const { data } = await github.rest.pulls.create({ owner, repo, ...pull });
   return { url: data.html_url };
 }, {
   repository: 'your-org/test-repo', baseBranch: 'main',
   branch: 'herbie/fix-addition-001', // caller-owned, stable, new branch name
-  title: 'Fix addition', body: 'Verified with the configured repository tests.',
+  title: 'Fix addition', body: 'Review the changes and repository CI results before merging.',
   changes,
 });
 console.log(published.url); // also returns branch and commit
 ```
 
-The publisher rejects empty/unverified patches, mismatched repository/base/patch
-evidence, an existing publication branch, or a fetched base-branch tip different
-from the tested commit. It copies the verified bytes, initializes a temporary bare
+The publisher rejects empty patches, missing or mismatched completion/cleanup
+evidence, an existing publication branch, or a base commit outside the current
+default branch history. It copies the captured bytes, initializes a temporary bare
 Git repository, fetches the base, applies the patch to an isolated index, and creates
 one commit with `commit-tree`. There is no checkout, repository-code execution, or
 dependency installation on the host. The existing host Git identity is used. A
@@ -366,8 +339,8 @@ retries. After a partial failure, inspect the recorded branch and its PRs before
 acting; retrying the same branch is rejected instead of creating a blind duplicate.
 
 Use the host-issued evidence from the completed attempt, not hand-built success
-flags. It binds the supplied artifact to that attempt; it is not a replacement for
-trusted artifact storage or proof that the chosen tests are comprehensive. Durable
+flags. It binds the supplied artifact to that attempt; it does not certify that
+tests passed or replace repository CI and review. Durable
 storage, CLI orchestration, and live end-to-end validation remain later work. Unit
 tests use only temporary Git repositories and mocked GitHub calls.
 

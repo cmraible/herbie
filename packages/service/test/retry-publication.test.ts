@@ -51,12 +51,12 @@ async function fixture(t:TestContext,options:{cancelCheck?:()=>Promise<'absent'|
     return {cookie:'herbie_session='+token,origin,'content-type':'application/json'};
   }
   async function retryableGoal(ownerId='7',goalRepository=repository,prewrite=false){
-    const {goal}=await store.createGoal(ownerId,{repository:goalRepository,prompt:'Synthetic retry fixture',testCommand:['node','--test'],maxAttempts:1},'live',randomUUID());
+    const {goal}=await store.createGoal(ownerId,{repository:goalRepository,prompt:'Synthetic retry fixture',maxAttempts:1},'live',randomUUID());
     const worker='fixture-worker';
     const job=await store.claim(worker,30_000,'live');assert.ok(job);assert.equal(job.goal.id,goal.id);
     const patch=Buffer.from('synthetic tested patch\n');
     const baseCommit='a'.repeat(40);
-    const artifact={baseCommit,patch,testResult:{exitCode:0,stdout:'synthetic tests passed',stderr:''},verification:{version:2 as const,repoUrl:'https://github.com/'+goalRepository+'.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),testCommand:['node','--test'],goalCompleted:true as const,sandboxDeleted:true as const}};
+    const artifact={baseCommit,patch,verification:{version:3 as const,repoUrl:'https://github.com/'+goalRepository+'.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true as const,sandboxDeleted:true as const}};
     await store.saveArtifact(job.id,worker,artifact);
     assert.equal(await store.beginPublication(job.id,worker),true);
     await store.publicationUncertain(job.id,worker,prewrite?'Publication remains unconfirmed during preflight_reconciliation (unexpected); reconciliation will check GitHub.':'Publication remains unconfirmed during branch_push (git_push_uncertain); reconciliation will check GitHub.');
@@ -159,7 +159,7 @@ test('cancel confirmed unpublished work checks ownership and CSRF, preserves evi
   const after=await store.pool.query('SELECT stage,artifact FROM jobs WHERE id=$1',[jobId]);
   assert.equal(after.rows[0].stage,'cancelled');assert.deepEqual(after.rows[0].artifact,before.rows[0].artifact);
   assert.ok((await store.events(goal.id)).some(e=>e.type==='cancel'&&e.message.includes('retained')));
-  assert.ok((await store.createGoal('7',{repository,prompt:'Next fixture',testCommand:['true'],maxAttempts:1},'live',randomUUID())).created);
+  assert.ok((await store.createGoal('7',{repository,prompt:'Next fixture',maxAttempts:1},'live',randomUUID())).created);
   assert.equal(setup.attempts,0);assert.equal(setup.publishes,0);
 });
 

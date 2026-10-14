@@ -3,7 +3,6 @@ export const goalState = z.enum(['queued', 'running', 'paused', 'awaiting_review
 export const goalInput = z.object({
   repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   prompt: z.string().trim().min(1).max(8000),
-  testCommand: z.array(z.string().min(1).max(1000).refine(s => !s.includes('\0'))).min(1).max(30),
   maxAttempts: z.number().int().min(1).max(5).default(1),
 }).strict();
 export const goalSchema = goalInput.extend({

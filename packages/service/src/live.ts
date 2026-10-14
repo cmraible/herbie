@@ -1,7 +1,7 @@
 import {registerDiagnosticSecret} from './diagnostic-log.js';
 import { Daytona } from '@daytona/sdk';
 import { runDaytonaAttempt } from '@herbie/loop/daytona-attempt';
-import { publishTestedPatch } from '@herbie/loop/publish-patch';
+import { publishPatch } from '@herbie/loop/publish-patch';
 import {KnownAttemptFailure,type Adapters,type PublicationPhase} from './adapters.js';
 import type { Auth } from './auth.js';
 import type { Github } from './github.js';
@@ -29,7 +29,6 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       const changes = await runDaytonaAttempt((params,options)=>daytona.create(params,options), {
         signal:execution.signal,
         repoUrl:`https://github.com/${execution.repository.repository}.git`,goal:execution.goal.prompt,
-        testCommand:execution.goal.testCommand,testTimeoutMs:60_000,
         secrets:{OPENAI_API_KEY:config.openaiSecretName},
         snapshot:config.snapshot,domainAllowList:config.domainAllowList,outboundProxyUrl:config.outboundProxyUrl,
       },report);
@@ -47,14 +46,14 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       if (existing) return {url:existing.url,number:existing.number,branch:existing.branch};
       await requireLease();
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
-      const published = await publishTestedPatch(request=>github.openPullRequest(token,request,requireLease), {
+      const published = await publishPatch(request=>github.openPullRequest(token,request,requireLease), {
         beforeWrite:requireLease,
         onPhase:async stage=>{
           const phases:Record<typeof stage,PublicationPhase>={preparing:'git_preparation',pushing:'branch_push','opening-pr':'pull_request_creation',published:'publication_confirmation'};
           await reportPhase?.(phases[stage]);
         },
         repository:access.repository,baseBranch:access.defaultBranch,branch:execution.branch,title,
-        body:`Goal: ${execution.goal.prompt}\n\nAttempt: ${execution.attemptId}\n\nVerified in a disposable Daytona sandbox with ${JSON.stringify(execution.goal.testCommand)}. Review the patch and test evidence before merging.`,changes,
+        body:`Goal: ${execution.goal.prompt}\n\nAttempt: ${execution.attemptId}\n\nChanges were produced in a disposable Daytona sandbox. Review the patch and repository CI results before merging.`,changes,
         gitEnvironment:{
           GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_COUNT:'3',
           GIT_CONFIG_KEY_0:'http.https://github.com/.extraHeader',GIT_CONFIG_VALUE_0:`Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,

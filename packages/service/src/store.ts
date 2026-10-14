@@ -9,14 +9,13 @@ import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
-const goalColumns = `id, owner_id AS "ownerId", repository, prompt, test_command AS "testCommand",
+const goalColumns = `id, owner_id AS "ownerId", repository, prompt,
   max_attempts AS "maxAttempts", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest", cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
 const artifactSchema = z.object({
   baseCommit: z.string(), patchBase64: z.string(),
-  testResult: z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string() }).optional(),
-  verification: z.object({ version: z.literal(2).optional(), repoUrl: z.string(), baseCommit: z.string(), patchSha256: z.string(), testCommand: z.array(z.string()), goalCompleted: z.literal(true), sandboxDeleted: z.literal(true) }).optional(),
+  verification: z.object({ version: z.union([z.literal(2), z.literal(3)]).optional(), repoUrl: z.string(), baseCommit: z.string(), patchSha256: z.string(), goalCompleted: z.literal(true), sandboxDeleted: z.literal(true) }).optional(),
 });
 const jobRow = z.object({
   id: z.string().uuid(), goal_id: z.string().uuid(), branch: z.string(), cycle: z.number().int(),
@@ -37,7 +36,7 @@ export class StoreError extends Error {
 const conflict = (message: string) => new StoreError(409, message);
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
-  const artifact = encoded ? { baseCommit: encoded.baseCommit, patch: Buffer.from(encoded.patchBase64, 'base64'), ...(encoded.testResult ? { testResult: encoded.testResult } : {}), ...(encoded.verification ? { verification: encoded.verification } : {}) } : null;
+  const artifact = encoded ? { baseCommit: encoded.baseCommit, patch: Buffer.from(encoded.patchBase64, 'base64'), ...(encoded.verification ? { verification: encoded.verification } : {}) } : null;
   return { id: row.id, attemptId: row.id, branch: row.branch, stage: row.stage, artifact, goal };
 }
 async function goalFrom(client: Pool | PoolClient, id: string, lock = false): Promise<Goal | null> {
@@ -95,7 +94,7 @@ export class Store {
         return { goal, created: false };
       }
       const id = randomUUID();
-      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, JSON.stringify(request.testCommand), request.maxAttempts, mode]);
+      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
       await addEvent(client, id, 'queued', 'Goal queued for a durable worker');
@@ -207,7 +206,7 @@ export class Store {
       const { row, goal } = await lockJob(client, id);
       await client.query("UPDATE jobs SET stage=CASE WHEN stage='queued' THEN 'running' ELSE stage END,lease_owner=$2,lease_expires_at=clock_timestamp()+$3*interval '1 millisecond' WHERE id=$1", [id, workerId, leaseMs]);
       if (row.stage !== 'publishing') await client.query("UPDATE goals SET state='running',attempt_count=attempt_count+$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, row.stage === 'queued' ? 1 : 0]);
-      if(row.stage!=='publishing')await addEvent(client, goal.id, row.stage === 'queued' ? 'attempt_started' : 'work_resumed', row.stage === 'queued' ? `Attempt ${row.cycle} started` : 'Resuming tested artifact publication');
+      if(row.stage!=='publishing')await addEvent(client, goal.id, row.stage === 'queued' ? 'attempt_started' : 'work_resumed', row.stage === 'queued' ? `Attempt ${row.cycle} started` : 'Resuming captured artifact publication');
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing claimed goal');
       return decodeJob(await loadJob(client, id), updated);
@@ -250,9 +249,9 @@ export class Store {
       const { row, goal } = await lockJob(client, jobId);
       if (goal.state === 'paused' || goal.state === 'cancelled') return false;
       if (row.lease_owner !== workerId || !row.lease_valid) throw conflict('Worker lease expired or belongs to another worker');
-      if (row.stage !== 'ready' || !row.artifact) throw conflict('Publication requires a tested artifact ready for its first publication');
+      if (row.stage !== 'ready' || !row.artifact) throw conflict('Publication requires a captured artifact ready for its first publication');
       await client.query("UPDATE jobs SET stage='publishing' WHERE id=$1", [jobId]);
-      await addEvent(client, goal.id, 'publishing', 'Publishing tested artifact from the trusted service');
+      await addEvent(client, goal.id, 'publishing', 'Publishing captured artifact from the trusted service');
       return true;
     });
   }
@@ -306,7 +305,7 @@ export class Store {
         ||!hasValidPublicationEvidence(goal.repository,job.artifact))throw conflict('Saved publication is no longer eligible for a safe retry');
       await client.query("UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,publication_blocked=false,eligible_at=clock_timestamp() WHERE id=$1",[jobId]);
       await client.query("UPDATE goals SET state='queued',error=NULL,updated_at=clock_timestamp() WHERE id=$1",[goal.id]);
-      await addEvent(client,goal.id,'publication_retry_queued','Queued the saved tested artifact for publication; no new attempt will run.');
+      await addEvent(client,goal.id,'publication_retry_queued','Queued the saved captured artifact for publication; no new attempt will run.');
       const updated=await goalFrom(client,goal.id);
       if(!updated)throw new Error('Missing retried publication goal');
       return updated;

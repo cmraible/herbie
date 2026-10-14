@@ -17,10 +17,10 @@ export function createDemoAdapters(): Adapters {
     },
     async attempt(execution,report) {
       await report('DEMO: deterministic attempt started; no sandbox or model was used.');
-      if (execution.goal.prompt.includes('[demo:fail]')) throw new KnownAttemptFailure('DEMO: requested simulated test failure; no publication occurred.');
+      if (execution.goal.prompt.includes('[demo:fail]')) throw new KnownAttemptFailure('DEMO: requested simulated attempt failure; no publication occurred.');
       const patch = Buffer.from('DEMO artifact; never eligible for live publication.');
-      await report('DEMO: simulated tests passed.');
-      return {baseCommit:'0'.repeat(40),patch,testResult:{exitCode:0,stdout:'DEMO: simulated test result',stderr:''}};
+      await report('DEMO: simulated attempt completed.');
+      return {baseCommit:'0'.repeat(40),patch};
     },
     async publish(execution,_changes,requireLease) {
       await requireLease();
