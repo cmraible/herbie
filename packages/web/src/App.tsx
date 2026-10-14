@@ -219,7 +219,7 @@ export function App() {
 
   return <div className="app">
     <header className="topbar">
-      <a className="brand" href="/">herbie</a>
+      <a className="brand" href="/">herbie 🥁</a>
       <div className="topbar-actions">
         {mode !== 'live' && <span className="mode-pill" role={healthState === 'pending' ? 'status' : undefined}>{mode === 'demo' ? 'Demo' : healthState === 'error' ? 'Offline' : 'Connecting'}</span>}
         {sessionState === 'signed-in' && session && <><span className="user-name">{session.user.login}</span><button onClick={() => { void logout(); }} disabled={busy}>Sign out</button></>}
