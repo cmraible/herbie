@@ -10,11 +10,11 @@ for(const state of ['queued','running','paused','awaiting_review','needs_attenti
   await page.route('**/api/goals/*/events**',r=>r.fulfill(json([])));
   await page.route('**/api/goals/*/cancel',r=>{cancels++;goal={...goal,state:'cancelled',cleanupStatus:'needs_attention'};return r.fulfill(json(goal));});
   await page.goto('/');
-  const details=page.getByRole('region',{name:'Goal details'});
+  const details=page.getByRole('region',{name:'Selected goal'});
   await expect(details.getByRole('button',{name:'Cancel goal'})).toBeEnabled();
   await details.getByRole('button',{name:'Cancel goal'}).click();
   await expect(details.getByText('Cancelled',{exact:true})).toBeVisible();
-  await expect(details.getByRole('status')).toContainText('Cleanup needs attention; your goal stays cancelled.');
+  await expect(details.getByRole('status').filter({hasText:'Cleanup needs attention'})).toContainText('Remote work may remain. Cleanup needs attention; your goal stays cancelled.');
   await expect(details.getByRole('button',{name:'Cancel goal'})).toHaveCount(0);
   await page.reload();await expect(details.getByText('Cancelled',{exact:true})).toBeVisible();
   expect(cancels).toBe(1);
