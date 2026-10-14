@@ -639,3 +639,21 @@ test('stdout-only test assertion evidence and stderr survive only in private dia
     assert.doesNotMatch(error.safeMessage(),/expected 4/);assert.equal(error.cleanup,'confirmed');return true;
   });
 });
+
+for(const deleteFails of [false,true])test('cancellation interrupts model execution and retains honest deletion status: '+deleteFails,async t=>{
+  const {sandbox,run}=await fixture(t);
+  const controller=new AbortController(),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  sandbox.process.executeCommand.mock.mockImplementationOnce(async()=>{entered.resolve();await release.promise;return {exitCode:1,result:'interrupted'};},1);
+  sandbox.delete.mock.mockImplementation(async()=>{release.resolve();if(deleteFails)throw new Error('synthetic delete failure');});
+  const work=run({signal:controller.signal});await entered.promise;controller.abort();
+  await assert.rejects(work,error=>error instanceof DaytonaAttemptError&&error.cleanup===(deleteFails?'unconfirmed':'confirmed'));
+  assert.equal(sandbox.delete.mock.callCount(),1);
+  assert.equal(sandbox.fs.downloadFileStream.mock.callCount(),0);
+});
+
+test('cancellation during sandbox creation deletes the eventual sandbox without running a command',async t=>{
+  const {sandbox,create,run}=await fixture(t);const controller=new AbortController();
+  create.mock.mockImplementation(async()=>{controller.abort();return sandbox;});
+  await assert.rejects(run({signal:controller.signal}),error=>error instanceof DaytonaAttemptError&&error.cleanup==='confirmed');
+  assert.equal(sandbox.delete.mock.callCount(),1);assert.equal(sandbox.process.executeCommand.mock.callCount(),0);
+});

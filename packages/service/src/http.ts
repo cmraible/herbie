@@ -159,10 +159,7 @@ export function createApiServer(options:ApiOptions){
             json(response,200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
           }
           const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();
-          json(response,200,await store.control(id,userId,action,action==='cancel'&&adapters.mode==='live'&&adapters.checkUnpublished?async job=>{
-            const repository=await adapters.reconciliationRepository(job.goal.repository);
-            return adapters.checkUnpublished!({goal:job.goal,repository,attemptId:job.attemptId,branch:job.branch});
-          }:undefined));return;
+          json(response,200,await store.control(id,userId,action));return;
         }
       }
       const demoPath=url.pathname.match(/^\/api\/demo\/goals\/([^/]+)\/(merge|close)$/);

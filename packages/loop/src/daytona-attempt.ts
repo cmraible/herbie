@@ -19,6 +19,7 @@ type AttemptSandbox = Pick<Sandbox, 'id' | 'delete'> & {
 };
 type CreateSandbox = (params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams, options: { timeout: number }) => Promise<AttemptSandbox>;
 type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyUrl'> & {
+  signal?: AbortSignal;
   snapshot?: string; domainAllowList?: string; repoUrl: string; commit?: string; goal: string;
   testCommand?: string[]; testTimeoutMs?: number;
 };
@@ -91,7 +92,7 @@ export async function runDaytonaAttempt(
     catch(cause){throw new AttemptReportError('Attempt event persistence failed',{cause});}
     finally{clearTimeout(timer);}
   };
-  const begin=async(next:AttemptStage):Promise<void>=>{stage=next;await emit(`Attempt stage: ${stage}`);};
+  const begin=async(next:AttemptStage):Promise<void>=>{if(next!=='sandbox_deletion')request.signal?.throwIfAborted();stage=next;await emit(`Attempt stage: ${stage}`);if(next!=='sandbox_deletion')request.signal?.throwIfAborted();};
   const repo = new URL(request.repoUrl);
   if (repo.protocol !== 'https:' || repo.username || repo.password || repo.search || repo.hash) {
     throw new Error('Use a public HTTPS repository URL without credentials, query, or fragment');
@@ -119,6 +120,7 @@ export async function runDaytonaAttempt(
   await emit(`Creating sandbox ${name}`);
   let sandbox: AttemptSandbox;
   try {
+    request.signal?.throwIfAborted();
     sandbox = await create({
       name, ...(request.snapshot ? { snapshot: request.snapshot }
         : { image: 'ubuntu:22.04', resources: { cpu: 1, memory: 1, disk: 3 } }),
@@ -133,8 +135,17 @@ export async function runDaytonaAttempt(
   const failures: Error[] = [];
   const diagnostics:AttemptDiagnostic[]=[];
   let cleanupConfirmed=false;
+  // Deletion interrupts an in-flight model command. Do not wait for its normal
+  // completion before attempting to stop paid execution. A failed delete remains
+  // unconfirmed; it never permits another attempt or a publication.
+  let deletion:Promise<void>|undefined;
+  const removeSandbox=()=>deletion??=(async()=>{await sandbox.delete(60,true);cleanupConfirmed=true;})();
+  const abort=()=>{void removeSandbox().catch(()=>undefined);};
+  request.signal?.addEventListener('abort',abort,{once:true});
+  if(request.signal?.aborted)abort();
   let changes: DaytonaAttemptChanges | undefined;
   try {
+    request.signal?.throwIfAborted();
     await emit(`Created sandbox ${sandbox.id}`);
     await begin('runtime_preparation');
     const preflight = await sandbox.process.executeCommand(
@@ -154,6 +165,7 @@ export async function runDaytonaAttempt(
     await begin('model_execution');
     await emit(`Running goal in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
+    request.signal?.throwIfAborted();
     const result = await sandbox.process.executeCommand(`chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`, directory, undefined, 240);
     if(result.exitCode!==0)throw new AttemptCommandError(result.exitCode,result.result);
     if(result.result!=='herbie-attempt-completed\n')throw new AttemptResultError('Invalid goal completion marker',result.result);
@@ -215,14 +227,14 @@ export async function runDaytonaAttempt(
       failures.push(new Error('Cleanup stage could not be persisted',{cause}));
     }
     try {
-      await sandbox.delete(60, true);
-      cleanupConfirmed=true;
+      await removeSandbox();
       await emit(`Deletion confirmed for sandbox ${sandbox.id}`);
     } catch (cause) {
       diagnostics.push(attemptDiagnostic(cause,'sandbox_deletion'));
       failures.push(new Error(cleanupConfirmed?'Deletion confirmation event could not be persisted':`Deletion unconfirmed for sandbox ${sandbox.id}; check Daytona before retrying`, { cause }));
     }
   }
+  request.signal?.removeEventListener('abort',abort);
   if (!failures.length && changes) {
     if (testCommand && changes.testResult?.exitCode === 0) {
       changes.verification = {

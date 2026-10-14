@@ -131,13 +131,13 @@ test('retry and cancel serialize safely while repository checks are in flight',a
   let cancelBeforeQueue:Response;
   try{cancelBeforeQueue=await fetch(base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers,body:'{}'});}
   finally{release.resolve();}
-  assert.equal(cancelBeforeQueue.status,409,'publishing job remains protected during read-only preflight');
-  const queued=await retry;assert.equal(queued.status,200);
+  assert.equal(cancelBeforeQueue.status,200,'cancellation does not wait for remote preflight');
+  const queued=await retry;assert.equal(queued.status,409);
   const cancelAfterQueue=await fetch(base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers,body:'{}'});
   assert.equal(cancelAfterQueue.status,200);assert.equal((await cancelAfterQueue.json()).state,'cancelled');
   assert.equal(await setup.store.claim('worker-after-cancel',30_000,'live'),null,'cancellation wins before the saved artifact is claimed');
   const row=await setup.store.pool.query<{stage:string;artifact:Record<string,unknown>|null}>('SELECT stage,artifact FROM jobs WHERE goal_id=$1',[goal.id]);
-  assert.equal(row.rows[0]?.stage,'cancelled');assert.equal(row.rows[0]?.artifact,null);
+  assert.equal(row.rows[0]?.stage,'cancelled');assert.ok(row.rows[0]?.artifact);
   assert.equal(setup.attempts,0);assert.equal(setup.publishes,0);
 });
 
@@ -154,93 +154,21 @@ test('cancel confirmed unpublished work checks ownership and CSRF, preserves evi
   assert.equal(checks,0);
   const before=await store.pool.query('SELECT artifact FROM jobs WHERE id=$1',[jobId]);
   const response=await fetch(path,{method:'POST',headers});assert.equal(response.status,200);
-  assert.equal((await response.json()).state,'cancelled');assert.equal(checks,1);
-  assert.equal((await fetch(path,{method:'POST',headers})).status,200);assert.equal(checks,1);
+  assert.equal((await response.json()).state,'cancelled');assert.equal(checks,0);
+  assert.equal((await fetch(path,{method:'POST',headers})).status,200);assert.equal(checks,0);
   const after=await store.pool.query('SELECT stage,artifact FROM jobs WHERE id=$1',[jobId]);
   assert.equal(after.rows[0].stage,'cancelled');assert.deepEqual(after.rows[0].artifact,before.rows[0].artifact);
-  assert.match((await store.events(goal.id)).at(-1)!.message,/artifact retained/);
+  assert.ok((await store.events(goal.id)).some(e=>e.type==='cancel'&&e.message.includes('retained')));
   assert.ok((await store.createGoal('7',{repository,prompt:'Next fixture',testCommand:['true'],maxAttempts:1},'live',randomUUID())).created);
   assert.equal(setup.attempts,0);assert.equal(setup.publishes,0);
 });
 
-for(const remote of ['pull_request_exists','branch_exists','error'] as const)test('cancel fails closed for '+remote,async t=>{
+for(const remote of ['pull_request_exists','branch_exists','error'] as const)test('cancel does not depend on remote state: '+remote,async t=>{
   const setup=await fixture(t,{cancelCheck:async()=>{if(remote==='error')throw new Error('Synthetic GitHub outage');return remote;}});if(!setup)return;
   const {goal,jobId}=await setup.reconciledGoal();
   const response=await fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers:await setup.session()});
-  assert.equal(response.status,remote==='error'?500:409);
-  assert.equal((await setup.store.getGoal(goal.id))?.state,'needs_attention');
-  assert.equal((await setup.store.pool.query('SELECT stage FROM jobs WHERE id=$1',[jobId])).rows[0].stage,'publishing');
-});
-
-test('cancel refuses uncertain writes and active or expired unreleased publication leases',async t=>{
-  let checks=0;
-  const setup=await fixture(t,{cancelCheck:async()=>{checks++;return 'absent';}});if(!setup)return;
-  const {goal,jobId}=await setup.retryableGoal();const headers=await setup.session();
-  const cancel=()=>fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers});
-  assert.equal((await cancel()).status,409);
-  await setup.store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[jobId]);
-  await setup.store.claim('first-reconciler',30_000,'live');
-  await setup.store.publicationUncertain(jobId,'first-reconciler','Publication remains unconfirmed during preflight_reconciliation (pull_request_not_found); reconciliation will check GitHub.');
-  await setup.store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[jobId]);
-  await setup.store.claim('reconciler',30_000,'live');
-  assert.equal((await cancel()).status,409);
-  await setup.store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[jobId]);
-  assert.equal((await cancel()).status,409);assert.equal(checks,0);
-});
-
-test('cancel locks out claims and fences a retry that finished its remote checks concurrently',async t=>{
-  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
-  const setup=await fixture(t,{cancelCheck:async()=>{entered.resolve();await release.promise;return 'absent';}});if(!setup)return;
-  const {goal,jobId,artifact}=await setup.reconciledGoal();
-  const candidate=await setup.store.publicationRetryCandidate(goal.id,'7');assert.equal(candidate?.kind,'retryable');
-  if(candidate?.kind!=='retryable')throw new Error('Missing fixture candidate');
-  await setup.store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[jobId]);
-  const cancellation=fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers:await setup.session()});
-  await entered.promise;
-  let retry:Promise<unknown>;
-  try{
-    assert.equal(await setup.store.claim('racing-reconciler',30_000,'live'),null);
-    retry=assert.rejects(setup.store.queueSavedPublication(jobId,'7',candidate.job.branch,artifact.baseCommit));
-  }finally{release.resolve();}
-  assert.equal((await cancellation).status,200);await retry;
+  assert.equal(response.status,200);
   assert.equal((await setup.store.getGoal(goal.id))?.state,'cancelled');
-  assert.equal(setup.attempts,0);assert.equal(setup.publishes,0);
-});
-
-
-test('later absence cannot make an earlier ambiguous remote write safe to cancel',async t=>{
-  let checks=0;
-  const setup=await fixture(t,{cancelCheck:async()=>{checks++;return 'absent';}});if(!setup)return;
-  const {goal}=await setup.reconciledGoal(false);
-  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers:await setup.session()});
-  assert.equal(response.status,409);assert.equal(checks,0);
-  assert.equal((await setup.store.getGoal(goal.id))?.state,'needs_attention');
-});
-
-test('recovery of an expired publisher remains blocked after a later successful absence reconciliation',async t=>{
-  const setup=await fixture(t,{cancelCheck:async()=>{throw new Error('Must not check remote state');}});if(!setup)return;
-  const {goal,jobId}=await setup.reconciledGoal();
-  await setup.store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[jobId]);
-  await setup.store.claim('expired-worker',30_000,'live');
-  await setup.store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[jobId]);
-  await setup.store.recoverExpired();
-  await setup.store.claim('later-reconciler',30_000,'live');
-  await setup.store.publicationUncertain(jobId,'later-reconciler','Publication remains unconfirmed during preflight_reconciliation (pull_request_not_found); reconciliation will check GitHub.');
-  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers:await setup.session()});
-  assert.equal(response.status,409);assert.equal((await setup.store.getGoal(goal.id))?.state,'needs_attention');
-});
-
-
-test('a durable push phase blocks cancellation even after later preflight failures and absence checks',async t=>{
-  const setup=await fixture(t,{cancelCheck:async()=>{throw new Error('Must remain blocked before GitHub checks');}});if(!setup)return;
-  const {goal,jobId}=await setup.reconciledGoal();
-  await setup.store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[jobId]);
-  await setup.store.claim('stalled-phase-worker',30_000,'live');
-  await setup.store.recordPublicationPhase(jobId,'stalled-phase-worker','branch_push');
-  await setup.store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[jobId]);
-  await setup.store.recoverExpired();
-  await setup.store.claim('absence-reconciler',30_000,'live');
-  await setup.store.publicationUncertain(jobId,'absence-reconciler','Publication remains unconfirmed during preflight_reconciliation (pull_request_not_found); reconciliation will check GitHub.');
-  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/cancel',{method:'POST',headers:await setup.session()});
-  assert.equal(response.status,409);assert.equal((await setup.store.getGoal(goal.id))?.state,'needs_attention');
+  assert.equal((await setup.store.getGoal(goal.id))?.cleanupStatus,'needs_attention');
+  assert.equal((await setup.store.pool.query('SELECT stage FROM jobs WHERE id=$1',[jobId])).rows[0].stage,'cancelled');
 });

@@ -11,6 +11,7 @@ export const goalSchema = goalInput.extend({
   attemptCount: z.number().int(), createdAt: z.string(), updatedAt: z.string(),
   mode: z.enum(['demo', 'live']), stopRequested: z.enum(['pause', 'cancel']).nullable(),
   pullRequest: z.object({url:z.string().url(), number:z.number().int(), state:z.enum(['open','merged','closed']), branch:z.string()}).nullable(),
+  cleanupStatus: z.enum(['not_required','pending','complete','needs_attention']).default('not_required'),
   error: z.string().nullable(),
 });
 export const eventSchema = z.object({id:z.number().int(), goalId:z.string().uuid(), type:z.string(), message:z.string(), createdAt:z.string()});
