@@ -61,7 +61,6 @@ jobs:
           --health-interval 2s --health-timeout 2s --health-retries 15
     env:
       HERBIE_TEST_DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie
-      WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -107,7 +106,6 @@ jobs:
           --health-interval 2s --health-timeout 2s --health-retries 15
     env:
       HERBIE_TEST_DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie
-      WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -153,7 +151,6 @@ jobs:
           --health-interval 2s --health-timeout 2s --health-retries 15
     env:
       HERBIE_TEST_DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie
-      WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -185,78 +182,9 @@ jobs:
             packages/web/test-results
           retention-days: 7
 
-  edge-verification:
-    name: Edge Worker verification
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    concurrency:
-      group: herbie-edge-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: '24.19.0'
-          package-manager-cache: false
-      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          version: 10.34.6
-          run_install: false
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Run local Worker checks
-        run: |
-          pnpm build
-          bash scripts/ci-verify.sh edge
-        env:
-          WRANGLER_SEND_METRICS: 'false'
-      - name: Save failure evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: edge-verification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/ci
-          retention-days: 7
-
   container-verification:
-    name: Deployment container dry run
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    concurrency:
-      group: herbie-container-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: '24.19.0'
-          package-manager-cache: false
-      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          version: 10.34.6
-          run_install: false
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Build the production Worker and container without credentials
-        run: |
-          pnpm build
-          empty_env="$RUNNER_TEMP/empty.env"
-          : > "$empty_env"
-          export DOCKER_HOST=unix:///var/run/docker.sock
-          unset DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-          docker --host=unix:///var/run/docker.sock info --format '{{.ServerVersion}}' >/dev/null
-          pnpm --filter @herbie/cloudflare exec wrangler deploy \
-            --dry-run --outdir "$RUNNER_TEMP/worker-dry-run" --env-file "$empty_env"
-        env:
-          CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: 'false'
-          CLOUDFLARE_INCLUDE_PROCESS_ENV: 'false'
-          WRANGLER_SEND_METRICS: 'false'
+    name: Portable container verification
+    uses: ./.github/workflows/portable-smoke.yml
 
   all-tests-passed:
     name: All tests passed
@@ -265,7 +193,6 @@ jobs:
       - unit-verification
       - cli-verification
       - browser-verification
-      - edge-verification
       - container-verification
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -277,11 +204,10 @@ jobs:
           UNIT_RESULT: ${{ needs.unit-verification.result }}
           CLI_RESULT: ${{ needs.cli-verification.result }}
           BROWSER_RESULT: ${{ needs.browser-verification.result }}
-          EDGE_RESULT: ${{ needs.edge-verification.result }}
           CONTAINER_RESULT: ${{ needs.container-verification.result }}
         run: |
           failed=0
-          for check in BUILD UNIT CLI BROWSER EDGE CONTAINER; do
+          for check in BUILD UNIT CLI BROWSER CONTAINER; do
             result_var="${check}_RESULT"
             result="${!result_var}"
             if [[ "$result" != success ]]; then
@@ -302,63 +228,3 @@ jobs:
     with:
       publish: true
       release_sequence: ${{ github.run_number }}
-
-  deploy:
-    name: Cloudflare deployment paused for k3s migration
-    # Keep the existing service running, but never redeploy it on migration merges.
-    # Re-enabling this rollback path requires a reviewed workflow change after
-    # confirming the k3s coordinator is stopped.
-    if: ${{ false }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment:
-      name: production
-    concurrency:
-      group: herbie-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: '24.19.0'
-          package-manager-cache: false
-      - name: Validate deployment configuration before installation
-        run: node packages/cloudflare/scripts/preflight.ts
-        env: &deployment_inputs
-          HERBIE_DEPLOY_ENABLED: 'true'
-          HERBIE_EXECUTION_ENABLED: ${{ vars.HERBIE_EXECUTION_ENABLED || 'false' }}
-          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-          HERBIE_DAYTONA_OPENAI_SECRET: ${{ secrets.HERBIE_DAYTONA_OPENAI_SECRET }}
-          DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
-          HERBIE_DAYTONA_SNAPSHOT: ${{ secrets.HERBIE_DAYTONA_SNAPSHOT }}
-          HERBIE_DEPLOY_REPOSITORY: ${{ secrets.HERBIE_DEPLOY_REPOSITORY }}
-          HERBIE_PUBLIC_URL: ${{ secrets.HERBIE_PUBLIC_URL }}
-          HERBIE_SUPABASE_PROJECT_REF: ${{ secrets.HERBIE_SUPABASE_PROJECT_REF }}
-          HERBIE_SUPABASE_POOLER_HOST: ${{ secrets.HERBIE_SUPABASE_POOLER_HOST }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          HERBIE_GITHUB_APP_ID: ${{ secrets.HERBIE_GITHUB_APP_ID }}
-          HERBIE_GITHUB_CLIENT_ID: ${{ secrets.HERBIE_GITHUB_CLIENT_ID }}
-          HERBIE_DATABASE_URL: ${{ secrets.HERBIE_DATABASE_URL }}
-          HERBIE_CREDENTIAL_KEY: ${{ secrets.HERBIE_CREDENTIAL_KEY }}
-          HERBIE_GITHUB_CLIENT_SECRET: ${{ secrets.HERBIE_GITHUB_CLIENT_SECRET }}
-          HERBIE_GITHUB_PRIVATE_KEY: ${{ secrets.HERBIE_GITHUB_PRIVATE_KEY }}
-          HERBIE_GITHUB_WEBHOOK_SECRET: ${{ secrets.HERBIE_GITHUB_WEBHOOK_SECRET }}
-          HERBIE_ALLOWED_GITHUB_USER_ID: ${{ secrets.HERBIE_ALLOWED_GITHUB_USER_ID }}
-          HERBIE_DATABASE_CA: ${{ secrets.HERBIE_DATABASE_CA }}
-      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          version: 10.34.6
-          run_install: false
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: Build deployment assets and their type dependencies
-        run: pnpm build:deploy
-      - name: Deploy current main and verify the new container revision
-        timeout-minutes: 22
-        run: pnpm --filter @herbie/cloudflare exec tsx scripts/deploy.ts
-        env: *deployment_inputs

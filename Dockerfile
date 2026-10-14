@@ -18,7 +18,7 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     pnpm install --frozen-lockfile --prod=false --filter herbie --filter '@herbie/service...' --filter '@herbie/web...'
 COPY packages/ packages/
-RUN test ! -e packages/cli && test ! -e packages/cloudflare && \
+RUN test ! -e packages/cli && \
     test ! -e packages/service/test && test ! -e packages/service/.env && \
     pnpm --filter '@herbie/service...' build && pnpm --filter @herbie/web build
 

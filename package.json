@@ -8,7 +8,6 @@
     "start": "pnpm --filter @herbie/loop start",
     "demo": "pnpm --filter @herbie/demo start",
     "build": "pnpm -r build",
-    "build:deploy": "pnpm --filter @herbie/loop build && pnpm --filter @herbie/web build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @herbie/loop test:e2e",

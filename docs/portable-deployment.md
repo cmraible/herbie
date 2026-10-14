@@ -8,12 +8,13 @@ credential encryption key, database TLS verification, and explicit execution gat
 
 ## Image delivery
 
-`Portable image` builds and smoke-tests every PR without publishing credentials.
+CI builds and smoke-tests every PR through the shared portable container workflow
+without publishing credentials.
 Every push to main runs the full CI suite. Only after all blocking checks pass,
 CI calls the portable workflow to build, smoke-test, and publish that exact commit.
 Publication retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
 existing `homelab-image` environment restrictions. The job rejects a commit if
-main has advanced before publication. Cloudflare deployment remains disabled.
+main has advanced before publication.
 
 The image name is `ghcr.io/<repository-owner>/<repository-name>`, lowercased from
 GitHub repository context. Only publication has `packages: write`, using the
@@ -82,11 +83,13 @@ Provision runtime secrets through the operator's approved secret channel. The
 standalone service expects `DATABASE_URL`, `HERBIE_CREDENTIAL_KEY`,
 `HERBIE_ALLOWED_GITHUB_USER_ID`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`,
 `GITHUB_CLIENT_SECRET`, `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET`.
-The GitHub names intentionally lack the deployment wrapper's `HERBIE_` prefix.
 Preserve `HERBIE_DATABASE_CA` if configured. Execution also needs `DAYTONA_API_KEY`,
 `HERBIE_DAYTONA_OPENAI_SECRET` (the existing Daytona secret name), and any configured
 `DAYTONA_API_URL` / `HERBIE_DAYTONA_SNAPSHOT`. Do not export the model API key from
 Daytona. Never log or commit any of these values.
+
+Cloudflare DNS and Tunnel still provide ingress. Their configuration and credentials
+remain in private infrastructure; removing the Workers runtime does not retire ingress.
 
 ## Handoff and rollback
 
