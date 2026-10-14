@@ -1,6 +1,15 @@
 name: Portable image
 on:
   pull_request:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      release_sequence:
+        description: Monotonic sequence from the successful main CI run
+        type: string
+        default: '0'
   workflow_dispatch:
     inputs:
       publish:
@@ -28,7 +37,7 @@ jobs:
     name: Publish GHCR image
     needs: verify
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.publish &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && inputs.publish &&
       github.ref == 'refs/heads/main' && vars.HERBIE_IMAGE_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -43,6 +52,7 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
       REVISION: ${{ github.sha }}
+      RELEASE_SEQUENCE: ${{ inputs.release_sequence || '0' }}
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -51,6 +61,12 @@ jobs:
         run: |
           docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:publish .
           bash scripts/test-portable-container.sh herbie:publish "$REVISION"
+      - name: Reject a superseded main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current" = "$REVISION" || { echo 'Main advanced; this image must not be published.' >&2; exit 1; }
       - name: Push revision tag and record immutable digest
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,4 +79,10 @@ jobs:
           docker tag herbie:publish "$IMAGE_REPOSITORY:$REVISION"
           docker push "$IMAGE_REPOSITORY:$REVISION"
           digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REPOSITORY:$REVISION")"
+          if [[ "$RELEASE_SEQUENCE" =~ ^[1-9][0-9]*$ ]]; then
+            # Only CI callers publish into the numerically ordered deployment channel.
+            channel_tag="main-$RELEASE_SEQUENCE-$REVISION"
+            docker tag herbie:publish "$IMAGE_REPOSITORY:$channel_tag"
+            docker push "$IMAGE_REPOSITORY:$channel_tag"
+          fi
           printf 'Revision: `%s`\n\nImmutable image: `%s`\n' "$REVISION" "$digest" >> "$GITHUB_STEP_SUMMARY"
