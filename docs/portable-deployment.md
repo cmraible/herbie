@@ -46,11 +46,37 @@ Flux readiness, and public health after rollout. Roll back by pinning the OCI
 source to a previously approved artifact digest; restore its version selector
 when ready to resume automatic updates.
 
-For an end-to-end release check, compare the OCI artifact's source revision with
-both health revision fields and the running pod's image digest. Confirm the OCI
-source and workload Kustomization are Ready. The infrastructure Git revision
-should remain unchanged between application releases; no manual reconciliation
-or image-pin edit is part of normal delivery.
+### Verify an intended release
+
+Start with the successful `main` workflow run that published the release. Record
+its full source commit SHA, run number, and the image digest shown in the
+publication job. The run number gives the expected OCI artifact tag
+(`0.0.<CI-run-number>`); the digest and SHA identify the tested image. A manual
+workflow dispatch does not announce an artifact, so it is not an automatic
+release candidate.
+
+After Flux has had time to poll, use the operator's existing kube context and
+private ingress URL (shown here as placeholders):
+
+```sh
+flux get sources oci -A
+flux get kustomizations -A
+kubectl -n <workload-namespace> rollout status deployment/<workload-name>
+kubectl -n <workload-namespace> get deployment <workload-name> \
+  -o jsonpath='{.spec.template.spec.containers[?(@.name=="herbie")].image}{"\n"}'
+curl --fail --silent <service-base-url>/api/health
+```
+
+Confirm the OCI source and workload Kustomization are Ready and reference the
+expected artifact version. The Deployment image must use the publication
+digest (`@sha256:...`), and rollout status must succeed. The health response
+must report `deploymentId` and `imageRevision` equal to the full source SHA;
+check that it also reports the expected service mode and execution gate for the
+release. A successful health response checks PostgreSQL as well as service
+readiness. If any value differs, the intended release is not yet verified.
+
+The infrastructure Git revision should remain unchanged between application
+releases; no manual reconciliation or image-pin edit is part of normal delivery.
 
 The Docker context is an allowlist of public source/manifests, excluding local
 .env files, Git metadata, deployment configuration, tests, and credentials. The
