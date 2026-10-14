@@ -1,4 +1,4 @@
-# Portable deployment preparation
+# Portable deployment
 
 The root Dockerfile runs the API, React UI, and background coordinator on port
 8787 with Node 24 and native Git. PostgreSQL stores durable state. Coding and
@@ -44,6 +44,12 @@ both identify the exact source SHA. Verify the running digest, source revision,
 Flux readiness, and public health after rollout. Roll back by pinning the OCI
 source to a previously approved artifact digest; restore its version selector
 when ready to resume automatic updates.
+
+For an end-to-end release check, compare the OCI artifact's source revision with
+both health revision fields and the running pod's image digest. Confirm the OCI
+source and workload Kustomization are Ready. The infrastructure Git revision
+should remain unchanged between application releases; no manual reconciliation
+or image-pin edit is part of normal delivery.
 
 The Docker context is an allowlist of public source/manifests, excluding local
 .env files, Git metadata, deployment configuration, tests, and credentials. The
