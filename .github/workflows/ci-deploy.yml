@@ -189,7 +189,12 @@ jobs:
   container-verification:
     name: Portable container verification
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/portable-smoke.yml
+    with:
+      publish: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.HERBIE_IMAGE_PUBLISH_ENABLED == 'true' }}
 
   all-tests-passed:
     name: All tests passed
@@ -223,7 +228,7 @@ jobs:
           exit "$failed"
 
   publish-portable-image:
-    name: Publish main image
+    name: Promote PR image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read

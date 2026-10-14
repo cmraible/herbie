@@ -1,6 +1,11 @@
 name: Portable container verification
 on:
   workflow_call:
+    inputs:
+      publish:
+        description: Upload the tested PR image for promotion after merge
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -8,15 +13,36 @@ jobs:
     name: Portable container smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REPOSITORY: ${{ github.repository }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+      REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           persist-credentials: false
       - name: Verify release artifact metadata
         run: node --test scripts/build-release-artifact.test.mjs
+      - name: Verify manifest-only image promotion
+        run: bash scripts/test-image-promotion.sh
       - name: Build and exercise the standalone container with an isolated database
-        env:
-          REVISION: ${{ github.sha }}
         run: |
-          docker build --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
+          tree="$(git rev-parse HEAD^{tree})"
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --label "io.herbie.source-tree=$tree" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
           bash scripts/test-portable-container.sh herbie:smoke "$REVISION"
+      - name: Upload the tested PR image
+        if: inputs.publish && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: |
+          image_repository="ghcr.io/${REPOSITORY,,}"
+          tree="$(git rev-parse HEAD^{tree})"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin ghcr.io
+          docker tag herbie:smoke "$image_repository:tree-$tree"
+          docker push "$image_repository:tree-$tree"
+          printf 'PR candidate: `%s:tree-%s`\n' "$image_repository" "$tree" >> "$GITHUB_STEP_SUMMARY"

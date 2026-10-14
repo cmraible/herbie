@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the main image to GHCR
+        description: Promote the matching PR image to the main revision tag
         type: boolean
         default: false
 permissions:
@@ -20,9 +20,12 @@ permissions:
 jobs:
   verify:
     if: ${{ !inputs.publish }}
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/portable-smoke.yml
   publish:
-    name: Publish GHCR image
+    name: Promote GHCR image
     if: >-
       (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && inputs.publish &&
       github.ref == 'refs/heads/main' && vars.HERBIE_IMAGE_PUBLISH_ENABLED == 'true'
@@ -44,9 +47,6 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           persist-credentials: false
-      - name: Build the image
-        run: |
-          docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:publish .
       - name: Install checksum-pinned Flux artifact publisher
         if: inputs.release_sequence != '' && inputs.release_sequence != '0'
         run: |
@@ -61,7 +61,7 @@ jobs:
         run: |
           current="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
           test "$current" = "$REVISION" || { echo 'Main advanced; this image must not be published.' >&2; exit 1; }
-      - name: Push revision tag and record immutable digest
+      - name: Promote the existing manifest and announce the release
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
@@ -71,16 +71,11 @@ jobs:
           registry=ghcr.io
           trap 'docker logout "$registry" >/dev/null 2>&1 || true' EXIT
           printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin "$registry"
-          docker tag herbie:publish "$IMAGE_REPOSITORY:$REVISION"
-          docker push "$IMAGE_REPOSITORY:$REVISION"
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REPOSITORY:$REVISION")"
+          tree="$(git rev-parse HEAD^{tree})"
+          digest="$(bash scripts/promote-portable-image.sh "$IMAGE_REPOSITORY" "$tree" "$REVISION" "$RELEASE_SEQUENCE")"
           if [[ "$RELEASE_SEQUENCE" =~ ^[1-9][0-9]*$ ]]; then
-            # Only CI callers publish into the numerically ordered deployment channel.
-            channel_tag="main-$RELEASE_SEQUENCE-$REVISION"
-            docker tag herbie:publish "$IMAGE_REPOSITORY:$channel_tag"
-            docker push "$IMAGE_REPOSITORY:$channel_tag"
             node scripts/build-release-artifact.mjs "$digest" "$REVISION" "$RUNNER_TEMP/release-artifact"
-            # Recheck after the image upload, immediately before announcing a release.
+            # Recheck after promotion, immediately before announcing a release.
             current="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
             test "$current" = "$REVISION" || { echo 'Main advanced; refusing release artifact.' >&2; exit 1; }
             flux push artifact "oci://$IMAGE_REPOSITORY:0.0.$RELEASE_SEQUENCE" \
