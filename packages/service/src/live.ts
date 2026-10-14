@@ -27,6 +27,7 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
       const daytona = new Daytona({apiKey:config.apiKey,apiUrl:config.apiUrl,target:config.target,requestTimeoutMs:30_000});
       const changes = await runDaytonaAttempt((params,options)=>daytona.create(params,options), {
+        signal:execution.signal,
         repoUrl:`https://github.com/${execution.repository.repository}.git`,goal:execution.goal.prompt,
         testCommand:execution.goal.testCommand,testTimeoutMs:60_000,
         secrets:{OPENAI_API_KEY:config.openaiSecretName},

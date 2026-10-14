@@ -11,6 +11,7 @@ export interface Execution {
   repository: RepositoryAccess;
   attemptId: string;
   branch: string;
+  signal?: AbortSignal;
 }
 export interface PullRequest {
   url: string;

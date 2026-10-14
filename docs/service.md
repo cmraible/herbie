@@ -23,13 +23,21 @@ prevents new external calls and stale database writes;
 it cannot undo an external call already in flight.
 
 - Queued jobs survive client, API and worker restarts.
-- Pause/cancel during a running attempt records a visible request. The bounded
-  sandbox attempt finishes and performs cleanup; pause retains the verified
-  artifact, cancel discards it. Cancellation is not immediate sandbox termination.
+- Pause during an attempt lets its bounded work finish and retains the artifact.
+- Cancel immediately marks any nonterminal goal cancelled and revokes worker leases,
+  without GitHub access or publication reconciliation. Repeat cancellation is safe.
+  The active worker observes revocation on its next heartbeat (normally within five
+  seconds) and requests sandbox deletion, including during a model command.
+  Artifacts and audit history are retained. `cleanupStatus` independently reports
+  `not_required`, `pending`, `complete`, or `needs_attention`; missing confirmation
+  becomes `needs_attention` after five minutes while the coordinator is running.
+  Failed deletion never resumes work. Inspect remaining remote resources manually.
 - Paused saved artifacts resume at publication without another model run.
-- Once publication begins, pause/cancel returns a conflict until its outcome is
-  known. Canceling a goal with a known open PR stops future work; it does not close
-  or delete that PR on GitHub.
+- Once publication begins, pause waits for its outcome; cancellation does not.
+  A remote write already in flight may still finish. Its outcome requires attention,
+  and any returned PR is recorded without reviving the goal. Existing branches and
+  PRs are not deleted or closed by cancellation. No subsequent publication or paid
+  attempt is queued for the cancelled goal.
 - An expired lease during sandbox execution becomes `needs_attention`. Herbie
   cannot prove that the remote work or cleanup finished, so it never repeats it.
 - Publication intent and its unique branch are durable before external writes.

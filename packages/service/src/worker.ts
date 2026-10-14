@@ -19,18 +19,20 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
   const job = await store.claim(workerId,leaseMs,adapters.mode);
   if (!job) return false;
   let leaseLost = false;
+  const controller = new AbortController();
+  const loseLease = () => { leaseLost = true; controller.abort(); };
   let renewing = false;
   const heartbeat = setInterval(() => {
     if (renewing) return;
     renewing = true;
-    void store.heartbeat(job.id,workerId,leaseMs).then(owned => { if (!owned) leaseLost = true; })
-      .catch(error => { leaseLost = true; logFailure(error,{component:'worker-heartbeat',goalId:job.goal.id,jobId:job.id}); }).finally(() => { renewing = false; });
+    void store.heartbeat(job.id,workerId,leaseMs).then(owned => { if (!owned) loseLease(); })
+      .catch(error => { loseLease(); logFailure(error,{component:'worker-heartbeat',goalId:job.goal.id,jobId:job.id}); }).finally(() => { renewing = false; });
   },heartbeatMs);
   const requireLease = async (): Promise<void> => {
     if (leaseLost) throw new StoreError(409,'Worker lease lost');
     const owned = await store.heartbeat(job.id,workerId,leaseMs);
     if (!owned || leaseLost) {
-      leaseLost = true;
+      loseLease();
       throw new StoreError(409,'Worker lease lost');
     }
   };
@@ -40,32 +42,40 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     publicationPhase=phase;
     await store.recordPublicationPhase(job.id,workerId,phase);
   };
+  let changes = job.artifact;
+  let published: {url:string;number:number;branch:string}|undefined;
   try {
-    const execution = await executionFor(adapters,job,publishing);
+    await requireLease();
+    const execution = {...await executionFor(adapters,job,publishing),signal:controller.signal};
+    await requireLease();
     if (publishing) {
       // No effectful replay after a crash or ambiguous publication response.
       await reportPublicationPhase('preflight_reconciliation');
       const existing = await adapters.reconcile(execution);
       if (!existing) await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
       else {
+        published = existing;
         await reportPublicationPhase('state_persistence');
         await store.completePublication(job.id,workerId,{url:existing.url,number:existing.number,branch:existing.branch});
         if (existing.state !== 'open') await store.reconcile(job.id,existing.state);
       }
       return true;
     }
-    let changes = job.artifact;
+    controller.signal.throwIfAborted();
     if (!changes) {
       // Authorization can outlive the lease; fence the paid operation after that read.
       await requireLease();
       changes = await adapters.attempt(execution, async message => {
         await store.appendEvent(job.goal.id,'attempt',message.slice(0,2000));
       });
-      if (leaseLost) throw new Error('Worker lease lost');
+      await requireLease();
       await store.saveArtifact(job.id,workerId,changes);
     }
     if (leaseLost) throw new Error('Worker lease lost');
-    if (!await store.beginPublication(job.id,workerId)) return true;
+    if (!await store.beginPublication(job.id,workerId)) {
+      await store.finishCancelled(job.id,workerId,changes?.verification?.sandboxDeleted?'complete':'needs_attention',changes??undefined);
+      return true;
+    }
     publishing = true;
     await reportPublicationPhase('preflight_reconciliation');
     const existing = await adapters.reconcile(execution);
@@ -73,10 +83,19 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     if (!existing) await requireLease();
     if(existing)await reportPublicationPhase('state_persistence');
     const result = existing ?? await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
+    published = result;
     if(!existing)await reportPublicationPhase('state_persistence');
     await store.completePublication(job.id,workerId,result);
     if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);
   } catch (error) {
+    const cancelled = await store.getGoal(job.goal.id);
+    if (cancelled?.state === 'cancelled') {
+      controller.abort();
+      await store.finishCancelled(job.id,workerId,
+        !publishing && (error instanceof DaytonaAttemptError ? error.cleanup==='confirmed' : changes?.verification?.sandboxDeleted===true) ? 'complete' : 'needs_attention',
+        changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),published);
+      return true;
+    }
     const errorId=logFailure(error,{component:publishing?'publication':'attempt',goalId:job.goal.id,jobId:job.id,stage:publishing?publicationPhase:error instanceof DaytonaAttemptError?error.diagnostics[0]?.stage:undefined});
     // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
     try {
