@@ -30,6 +30,7 @@ export function App() {
   const [repositoriesResolved,setRepositoriesResolved] = useState(false);
   const [repositoryRefresh,setRepositoryRefresh] = useState(0);
   const [selected,setSelected] = useState<string|null>(() => location.hash.slice(1) || null);
+  const [showFinished,setShowFinished] = useState(false);
   const [events,setEvents] = useState<GoalEvent[]>([]);
   const [eventsState,setEventsState] = useState<'idle'|'loading'|'loaded'|'error'>('idle');
   const [eventsError,setEventsError] = useState<string|null>(null);
@@ -40,6 +41,8 @@ export function App() {
   const [formError,setFormError] = useState<string|null>(null);
   const [installationNotice,setInstallationNotice] = useState<string|null>(null);
   const goal = goals.find(item => item.id === selected) ?? null;
+  const visibleGoals = goals.filter(item => showFinished || !['completed','cancelled'].includes(item.state));
+  const finishedCount = goals.filter(item => ['completed','cancelled'].includes(item.state)).length;
 
   useEffect(() => {
     let alive = true;
@@ -86,7 +89,6 @@ export function App() {
         if (!alive) return;
         setGoals(list);
         setGoalsLoaded(true); setGoalsError(null);
-        setSelected(current => current && list.some(item => item.id === current) ? current : list[0]?.id ?? null);
       } catch (failure) {
         if (!alive) return;
         if (failure instanceof ApiError && failure.status === 401) { setSession(null); setSessionState('signed-out'); }
@@ -128,7 +130,13 @@ export function App() {
   },[session]);
 
   useEffect(() => {
-    history.replaceState(null,'',selected ? `#${selected}` : location.pathname);
+    const restoreSelection = () => setSelected(location.hash.slice(1) || null);
+    window.addEventListener('popstate',restoreSelection);
+    window.addEventListener('hashchange',restoreSelection);
+    return () => { window.removeEventListener('popstate',restoreSelection); window.removeEventListener('hashchange',restoreSelection); };
+  },[]);
+
+  useEffect(() => {
     setEvents([]);
     if (!selected || !session) return;
     let alive = true;
@@ -149,6 +157,15 @@ export function App() {
     return () => { alive = false; clearInterval(timer); };
   },[selected,session]);
 
+  function navigateToGoal(id: string) {
+    history.pushState(null,'',`#${id}`);
+    setSelected(id);
+  }
+  function navigateToList() {
+    history.pushState(null,'',location.pathname + location.search);
+    setSelected(null);
+  }
+
   useEffect(() => { sessionStorage.setItem('herbie-draft',JSON.stringify(draft)); },[draft]);
 
   async function login(demo: boolean) {
@@ -161,7 +178,7 @@ export function App() {
   }
   async function logout() {
     setBusy(true); setError(null);
-    try { await api.logout(); setSession(null); setSessionState('signed-out'); setGoals([]); setGoalsLoaded(false); setSelected(null); }
+    try { await api.logout(); history.replaceState(null,'',location.pathname + location.search); setSession(null); setSessionState('signed-out'); setGoals([]); setGoalsLoaded(false); setSelected(null); }
     catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -181,7 +198,7 @@ export function App() {
     try {
       const result = await api.start(parseDraft(draft),draft.requestId);
       setGoals(current => [result,...current.filter(item => item.id !== result.id)]); setGoalsLoaded(true);
-      setSelected(result.id); setCreating(false); setDraft(newDraft(draft.repository));
+      navigateToGoal(result.id); setCreating(false); setDraft(newDraft(draft.repository));
     } catch (failure) { setFormError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -212,17 +229,22 @@ export function App() {
         {(sessionState === 'error' || healthState === 'error') && <div className="status-message" role="alert">{startupError ?? 'Herbie could not connect.'}<button onClick={() => setStartupRefresh(value => value + 1)}>Try again</button></div>}
         {sessionState === 'signed-out' && healthState === 'ready' && <><button className="primary" onClick={() => { void login(mode === 'demo'); }} disabled={busy}>{mode === 'demo' ? 'Enter demo' : 'Continue with GitHub'}</button><p className="fineprint">{mode === 'demo' ? 'Demo jobs and pull requests are simulated.' : 'GitHub access is checked separately for each repository.'}</p></>}
       </section> : <>
-        <section className="page-heading"><div><h1>Goals</h1><p>Work that keeps moving.</p></div><div className="heading-actions">{mode === 'live' && <button onClick={() => { void connectRepositories(); }} disabled={busy || !goalsLoaded}>Connect repositories</button>}<button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div></section>
+        <section className="page-heading"><div><h1>{selected ? 'Goal' : 'Goals'}</h1>{!selected && <p>Work that keeps moving.</p>}</div><div className="heading-actions">{mode === 'live' && <button onClick={() => { void connectRepositories(); }} disabled={busy || !goalsLoaded}>Connect repositories</button>}<button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div></section>
         {installationNotice && <div className="status-message" role="status">{{connected: 'GitHub connected. Repositories are refreshing.', permissions: 'The app needs Contents and Pull requests write permissions. Update its GitHub permissions, then connect again.', cancelled: 'GitHub connection was cancelled.', expired: 'That installation link expired. Connect repositories again.', failed: 'Herbie could not verify the installation. Try connecting again.'}[installationNotice] ?? 'GitHub installation status updated.'}</div>}
         {mode === 'demo' && <p className="subtle-note">Demo mode: attempts and pull requests are simulated.</p>}
         {healthState === 'error' && <div className="status-message" role="alert">{startupError ?? 'Herbie could not connect.'}<button onClick={() => setStartupRefresh(value => value + 1)}>Retry</button></div>}
         {!goalsLoaded && !goalsError && <p className="subtle-note" role="status">Loading goals…</p>}
         {goalsError && <div className="status-message" role="alert">{goalsLoaded && 'Couldn’t refresh goals. Showing the latest saved progress. '}{goalsError}<button onClick={() => setGoalsRefresh(value => value + 1)}>Retry</button></div>}
-        {goalsLoaded && goals.length === 0 && <section className="empty-state"><h2>No goals yet</h2><p>Start with one useful change.</p><button className="text-button" onClick={openCreate}>Create a goal</button></section>}
-        {goals.length > 0 && <section className="goal-list" aria-label="Goals" aria-busy={!goalsLoaded}>
-          {goals.map(item => <button className={`goal-row ${item.id === selected ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(item.id)}><span className="goal-row-title">{item.prompt.replace('[demo:fail]', '').trim()}</span><span className="goal-row-meta">{item.repository} <span>·</span> {labels[item.state]} <span>·</span> {time(item.createdAt)}</span></button>)}
-        </section>}
-        {goal && <section className="goal-detail" aria-label="Selected goal" aria-busy={eventsState === 'loading'}>
+        {!selected && goalsLoaded && goals.length === 0 && <section className="empty-state"><h2>No goals yet</h2><p>Start with one useful change.</p><button className="text-button" onClick={openCreate}>Create a goal</button></section>}
+        {!selected && goals.length > 0 && <>
+          <section className="goal-list" aria-label="Goals" aria-busy={!goalsLoaded}>
+            {visibleGoals.map(item => <button className="goal-row" key={item.id} onClick={() => navigateToGoal(item.id)}><span className="goal-row-title">{item.prompt.replace('[demo:fail]', '').trim()}</span><span className="goal-row-meta"><span className={`status-dot status-${item.state}`}/>{labels[item.state]} <span>·</span> {item.repository} <span>·</span> {time(item.createdAt)}</span></button>)}
+          </section>
+          {finishedCount > 0 && <button className="finished-toggle" onClick={() => setShowFinished(value => !value)}>{showFinished ? 'Hide' : 'Show'} completed and cancelled ({finishedCount})</button>}
+          {goalsLoaded && visibleGoals.length === 0 && <section className="empty-state"><h2>All goals are finished</h2><p>Completed and cancelled goals are hidden.</p></section>}
+        </>}
+        {selected && goal && <section className="goal-detail" aria-label="Selected goal" aria-busy={eventsState === 'loading'}>
+          <button className="back-button" onClick={navigateToList}>← All goals</button>
           <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><h2>{goal.prompt.replace('[demo:fail]', '').trim()}</h2></div><Badge goal={goal}/></div>
           <p className="goal-meta">Attempt {goal.attemptCount} of {goal.maxAttempts} <span>·</span> Created {time(goal.createdAt)}</p>
           {goal.error && <div className="status-message" role="alert">{goal.error}</div>}
@@ -234,6 +256,7 @@ export function App() {
           <details className="test-command"><summary>Test command</summary><code>{JSON.stringify(goal.testCommand)}</code></details>
           <section className="activity"><h3>Activity</h3>{eventsState === 'loading' ? <p className="subtle-note" role="status">Loading activity…</p> : <>{eventsError && <p className="subtle-note" role="status">Activity could not refresh; showing the latest events.</p>}{events.length === 0 ? <p className="subtle-note">No activity yet.</p> : <ol>{events.map(event => <li key={event.id}><span>{event.message}</span><time>{time(event.createdAt)} · {event.type.replaceAll('_', ' ')}</time></li>)}</ol>}</>}</section>
         </section>}
+        {selected && !goal && goalsLoaded && <section className="empty-state"><h2>Goal not found</h2><button className="text-button" onClick={navigateToList}>Back to goals</button></section>}
       </>}
     </main>
     {creating && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="dialog-heading"><h2 id="create-title">New goal</h2><button className="icon-button" aria-label="Close new goal" disabled={busy} onClick={() => setCreating(false)}>×</button></div><form onSubmit={event => { void createGoal(event); }}><label>Repository<select autoFocus required disabled={repositoryLoading || busy} value={draft.repository} onChange={event => edit({repository:event.target.value})}><option value="" disabled>Choose a repository</option>{repositories.map(repo => <option key={repo.fullName}>{repo.fullName}</option>)}</select></label><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}><span>{repositoryLoading ? 'Checking repository access…' : 'Repository access is checked when you start a goal.'}</span><button type="button" disabled={repositoryLoading || busy} onClick={() => setRepositoryRefresh(current => current+1)}>Refresh</button></div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access. {mode === 'live' && <button type="button" disabled={busy} onClick={() => { void connectRepositories(); }}>Connect</button>}</div>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label><label>Test command <span className="optional">JSON argument array</span><input required className="mono-input" value={draft.test} onChange={event => edit({test:event.target.value})}/></label><label>Maximum attempts<select value={draft.maxAttempts} onChange={event => edit({maxAttempts:event.target.value})}>{[1,2,3,4,5].map(count => <option key={count} value={count}>{count} {count === 1 ? 'attempt' : 'attempts'}</option>)}</select></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}{formError && <div className="status-message" role="alert">{formError}</div>}<div className="dialog-footer"><button type="button" onClick={() => setCreating(false)} disabled={busy}>Cancel</button><button className="primary" type="submit" disabled={busy || repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError)}>{busy ? 'Starting…' : 'Start goal'}</button></div></form></section></div>}

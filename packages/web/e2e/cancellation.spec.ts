@@ -10,6 +10,7 @@ for(const state of ['queued','running','paused','awaiting_review','needs_attenti
   await page.route('**/api/goals/*/events**',r=>r.fulfill(json([])));
   await page.route('**/api/goals/*/cancel',r=>{cancels++;goal={...goal,state:'cancelled',cleanupStatus:'needs_attention'};return r.fulfill(json(goal));});
   await page.goto('/');
+  await page.getByRole('button',{name:/Synthetic cancellation fixture/}).click();
   const details=page.getByRole('region',{name:'Selected goal'});
   await expect(details.getByRole('button',{name:'Cancel goal'})).toBeEnabled();
   await details.getByRole('button',{name:'Cancel goal'}).click();
