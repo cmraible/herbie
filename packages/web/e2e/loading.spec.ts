@@ -141,10 +141,29 @@ test('poll failures keep the last goal and details on screen',async({page})=>{
     return requests===1?json(route,[fixtureGoal]):json(route,{error:'temporary goals outage'},503);
   });
   await page.goto('/');
+  await page.getByRole('button',{name:/Keep loaded work visible/}).click();
   await expect(page.getByRole('heading',{name:'Keep loaded work visible'})).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('Showing the latest saved progress.',{timeout:6000});
   await expect(page.getByRole('heading',{name:'Keep loaded work visible'})).toBeVisible();
   await expect(page.getByText('No goals yet')).toHaveCount(0);
+});
+
+test('the goal list hides finished work until requested and opens details separately',async({page})=>{
+  const completed={...fixtureGoal,id:randomUUID(),prompt:'Finished work',state:'completed'};
+  const cancelled={...fixtureGoal,id:randomUUID(),prompt:'Stopped work',state:'cancelled'};
+  await routeSignedIn(page,[fixtureGoal,completed,cancelled]);
+  await page.goto('/');
+  await expect(page.getByRole('region',{name:'Selected goal'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/Keep loaded work visible/})).toBeVisible();
+  await expect(page.getByText('Finished work')).toHaveCount(0);
+  await expect(page.getByText('Stopped work')).toHaveCount(0);
+  await page.getByRole('button',{name:'Show completed and cancelled (2)'}).click();
+  await page.getByRole('button',{name:/Finished work/}).click();
+  await expect(page.getByRole('region',{name:'Selected goal'}).getByRole('heading',{name:'Finished work'})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Goals'})).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Stopped work/})).toBeVisible();
 });
 
 test('mobile loading and repeated refresh clicks remain within the viewport',async({page})=>{
