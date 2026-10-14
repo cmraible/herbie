@@ -21,20 +21,29 @@ short-lived `GITHUB_TOKEN`; no infrastructure credential enters the public repo.
 A manual main-branch dispatch with `publish=true` still publishes a source-SHA tag
 for recovery, but cannot advance the automatic deployment channel.
 
-Successful CI publication also produces `main-<CI-run-number>-<source-SHA>`.
-The private infrastructure repository's Flux image policy selects the highest
-numeric CI sequence, reflects its digest, and commits both the immutable image
-reference and matching deployment tag. An older run finishing late cannot replace
-a newer selected release. Infrastructure commits do not trigger application CI,
-so this path has no commit loop. Public GHCR visibility permits anonymous image
-pulls; publishing does not change package visibility or registry permissions.
+Successful CI publication also produces a deployment artifact in the same public
+GHCR package, tagged `0.0.<CI-run-number>`. This tag contains a Flux OCI artifact,
+not a runnable container. It carries only fixed resource identities, the tested
+immutable image digest, and source revision. Its generated directory is explicit
+and contains no runtime configuration, hostname, namespace, secret references,
+or private files. Manual dispatches publish images but do not announce releases.
 
-`HERBIE_DEPLOYMENT_ID` identifies the selected deployment tag while the baked
-`HERBIE_IMAGE_REVISION` remains the exact source SHA. Verify the running digest,
-source SHA, Flux readiness, and public health after rollout. To roll back, suspend
-the private image automation first, then restore an approved digest and deployment
-ID together; otherwise the policy will select the newer release again. Do not
-reset the CI run-number ordering or delete channel tags as part of a rollback.
+Flux polls the OCI repository for the highest `0.0.*` version and applies its
+artifact using private Kustomization patches. A new artifact changes the pinned
+Deployment image and therefore triggers a rollout. Git remains read-only; there
+are no image-update commits or mutable container tags driving deployment. Numeric
+versions prevent an older CI run from replacing a newer release. The publishing
+job rechecks main immediately before announcing the artifact.
+
+The consumer must supply its private workload configuration as patches for the
+four resource identities in `scripts/build-release-artifact.mjs`. The unpatched
+release skeleton deliberately cannot deploy a working service. Keep the consumer's
+resource identities and Kustomization unchanged when moving from Git to OCI so
+Flux retains ownership. `HERBIE_DEPLOYMENT_ID` and the baked `HERBIE_IMAGE_REVISION`
+both identify the exact source SHA. Verify the running digest, source revision,
+Flux readiness, and public health after rollout. Roll back by pinning the OCI
+source to a previously approved artifact digest; restore its version selector
+when ready to resume automatic updates.
 
 The Docker context is an allowlist of public source/manifests, excluding local
 .env files, Git metadata, deployment configuration, tests, and credentials. The

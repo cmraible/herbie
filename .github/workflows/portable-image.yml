@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           persist-credentials: false
+      - name: Verify release artifact metadata
+        run: node --test scripts/build-release-artifact.test.mjs
       - name: Build and exercise the standalone container with an isolated database
         env:
           REVISION: ${{ github.sha }}
@@ -61,6 +63,14 @@ jobs:
         run: |
           docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:publish .
           bash scripts/test-portable-container.sh herbie:publish "$REVISION"
+      - name: Install checksum-pinned Flux artifact publisher
+        if: inputs.release_sequence != '' && inputs.release_sequence != '0'
+        run: |
+          curl --fail --silent --show-error --location https://github.com/fluxcd/flux2/releases/download/v2.9.6/flux_2.9.6_linux_amd64.tar.gz -o "$RUNNER_TEMP/flux.tar.gz"
+          echo "b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5  $RUNNER_TEMP/flux.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/flux-bin"
+          tar -xzf "$RUNNER_TEMP/flux.tar.gz" -C "$RUNNER_TEMP/flux-bin" flux
+          echo "$RUNNER_TEMP/flux-bin" >> "$GITHUB_PATH"
       - name: Reject a superseded main commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,6 +81,7 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           IMAGE_REPOSITORY="ghcr.io/${REPOSITORY,,}"
           registry=ghcr.io
@@ -84,5 +95,13 @@ jobs:
             channel_tag="main-$RELEASE_SEQUENCE-$REVISION"
             docker tag herbie:publish "$IMAGE_REPOSITORY:$channel_tag"
             docker push "$IMAGE_REPOSITORY:$channel_tag"
+            node scripts/build-release-artifact.mjs "$digest" "$REVISION" "$RUNNER_TEMP/release-artifact"
+            # Recheck after the image upload, immediately before announcing a release.
+            current="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+            test "$current" = "$REVISION" || { echo 'Main advanced; refusing release artifact.' >&2; exit 1; }
+            flux push artifact "oci://$IMAGE_REPOSITORY:0.0.$RELEASE_SEQUENCE" \
+              --path="$RUNNER_TEMP/release-artifact" --source="$REPOSITORY_URL" \
+              --revision="main@sha1:$REVISION"
+            printf '\nFlux release artifact: `%s:0.0.%s`\n' "$IMAGE_REPOSITORY" "$RELEASE_SEQUENCE" >> "$GITHUB_STEP_SUMMARY"
           fi
           printf 'Revision: `%s`\n\nImmutable image: `%s`\n' "$REVISION" "$digest" >> "$GITHUB_STEP_SUMMARY"
