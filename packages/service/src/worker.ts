@@ -42,7 +42,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
   let publicationPhase:PublicationPhase='preflight_reconciliation';
   const reportPublicationPhase=async(phase:PublicationPhase):Promise<void>=>{
     publicationPhase=phase;
-    await store.recordPublicationPhase(job.id,workerId,phase);
+    if(!recoveringPublication)await store.recordPublicationPhase(job.id,workerId,phase);
   };
   let changes = job.artifact;
   let published: {url:string;number:number;branch:string}|undefined;
@@ -130,8 +130,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
     try {
       if (publishing) {
-        await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)));
-        await store.appendEvent(job.goal.id,'diagnostic_reference',`Failure reference: ${errorId}`);
+        await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)),errorId);
       }
       else await store.fail(job.id,workerId,error instanceof KnownAttemptFailure ? error.message : error instanceof DaytonaAttemptError ? `${error.safeMessage()} Reference: ${errorId}` : `Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal. Reference: ${errorId}`,!(error instanceof KnownAttemptFailure));
     } catch (saveError) {

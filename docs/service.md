@@ -201,3 +201,5 @@ private-repository read transport; deployment supervision, retention, rate limit
 and health/queue observability. The current webhook handler reconciles all pending
 review PRs, appropriate for a small first deployment; narrow it by repository as
 volume grows.
+
+Publication recovery keeps the latest retry count, next deadline, and failure reference in goal status. The event feed records the first five failures as backoff increases, changed failure causes, safety blocks, and recovery success. Identical failures after backoff reaches its cap do not add more feed entries; every thrown failure remains in server diagnostics. Historical events are retained.
