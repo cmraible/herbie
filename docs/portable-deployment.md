@@ -8,23 +8,32 @@ credential encryption key, database TLS verification, and explicit execution gat
 
 ## Image delivery
 
-CI builds and smoke-tests every PR through the shared portable container workflow
-without publishing credentials.
-Every push to main runs the full CI suite. Only after all blocking checks pass,
-CI calls the portable workflow to build, smoke-test, and publish that exact commit.
-Publication retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
+CI builds and smoke-tests every PR through the shared portable container workflow.
+Same-repository PRs upload the tested image to GHCR as `tree-<git-tree-SHA>` when
+`HERBIE_IMAGE_PUBLISH_ENABLED=true`. Fork PRs verify without registry writes.
+PR uploads stage candidates only; they do not deploy production.
+
+Every push to main promotes the candidate matching its exact Git tree, including
+verification of the image's source-tree label. Promotion copies only the existing
+manifest to the main commit SHA and ordered channel tags: no rebuild, tests,
+image pull, or layer upload. This also works for squash/rebase merges with the
+same final contents. A missing or mismatched image fails without a fallback build;
+update PRs against main and wait for their image uploads before merging. Direct
+pushes and fork contributions need an image prepared through a same-repository PR.
+
+Promotion retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
 existing `homelab-image` environment restrictions. The job rejects a commit if
-main has advanced before publication.
+main has advanced before promotion or the release announcement.
 
 The image name is `ghcr.io/<repository-owner>/<repository-name>`, lowercased from
-GitHub repository context. Only publication has `packages: write`, using the
-short-lived `GITHUB_TOKEN`; no infrastructure credential enters the public repo.
-A manual main-branch dispatch with `publish=true` still publishes a source-SHA tag
+GitHub repository context. PR uploads and main promotion use `packages: write`
+with the short-lived `GITHUB_TOKEN`; no infrastructure credential enters the repo.
+A manual main-branch dispatch with `publish=true` retags the matching PR image
 for recovery, but cannot advance the automatic deployment channel.
 
 Successful CI publication also produces a deployment artifact in the same public
 GHCR package, tagged `0.0.<CI-run-number>`. This tag contains a Flux OCI artifact,
-not a runnable container. It carries only fixed resource identities, the tested
+not a runnable container. It carries only fixed resource identities, the published
 immutable image digest, and source revision. Its generated directory is explicit
 and contains no runtime configuration, hostname, namespace, secret references,
 or private files. Manual dispatches publish images but do not announce releases.
@@ -40,14 +49,18 @@ The consumer must supply its private workload configuration as patches for the
 four resource identities in `scripts/build-release-artifact.mjs`. The unpatched
 release skeleton deliberately cannot deploy a working service. Keep the consumer's
 resource identities and Kustomization unchanged when moving from Git to OCI so
-Flux retains ownership. `HERBIE_DEPLOYMENT_ID` and the baked `HERBIE_IMAGE_REVISION`
-both identify the exact source SHA. Verify the running digest, source revision,
+Flux retains ownership. `HERBIE_DEPLOYMENT_ID` identifies the main commit; baked `HERBIE_IMAGE_REVISION`
+identifies the PR merge commit used to build the image. These SHAs can differ, but
+their source trees must match. The image label `io.herbie.source-tree` records that
+tree. Verify the running digest, main revision,
 Flux readiness, and public health after rollout. Roll back by pinning the OCI
 source to a previously approved artifact digest; restore its version selector
 when ready to resume automatic updates.
 
 For an end-to-end release check, compare the OCI artifact's source revision with
-both health revision fields and the running pod's image digest. Confirm the OCI
+health's `deploymentId`, and its image digest with the running pod's image.
+Compare health's `imageRevision` with the image's `org.opencontainers.image.revision`
+label; it remains the PR build revision after promotion. Confirm the OCI
 source and workload Kustomization are Ready. The infrastructure Git revision
 should remain unchanged between application releases; no manual reconciliation
 or image-pin edit is part of normal delivery.
