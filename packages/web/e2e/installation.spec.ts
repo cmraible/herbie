@@ -22,7 +22,7 @@ test('connect repositories returns to Herbie, refreshes access, and survives Bac
 
   await page.goto('/');
   await expect(page.getByRole('button',{name:'Connect repositories'})).toBeVisible();
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByRole('button',{name:'Close new goal'}).click();
   const connectButton=page.getByRole('button',{name:'Connect repositories'});
   const pendingConnect=connectButton.click();
@@ -30,24 +30,24 @@ test('connect repositories returns to Herbie, refreshes access, and survives Bac
   await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
   await expect(connectButton).toBeEnabled();
   await expect(page.getByRole('button',{name:'Sign out'}).first()).toBeEnabled();
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await expect(page.getByRole('button',{name:'Close new goal'})).toBeEnabled();
   await page.getByRole('button',{name:'Close new goal'}).click();
   releaseInstallStart();
   await pendingConnect;
-  await expect(page.getByText('GitHub installation verified. Your public repositories are refreshing.',{exact:true})).toBeVisible();
+  await expect(page.getByText('GitHub connected. Repositories are refreshing.',{exact:true})).toBeVisible();
   await expect(page).toHaveURL(`${baseUrl}/`);
   expect(repositoryRequests).toBeGreaterThanOrEqual(2);
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
   await page.getByRole('button',{name:'Close new goal'}).click();
 
   await page.goBack();
-  await expect(page.getByRole('heading',{name:'Your coding goals.'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await expect.poll(()=>repositoryRequests).toBeGreaterThanOrEqual(3);
   await expect(page.getByRole('button',{name:'Connect repositories'})).toBeEnabled();
   await expect(page.getByRole('button',{name:'Sign out'}).first()).toBeEnabled();
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await expect(page.getByRole('button',{name:'Close new goal'})).toBeEnabled();
   await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
 });

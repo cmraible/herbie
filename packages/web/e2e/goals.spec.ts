@@ -4,8 +4,8 @@ import {goalSchema} from '@herbie/contracts';
 
 const url=process.env.HERBIE_E2E_URL??'http://127.0.0.1:8787';
 async function login(page:Page){
-  await page.goto('/');await page.getByRole('button',{name:'Enter local demo'}).click();
-  await expect(page.getByRole('heading',{name:'Your coding goals.'})).toBeVisible();
+  await page.goto('/');await page.getByRole('button',{name:'Enter demo'}).click();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   const response=await page.request.get('/api/goals');
   const data:unknown=await response.json();
   for(const goal of z.array(goalSchema).parse(data)){
@@ -16,14 +16,14 @@ async function login(page:Page){
   }
 }
 async function start(page:Page,prompt:string,attempts='1'){
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill(prompt);
   await page.getByLabel('Maximum attempts').selectOption(attempts);
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
-  await expect(page.getByRole('region',{name:'Goal details'}).getByRole('heading',{name:prompt})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Selected goal'}).getByRole('heading',{name:prompt})).toBeVisible();
 }
-const detail=(page:Page)=>page.getByRole('region',{name:'Goal details'});
+const detail=(page:Page)=>page.getByRole('region',{name:'Selected goal'});
 
 test('a goal survives reload, pauses and resumes, then advances only to its attempt limit',async({page})=>{
   await login(page);
@@ -31,12 +31,12 @@ test('a goal survives reload, pauses and resumes, then advances only to its atte
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   await page.reload();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Ⅱ Pause'}).click();
+  await detail(page).getByRole('button',{name:'Pause'}).click();
   await expect(detail(page).getByText('Paused',{exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'▷ Resume'}).click();
+  await detail(page).getByRole('button',{name:'Resume'}).click();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Simulate merge'}).click();
-  await expect(detail(page).getByText('2 / 2',{exact:true})).toBeVisible();
+  await expect(detail(page).getByText('Attempt 2 of 2')).toBeVisible();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Simulate merge'}).click();
   await expect(detail(page).getByText('Completed',{exact:true})).toBeVisible();
@@ -45,7 +45,7 @@ test('a goal survives reload, pauses and resumes, then advances only to its atte
 });
 
 test('an invalid submission stays editable; a failed attempt has visible durable failure',async({page})=>{
-  await login(page);await page.getByRole('button',{name:'+ New goal'}).click();
+  await login(page);await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill('Exercise the failure path');
   await page.getByLabel('Test command').fill('npm test');
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
@@ -64,7 +64,7 @@ test('an invalid submission stays editable; a failed attempt has visible durable
 test('multiple active goals coexist; cancel and close stop work visibly',async({page})=>{
   await login(page);await start(page,'Review the cancellation behavior');
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill('A second concurrent goal');
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -102,7 +102,7 @@ test('retrying a lost create response returns the original goal without duplicat
     }
     await route.continue();
   });
-  await page.getByRole('button',{name:'+ New goal'}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill('Recover a lost create response');
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
@@ -115,7 +115,7 @@ test('retrying a lost create response returns the original goal without duplicat
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
   await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Sign out'}).click();
-  await expect(page.getByRole('button',{name:'Enter local demo'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Enter demo'})).toBeVisible();
 });
 
 test('repository discovery failures do not interrupt goal polling or repeat GitHub listing',async({page})=>{
@@ -129,14 +129,14 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
   await start(page,'Keep durable progress visible during repository discovery failure','2');
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   expect(repositoryRequests).toBe(1);
-  await page.getByRole('button',{name:'+ New goal'}).click();
-  await page.getByRole('button',{name:'Refresh repositories',exact:true}).click();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Repository discovery is temporarily unavailable');
   await page.getByRole('button',{name:'Close new goal'}).click();
   const id=z.uuid().parse(new URL(page.url()).hash.slice(1));
   const merged=await page.request.post(`/api/demo/goals/${id}/merge`,{headers:{origin:url},data:{}});
   expect(merged.ok()).toBeTruthy();
-  await expect(detail(page).getByText('2 / 2',{exact:true})).toBeVisible();
+  await expect(detail(page).getByText('Attempt 2 of 2')).toBeVisible();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   expect(repositoryRequests).toBe(2);
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
