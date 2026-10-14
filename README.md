@@ -253,16 +253,12 @@ Only the disposable Daytona runner requests `externalSandbox` with restricted ne
 access and no interactive approvals; Daytona supplies the isolation boundary. Normal
 host attempts retain server-owned sandbox and approval settings. The fixed model is
 `gpt-6-luna`, low effort, default service tier, with web search disabled and a 32K
-configured context window. Cumulative usage notifications trigger cancellation at
-an estimated $0.005, charging all input at $0.125/M and output at $0.50/M (the
-[standard Luna rates](https://developers.openai.com/api/docs/models/gpt-6-luna), checked
-2026-10-07). Repeated cumulative updates are not summed. Invalid matching usage also
-cancels. Cancellation waits at most five seconds for a matching terminal event, then
-the existing owned-process-group cleanup runs; unconfirmed termination remains a failure.
-This is an observed-usage guard, **not a provider-enforced spending cap**: delayed
-notifications, in-flight work, model tools, and infrastructure charges can exceed it.
-A 90-second turn deadline still applies when no usage notification arrives. There is
-no model fallback or retry.
+configured context window. Token-usage notifications do not trigger spending-based
+cancellation. Herbie does not impose a dollar spending cap. Attempt counts and the
+90-second turn deadline still bound execution. Cancellation waits at most five
+seconds for a matching terminal event, then the existing owned-process-group
+cleanup runs; unconfirmed termination remains a failure. There is no model
+fallback or retry.
 
 Creation is bounded at 120 seconds; each upload at 30 seconds; fresh runtime setup at
 240 seconds (snapshot configuration at 30); the turn at 90 seconds; each patch-extraction

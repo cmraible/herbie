@@ -73,7 +73,7 @@ Postgres database for production; the sample password and fixed demo encryption
 key are only for local demo. Keep the database and encryption key together in
 backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters,
 commands to 30 arguments and attempts to five. Existing Daytona deadlines and
-observed token-cost cutoff remain in force; the cutoff is not a hard spending cap.
+cancellation protections remain in force. Herbie does not impose a dollar spending cap.
 
 Verification uses a fresh clone and a protected supervisor, separate from the coding
 user. Artifact downloads are bounded before parsing, patches are capped at 8 MiB,
