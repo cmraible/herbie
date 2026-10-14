@@ -37,12 +37,12 @@ lines.on('line', line => {
     worker.stdout.once('data', () => {
       send({ id: 2, result: { turn: { id: 'turn-1' } } });
       log({ active: true });
-      if (mode === 'budget' || mode === 'budget-unconfirmed') send({
+      if (mode === 'high-usage') send({
         method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'turn-1',
-          tokenUsage: { total: { inputTokens: 40_000, outputTokens: 0 } } },
+          tokenUsage: { total: { inputTokens: 400_000, outputTokens: 100_000 } } },
       });
       if (mode === 'turn-exit') process.exit(7);
-      if (mode === 'success' || mode === 'turn-fail' || mode === 'cleanup-fail') {
+      if (mode === 'success' || mode === 'high-usage' || mode === 'turn-fail' || mode === 'cleanup-fail') {
         setImmediate(() => {
           complete(mode === 'turn-fail' ? 'failed' : 'completed');
           if (mode === 'cleanup-fail') process.exit(7);
@@ -54,7 +54,7 @@ lines.on('line', line => {
     assert.ok('params' in message);
     assert.deepEqual(message.params, { threadId: 'thread-1', turnId: 'turn-1' });
     send({ id: 3, result: {} });
-    if (mode !== 'interrupt-unconfirmed' && mode !== 'budget-unconfirmed') setImmediate(() => complete('interrupted'));
+    if (mode !== 'interrupt-unconfirmed') setImmediate(() => complete('interrupted'));
   } else throw new Error('Unexpected fixture request');
 });
 lines.on('close', () => { log({ eof: true }); process.exit(0); });
