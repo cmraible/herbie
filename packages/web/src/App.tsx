@@ -7,6 +7,7 @@ import {sortRepositories} from './repositories.js';
 
 const api = createClient();
 const terminal = new Set(['completed','cancelled','failed']);
+const onboardingInstallKey = 'herbie-onboarding-install';
 const labels: Record<Goal['state'], string> = {queued:'Queued',running:'Running',paused:'Paused',awaiting_review:'Ready for review',completed:'Completed',cancelled:'Cancelled',failed:'Failed',needs_attention:'Needs attention'};
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong. Please retry.'; }
 function time(value: string) { return new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
@@ -112,6 +113,10 @@ export function App() {
         setRepositories(list); setRepositoriesResolved(true);
         setDraft(current => list.some(repository => repository.fullName === current.repository)
           ? current : {...current,repository:list[0]?.fullName ?? '',requestId:crypto.randomUUID()});
+        if (sessionStorage.getItem(onboardingInstallKey)) {
+          sessionStorage.removeItem(onboardingInstallKey);
+          if (list.length === 0) void connectRepositories();
+        }
       } catch (failure) { if (alive) { setRepositoryError(message(failure)); setRepositoriesResolved(true); } }
       finally { if (alive) setRepositoryLoading(false); }
     }
@@ -172,13 +177,13 @@ export function App() {
     setBusy(true); setError(null);
     try {
       if (demo) { const current = await api.demoLogin(); setSession(current); setSessionState('signed-in'); }
-      else { const auth = await api.authStart('web'); location.assign(auth.url); }
-    } catch (failure) { setError(message(failure)); }
+      else { sessionStorage.setItem(onboardingInstallKey,'1'); const auth = await api.authStart('web'); location.assign(auth.url); }
+    } catch (failure) { sessionStorage.removeItem(onboardingInstallKey); setError(message(failure)); }
     finally { setBusy(false); }
   }
   async function logout() {
     setBusy(true); setError(null);
-    try { await api.logout(); history.replaceState(null,'',location.pathname + location.search); setSession(null); setSessionState('signed-out'); setGoals([]); setGoalsLoaded(false); setSelected(null); }
+    try { await api.logout(); sessionStorage.removeItem(onboardingInstallKey); history.replaceState(null,'',location.pathname + location.search); setSession(null); setSessionState('signed-out'); setGoals([]); setGoalsLoaded(false); setSelected(null); }
     catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -229,7 +234,7 @@ export function App() {
         {(sessionState === 'error' || healthState === 'error') && <div className="status-message" role="alert">{startupError ?? 'Herbie could not connect.'}<button onClick={() => setStartupRefresh(value => value + 1)}>Try again</button></div>}
         {sessionState === 'signed-out' && healthState === 'ready' && <><button className="primary" onClick={() => { void login(mode === 'demo'); }} disabled={busy}>{mode === 'demo' ? 'Enter demo' : 'Continue with GitHub'}</button><p className="fineprint">{mode === 'demo' ? 'Demo jobs and pull requests are simulated.' : 'GitHub access is checked separately for each repository.'}</p></>}
       </section> : <>
-        <section className="page-heading"><div><h1>{selected ? 'Goal' : 'Goals'}</h1>{!selected && <p>Work that keeps moving.</p>}</div><div className="heading-actions">{mode === 'live' && <button onClick={() => { void connectRepositories(); }} disabled={busy || !goalsLoaded}>Connect repositories</button>}<button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div></section>
+        <section className="page-heading"><div><h1>{selected ? 'Goal' : 'Goals'}</h1>{!selected && <p>Work that keeps moving.</p>}</div><div className="heading-actions"><button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div></section>
         {installationNotice && <div className="status-message" role="status">{{connected: 'GitHub connected. Repositories are refreshing.', permissions: 'The app needs Contents and Pull requests write permissions. Update its GitHub permissions, then connect again.', cancelled: 'GitHub connection was cancelled.', expired: 'That installation link expired. Connect repositories again.', failed: 'Herbie could not verify the installation. Try connecting again.'}[installationNotice] ?? 'GitHub installation status updated.'}</div>}
         {mode === 'demo' && <p className="subtle-note">Demo mode: attempts and pull requests are simulated.</p>}
         {healthState === 'error' && <div className="status-message" role="alert">{startupError ?? 'Herbie could not connect.'}<button onClick={() => setStartupRefresh(value => value + 1)}>Retry</button></div>}
