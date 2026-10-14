@@ -139,6 +139,7 @@ input::placeholder, textarea::placeholder { color: #777; }
 .checkbox-label input { accent-color: #fff; }
 .repository-discovery { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; color: #888; font-size: 11px; }
 .repository-discovery button { flex-shrink: 0; padding: 5px 8px; font-size: 11px; }
+.repository-discovery .text-button { padding: 0; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 
 @media (max-width: 560px) {
