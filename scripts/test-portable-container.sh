@@ -9,16 +9,22 @@ cleanup() {
   docker network rm "$prefix" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-trap 'docker logs "$prefix-app" 2>&1 | tail -60' ERR
+trap 'for container in "$prefix-db" "$prefix-app"; do
+  if docker inspect "$container" >/dev/null 2>&1; then
+    printf "Logs for %s:\n" "$container"
+    docker logs --tail 60 "$container" 2>&1 || true
+  fi
+done' ERR
 docker network create "$prefix" >/dev/null
 docker run -d --name "$prefix-db" --network "$prefix" --network-alias postgres \
   -e POSTGRES_USER=fixture -e POSTGRES_PASSWORD=fixture -e POSTGRES_DB=fixture \
   postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24 >/dev/null
+# The temporary initialization server only listens on a Unix socket.
 for ((i=0;i<30;i++)); do
-  if docker exec "$prefix-db" pg_isready -U fixture >/dev/null 2>&1; then break; fi
+  if docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U fixture >/dev/null 2>&1; then break; fi
   sleep 1
 done
-docker exec "$prefix-db" pg_isready -U fixture >/dev/null
+docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U fixture >/dev/null
 docker run -d --name "$prefix-app" --network "$prefix" \
   --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
