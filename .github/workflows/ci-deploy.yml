@@ -11,6 +11,7 @@ permissions:
 jobs:
   verify:
     name: Verify
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -43,6 +44,7 @@ jobs:
 
   unit-verification:
     name: Unit and PostgreSQL integration tests
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -88,6 +90,7 @@ jobs:
 
   cli-verification:
     name: Compiled CLI end-to-end
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -133,6 +136,7 @@ jobs:
 
   browser-verification:
     name: Browser verification
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -184,6 +188,7 @@ jobs:
 
   container-verification:
     name: Portable container verification
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/portable-smoke.yml
 
   all-tests-passed:
@@ -194,7 +199,7 @@ jobs:
       - cli-verification
       - browser-verification
       - container-verification
-    if: ${{ always() }}
+    if: ${{ always() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -218,8 +223,7 @@ jobs:
           exit "$failed"
 
   publish-portable-image:
-    name: Publish verified main image
-    needs: all-tests-passed
+    name: Publish main image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read

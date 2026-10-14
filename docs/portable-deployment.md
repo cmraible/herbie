@@ -10,8 +10,8 @@ credential encryption key, database TLS verification, and explicit execution gat
 
 CI builds and smoke-tests every PR through the shared portable container workflow
 without publishing credentials.
-Every push to main runs the full CI suite. Only after all blocking checks pass,
-CI calls the portable workflow to build, smoke-test, and publish that exact commit.
+Every push to main immediately calls the portable workflow to build and publish
+that commit without rerunning tests or container smoke checks.
 Publication retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
 existing `homelab-image` environment restrictions. The job rejects a commit if
 main has advanced before publication.
@@ -24,7 +24,7 @@ for recovery, but cannot advance the automatic deployment channel.
 
 Successful CI publication also produces a deployment artifact in the same public
 GHCR package, tagged `0.0.<CI-run-number>`. This tag contains a Flux OCI artifact,
-not a runnable container. It carries only fixed resource identities, the tested
+not a runnable container. It carries only fixed resource identities, the published
 immutable image digest, and source revision. Its generated directory is explicit
 and contains no runtime configuration, hostname, namespace, secret references,
 or private files. Manual dispatches publish images but do not announce releases.
