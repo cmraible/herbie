@@ -155,7 +155,7 @@ export function createApiServer(options:ApiOptions){
             const check=await adapters.checkPublicationRetry({goal:job.goal,repository,attemptId:job.attemptId,branch:job.branch},job.artifact);
             if(check==='pull_request_exists')throw new HttpError(409,'A pull request already exists; reconciliation will check GitHub.');
             if(check==='branch_exists')throw new HttpError(409,'The exact attempt branch already exists; automatic retry was refused.');
-            if(check==='base_changed')throw new HttpError(409,'The repository history no longer contains the tested base; the saved artifact cannot be published without retesting.');
+            if(check==='base_changed')throw new HttpError(409,'The repository history no longer contains the original base; the saved artifact cannot be published without a new attempt.');
             json(response,200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
           }
           const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();

@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 
 const demoSession={mode:'demo',user:{id:'fixture-user',login:'sample-user'}};
 const goalId=randomUUID();
-const fixtureGoal={id:goalId,ownerId:'fixture-owner',repository:'demo/sample',prompt:'Keep loaded work visible',testCommand:['npm','test'],maxAttempts:1,attemptCount:1,state:'running',createdAt:'2026-10-13T00:00:00.000Z',updatedAt:'2026-10-13T00:00:00.000Z',mode:'demo',stopRequested:null,pullRequest:null,error:null};
+const fixtureGoal={id:goalId,ownerId:'fixture-owner',repository:'demo/sample',prompt:'Keep loaded work visible',maxAttempts:1,attemptCount:1,state:'running',createdAt:'2026-10-13T00:00:00.000Z',updatedAt:'2026-10-13T00:00:00.000Z',mode:'demo',stopRequested:null,pullRequest:null,error:null};
 const health={mode:'demo'};
 const json=(route:Parameters<Parameters<Page['route']>[1]>[0],body:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
 async function routeSignedIn(page:Page,goals:unknown[]=[fixtureGoal]){

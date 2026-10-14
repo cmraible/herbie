@@ -63,7 +63,7 @@ test('live publication stops after awaited GitHub preflight when its durable lea
   const store = new Store(new Pool({ connectionString, options: `-c search_path=${schema}` }));
   t.after(async () => { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
   await store.migrate();
-  await store.createGoal('owner', { repository: 'alice/project', prompt: 'Fix arithmetic', testCommand: ['node', '--test'], maxAttempts: 1 }, 'live', randomUUID());
+  await store.createGoal('owner', { repository: 'alice/project', prompt: 'Fix arithmetic', maxAttempts: 1 }, 'live', randomUUID());
   const job = await store.claim('publisher');
   assert.ok(job);
   const changes = { baseCommit: '0'.repeat(40), patch: Buffer.from('unused: ownership fails before local preparation') };

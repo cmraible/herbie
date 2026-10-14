@@ -44,18 +44,15 @@ test('a goal survives reload, pauses and resumes, then advances only to its atte
   await page.screenshot({path:'test-results/goal-completed.png',fullPage:true});
 });
 
-test('an invalid submission stays editable; a failed attempt has visible durable failure',async({page})=>{
+test('a goal needs no test command and a failed attempt has visible durable failure',async({page})=>{
   await login(page);await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill('Exercise the failure path');
-  await page.getByLabel('Test command').fill('npm test');
-  await page.getByRole('button',{name:'Start goal',exact:false}).click();
-  await expect(page.getByRole('alert')).toContainText('JSON array');
-  await page.getByLabel('Test command').fill('["npm","test"]');
+  await expect(page.getByLabel('Test command')).toHaveCount(0);
   await page.getByLabel('Simulate an attempt failure').check();
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(detail(page).getByText('Failed',{exact:true})).toBeVisible();
-  await expect(detail(page).getByRole('alert')).toContainText('simulated test failure');
+  await expect(detail(page).getByRole('alert')).toContainText('simulated attempt failure');
   await page.reload();
   await expect(detail(page).getByText('Failed',{exact:true})).toBeVisible();
   await expect(detail(page).getByRole('button',{name:'Simulate merge'})).not.toBeVisible();

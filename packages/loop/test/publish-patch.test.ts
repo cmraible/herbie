@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { mock, test, type TestContext } from 'node:test';
 import { runDaytonaAttempt } from '../src/daytona-attempt.js';
-import { PatchPublicationError, publishTestedPatch } from '../src/publish-patch.js';
+import { PatchPublicationError, publishPatch } from '../src/publish-patch.js';
 import { createArithmeticFixture, runArithmeticTests } from './fixtures/arithmetic.js';
 
 const git = async (cwd: string, ...args: string[]) => (await promisify(execFile)('git', args, { cwd, timeout: 30_000 })).stdout.trim();
@@ -36,23 +36,21 @@ async function fixture(t: TestContext, extraFiles = false) {
   const patch = await readFile(patchFile);
   const runtime = join(directory, 'runtime');
   await mkdir(runtime);
-  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'daytona-test-runner', 'artifact-limits', 'diagnostic-log']) {
+  for (const name of ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'diagnostic-log']) {
     await writeFile(join(runtime, `${name}.js`), '');
   }
   const changes = await runDaytonaAttempt(async () => ({
     id: 'fixture', delete: async () => {}, git: { clone: async () => {} },
     fs: {
       createFolder: async () => {}, uploadFile: async () => {},
-      downloadFileStream: async path => Readable.from([Buffer.from(JSON.stringify(path.endsWith('/changes.json')
-        ? { baseCommit, patchBase64: patch.toString('base64') }
-        : { exitCode: 0, stdout: '2 tests passed', stderr: '' }))]),
+      downloadFileStream: async () => Readable.from([Buffer.from(JSON.stringify({ baseCommit, patchBase64: patch.toString('base64') }))]),
     },
-    process: { executeCommand: async command => ({ exitCode: 0,
-      result: command.includes('daytona-test-runner') ? 'herbie-tests-completed\n' : 'herbie-attempt-completed\n',
+    process: { executeCommand: async () => ({ exitCode: 0,
+      result: 'herbie-attempt-completed\n',
     }) },
   }), {
     snapshot: 'fixture', domainAllowList: 'github.com', repoUrl: 'https://github.com/example/repo.git',
-    goal: 'Fix addition', testCommand: ['node', '--test', 'add.test.mjs'],
+    goal: 'Fix addition',
   }, () => {}, pathToFileURL(runtime + '/'));
 
   // All publisher Git traffic is redirected to this local bare fixture, never GitHub.
@@ -68,13 +66,13 @@ async function fixture(t: TestContext, extraFiles = false) {
     process.env[key] = value;
     t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
   }
-  const createPullRequest = mock.fn<Parameters<typeof publishTestedPatch>[0]>(async () => ({ url: 'https://github.com/example/repo/pull/1' }));
+  const createPullRequest = mock.fn<Parameters<typeof publishPatch>[0]>(async () => ({ url: 'https://github.com/example/repo/pull/1' }));
   const request = { repository: 'example/repo', baseBranch: 'main', branch: 'herbie/fix-addition', title: 'Fix addition', body: 'Tested arithmetic fix', changes };
-  const publish = () => publishTestedPatch(createPullRequest, request);
+  const publish = () => publishPatch(createPullRequest, request);
   return { directory, repo, remote, config, scratch, changes, request, createPullRequest, publish };
 }
 
-test('publishes a verified patch as one commit and one draft PR without changing the source checkout', async t => {
+test('publishes a completed patch without independent tests as one commit and one draft PR without changing the source checkout', async t => {
   const { repo, remote, scratch, changes, request, createPullRequest, publish } = await fixture(t);
   const before = await git(repo, 'status', '--porcelain');
   const result = await publish();
@@ -93,7 +91,7 @@ test('publishes a verified patch as one commit and one draft PR without changing
 test('accepts Git identity and authentication configuration only for this publication', async t => {
   const { request, remote, createPullRequest } = await fixture(t);
   const previousName = process.env.GIT_AUTHOR_NAME;
-  const result = await publishTestedPatch(createPullRequest, { ...request, gitEnvironment: {
+  const result = await publishPatch(createPullRequest, { ...request, gitEnvironment: {
     GIT_AUTHOR_NAME: 'Herbie App', GIT_AUTHOR_EMAIL: 'herbie@example.invalid',
     GIT_COMMITTER_NAME: 'Herbie App', GIT_COMMITTER_EMAIL: 'herbie@example.invalid',
   } });
@@ -101,13 +99,11 @@ test('accepts Git identity and authentication configuration only for this public
   assert.equal(process.env.GIT_AUTHOR_NAME, previousName);
 });
 
-for (const invalid of ['unverified', 'legacy verifier', 'untested', 'failed tests', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
+for (const invalid of ['unverified', 'missing evidence version', 'incomplete goal', 'unconfirmed cleanup', 'changed bytes', 'changed base', 'wrong repo', 'empty']) {
   test(`rejects ${invalid} evidence without publication`, async t => {
     const { changes, scratch, createPullRequest, publish } = await fixture(t);
-    if (invalid === 'legacy verifier') delete changes.verification!.version;
+    if (invalid === 'missing evidence version') delete changes.verification!.version;
     if (invalid === 'unverified') delete changes.verification;
-    if (invalid === 'untested') delete changes.testResult;
-    if (invalid === 'failed tests') changes.testResult!.exitCode = 1;
     if (invalid === 'incomplete goal') Object.assign(changes.verification!, { goalCompleted: false });
     if (invalid === 'unconfirmed cleanup') Object.assign(changes.verification!, { sandboxDeleted: false });
     if (invalid === 'changed bytes') changes.patch[0] ^= 1;
@@ -132,7 +128,7 @@ test('publishes the checked bytes even if the caller mutates its buffer while pu
 });
 
 for (const overlapping of [false, true]) {
-  test(`publishes the exact tested tree when main advances with ${overlapping ? 'overlapping' : 'unrelated'} changes`, async t => {
+  test(`publishes the exact captured tree when main advances with ${overlapping ? 'overlapping' : 'unrelated'} changes`, async t => {
     const { repo, remote, changes, request, createPullRequest } = await fixture(t);
     await git(repo, 'reset', '--hard', changes.baseCommit);
     await writeFile(join(repo, overlapping ? 'add.mjs' : 'README.md'), overlapping
@@ -142,7 +138,7 @@ for (const overlapping of [false, true]) {
     await git(repo, 'push', remote, 'HEAD:refs/heads/main');
     const advanced = await git(remote, 'rev-parse', 'main');
     assert.notEqual(advanced, changes.baseCommit);
-    const result = await publishTestedPatch(createPullRequest, request);
+    const result = await publishPatch(createPullRequest, request);
     assert.equal(await git(remote, 'rev-parse', `${result.commit}^`), changes.baseCommit);
     assert.equal(await git(remote, 'show', `${result.commit}:add.mjs`), 'export function add(a, b) {\n  return a + b;\n}');
     assert.equal(await git(remote, 'merge-base', 'main', result.commit), changes.baseCommit);
@@ -181,7 +177,7 @@ test('a push failure reports uncertain remote state without opening a PR or retr
   const { remote, scratch, request, createPullRequest, publish } = await fixture(t);
   const phases: string[] = [];
   await writeFile(join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\nexit 1\n', { mode: 0o700 });
-  await assert.rejects(publishTestedPatch(createPullRequest, { ...request, onPhase: async phase => { phases.push(phase); } }), error => {
+  await assert.rejects(publishPatch(createPullRequest, { ...request, onPhase: async phase => { phases.push(phase); } }), error => {
     assert.ok(error instanceof PatchPublicationError);
     assert.equal(error.publication.stage, 'pushing');
     assert.match(error.publication.commit!, /^[0-9a-f]{40}$/);
@@ -241,7 +237,7 @@ test('preserves binary/non-UTF-8 files and modes without executing checkout filt
 
 test('a lost publication lease after local Git preparation prevents the push and PR creation', async t => {
   const { remote, request, scratch, createPullRequest } = await fixture(t);
-  await assert.rejects(publishTestedPatch(createPullRequest, {
+  await assert.rejects(publishPatch(createPullRequest, {
     ...request,
     beforeWrite: async () => { throw new Error('Worker lease lost'); },
   }), error => {
@@ -258,7 +254,7 @@ test('a lost publication lease after local Git preparation prevents the push and
 test('a lease lost after push preserves the branch but prevents PR creation', async t => {
   const { remote, request, scratch, createPullRequest } = await fixture(t);
   let ownership = true;
-  await assert.rejects(publishTestedPatch(createPullRequest, {
+  await assert.rejects(publishPatch(createPullRequest, {
     ...request,
     beforeWrite: async () => {
       if (!ownership) throw new Error('Worker lease lost');

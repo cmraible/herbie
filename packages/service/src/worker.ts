@@ -72,7 +72,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
         const check=await adapters.checkPublicationRetry(execution,changes);
         await requireLease();
         if(check==='branch_exists'||check==='base_changed'){
-          await store.blockPublication(job.id,workerId,check==='branch_exists'?'the attempt branch exists without a confirmed pull request; it will not be overwritten':'repository history no longer contains the tested base');
+          await store.blockPublication(job.id,workerId,check==='branch_exists'?'the attempt branch exists without a confirmed pull request; it will not be overwritten':'repository history no longer contains the original base');
           return true;
         }
         if(check==='pull_request_exists'){

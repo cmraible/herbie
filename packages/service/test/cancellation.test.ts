@@ -14,7 +14,7 @@ async function fixture(t:TestContext){
   const admin=new pg.Pool({connectionString});await admin.query('CREATE SCHEMA '+schema);
   const store=new Store(new pg.Pool({connectionString,options:'-c search_path='+schema}));await store.migrate();
   t.after(async()=>{await store.close();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();});
-  const {goal}=await store.createGoal('owner',{repository:'demo/example',prompt:'Synthetic fixture',testCommand:['true'],maxAttempts:2},'demo',randomUUID());
+  const {goal}=await store.createGoal('owner',{repository:'demo/example',prompt:'Synthetic fixture',maxAttempts:2},'demo',randomUUID());
   return {store,goal};
 }
 const changes={baseCommit:'a'.repeat(40),patch:Buffer.from('retained fixture')};

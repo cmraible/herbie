@@ -19,7 +19,7 @@ async function database(t: TestContext): Promise<Store | null> {
   await store.migrate();
   return store;
 }
-const request = { repository: 'demo/example', prompt: 'Fix arithmetic', testCommand: ['node', '--test'], maxAttempts: 1 };
+const request = { repository: 'demo/example', prompt: 'Fix arithmetic', maxAttempts: 1 };
 const artifact = { baseCommit: '0'.repeat(40), patch: Buffer.from('DEMO recovered artifact') };
 
 test('worker survives losing its attempt lease without publishing or repeating paid work', async t => {
