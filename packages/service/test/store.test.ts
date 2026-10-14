@@ -30,11 +30,23 @@ integration('migration preserves old goals and artifacts while new goals need no
   const id = randomUUID();
   await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
     VALUES($1,'owner','example/repo','Legacy goal','["npm","test"]',1,'live','queued')`, [id]);
+  const key = randomUUID();
+  const legacyRequest = {repository:'example/repo',prompt:'Legacy goal',testCommand:['npm','test'],maxAttempts:1};
+  const fingerprint = createHash('sha256').update(JSON.stringify({...legacyRequest,mode:'live'})).digest('hex');
+  await store.pool.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', ['owner',key,fingerprint,id]);
   await store.migrate();
   await store.migrate();
   const oldGoal = await store.getGoal(id);
   assert.equal(oldGoal?.prompt, 'Legacy goal');
   assert.ok(!('testCommand' in oldGoal!));
+  const request = {repository:'EXAMPLE/REPO',prompt:'Legacy goal',maxAttempts:1};
+  const replay = await store.createGoal('owner',request,'live',key);
+  assert.equal(replay.created,false);
+  assert.equal(replay.goal.id,id);
+  for (const change of [{prompt:'Different goal'},{repository:'example/other'},{maxAttempts:2}]) {
+    await assert.rejects(store.createGoal('owner',{...request,...change},'live',key), /different request/);
+  }
+  await assert.rejects(store.createGoal('owner',request,'demo',key), /different request/);
   assert.ok((await store.createGoal('owner',input(),'live',randomUUID())).created);
   assert.deepEqual((await store.pool.query('SELECT test_command FROM goals WHERE id=$1',[id])).rows[0].test_command,['npm','test']);
 
@@ -49,6 +61,16 @@ integration('migration preserves old goals and artifacts while new goals need no
   assert.ok(candidate && 'job' in candidate && candidate.job.artifact);
   assert.deepEqual(candidate.job.artifact,{baseCommit,patch,verification:evidence});
   assert.ok(hasValidPublicationEvidence('example/repo',candidate.job.artifact));
+});
+
+for (const paused of [false,true]) integration(`saved artifact activity describes capture without claiming tests passed (paused: ${paused})`, async () => {
+  const {goal} = await store.createGoal('owner',input(),'live',randomUUID());
+  const job = await store.claim('worker');
+  assert.ok(job);
+  if (paused) await store.control(goal.id,'owner','pause');
+  await store.saveArtifact(job.id,'worker',{baseCommit:'a'.repeat(40),patch:Buffer.from('captured patch')});
+  const events = await store.events(goal.id);
+  assert.equal(events.at(-1)?.message,paused ? 'Captured artifact held while paused' : 'Captured artifact saved durably');
 });
 
 integration('goals survive a new store and creation replay is scoped to owner and exact payload', async () => {

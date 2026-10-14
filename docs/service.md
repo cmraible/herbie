@@ -47,7 +47,7 @@ it cannot undo an external call already in flight.
 - Publication intent and its unique branch are durable before external writes.
   Following a lost response or crash, the worker looks up the existing PR first.
   A found PR is adopted once. If no PR or attempt branch exists, the worker checks
-  saved verification/cleanup evidence, current owner authorization, and tested-base
+  saved verification/cleanup evidence, current owner authorization, and original-base
   ancestry before retrying publication of the same artifact. It never reruns the
   model or increments the paid attempt count for publication recovery.
 - Publication failures persist a retry counter and deadline in PostgreSQL. Equal
@@ -93,7 +93,9 @@ evidence, without claiming tests passed. Saved version 2 artifacts remain usable
 artifacts without supported evidence remain ineligible for publication. The old
 `test_command` database column is retained as nullable for existing rows, but new
 goals no longer use it. The API field `testCommand` and CLI option `--test` have
-been removed. Already-published PRs reconcile normally.
+been removed. Retries of pre-upgrade requests compare the saved goal using the
+current input fields, preserving the original request ID. Already-published PRs
+reconcile normally.
 
 ## Live setup (operator approval required)
 

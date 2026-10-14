@@ -34,6 +34,9 @@ export class StoreError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'StoreError'; }
 }
 const conflict = (message: string) => new StoreError(409, message);
+function requestFingerprint({repository,prompt,maxAttempts}:GoalInput, mode:Goal['mode']):string {
+  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,maxAttempts,mode})).digest('hex');
+}
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
   const artifact = encoded ? { baseCommit: encoded.baseCommit, patch: Buffer.from(encoded.patchBase64, 'base64'), ...(encoded.verification ? { verification: encoded.verification } : {}) } : null;
@@ -82,15 +85,17 @@ export class Store {
   async createGoal(ownerId: string, input: GoalInput, mode: 'demo' | 'live', key: string): Promise<{ goal: Goal; created: boolean }> {
     const request = goalInput.parse(input);
     z.string().uuid().parse(key);
-    const fingerprint = createHash('sha256').update(JSON.stringify({ ...request, repository: request.repository.toLowerCase(), mode })).digest('hex');
+    const fingerprint = requestFingerprint(request,mode);
     return this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`request:${ownerId}:${key}`]);
       const existing = await client.query<Record<string, unknown>>('SELECT fingerprint,goal_id FROM goal_requests WHERE owner_id=$1 AND request_key=$2', [ownerId, key]);
       if (existing.rows[0]) {
         const previous = z.object({ fingerprint: z.string(), goal_id: z.string().uuid() }).parse(existing.rows[0]);
-        if (previous.fingerprint !== fingerprint) throw conflict('Idempotency key was already used for a different request');
         const goal = await goalFrom(client, previous.goal_id);
         if (!goal) throw new Error('Missing idempotent goal');
+        // Pre-upgrade fingerprints included testCommand. Compare the immutable
+        // goal input in the current shape so interrupted requests still replay.
+        if (previous.fingerprint !== fingerprint && requestFingerprint(goal,goal.mode) !== fingerprint) throw conflict('Idempotency key was already used for a different request');
         return { goal, created: false };
       }
       const id = randomUUID();
@@ -238,7 +243,7 @@ export class Store {
       const paused = goal.stopRequested === 'pause';
       await client.query('UPDATE jobs SET stage=$2,artifact=$3,lease_owner=CASE WHEN $4 THEN NULL ELSE lease_owner END,lease_expires_at=CASE WHEN $4 THEN NULL ELSE lease_expires_at END WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'ready', cancelled ? null : JSON.stringify(artifact), cancelled || paused]);
       await client.query('UPDATE goals SET state=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1', [goal.id, cancelled ? 'cancelled' : paused ? 'paused' : 'running']);
-      await addEvent(client, goal.id, cancelled ? 'cancelled' : paused ? 'paused' : 'artifact_ready', cancelled ? 'Completed attempt discarded after cancellation' : paused ? 'Tested artifact held while paused' : 'Tested artifact saved durably');
+      await addEvent(client, goal.id, cancelled ? 'cancelled' : paused ? 'paused' : 'artifact_ready', cancelled ? 'Completed attempt discarded after cancellation' : paused ? 'Captured artifact held while paused' : 'Captured artifact saved durably');
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing artifact goal');
       return decodeJob(await loadJob(client, jobId), updated);
