@@ -57,6 +57,8 @@ export function createApiServer(options:ApiOptions){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
       if(request.headers.origin!==origin)throw new HttpError(403,'Request origin is not allowed');
     }
+    // Process liveness must not restart healthy workers during a database outage.
+    if(method==='GET'&&url.pathname==='/api/live'){json(response,200,{alive:true});return;}
     if(method==='GET'&&url.pathname==='/api/health'){
       try{await store.pool.query('SELECT 1');}
       catch(error){const errorId=logFailure(error,{component:'health-database'});json(response,503,{error:'Database unavailable',errorId});return;}
@@ -157,10 +159,7 @@ export function createApiServer(options:ApiOptions){
             json(response,200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
           }
           const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();
-          json(response,200,await store.control(id,userId,action,action==='cancel'&&adapters.mode==='live'&&adapters.checkUnpublished?async job=>{
-            const repository=await adapters.reconciliationRepository(job.goal.repository);
-            return adapters.checkUnpublished!({goal:job.goal,repository,attemptId:job.attemptId,branch:job.branch});
-          }:undefined));return;
+          json(response,200,await store.control(id,userId,action));return;
         }
       }
       const demoPath=url.pathname.match(/^\/api\/demo\/goals\/([^/]+)\/(merge|close)$/);

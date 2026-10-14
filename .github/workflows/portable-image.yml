@@ -1,0 +1,66 @@
+name: Portable image
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified main image to GHCR
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Portable container smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Build and exercise the standalone container with an isolated database
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          docker build --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
+          bash scripts/test-portable-container.sh herbie:smoke "$REVISION"
+  publish:
+    name: Publish GHCR image
+    needs: verify
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish &&
+      github.ref == 'refs/heads/main' && vars.HERBIE_IMAGE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: homelab-image
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: herbie-image-publish
+      cancel-in-progress: false
+    env:
+      REPOSITORY: ${{ github.repository }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+      REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Build and verify the exact image before obtaining registry credentials
+        run: |
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:publish .
+          bash scripts/test-portable-container.sh herbie:publish "$REVISION"
+      - name: Push revision tag and record immutable digest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        run: |
+          IMAGE_REPOSITORY="ghcr.io/${REPOSITORY,,}"
+          registry=ghcr.io
+          trap 'docker logout "$registry" >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin "$registry"
+          docker tag herbie:publish "$IMAGE_REPOSITORY:$REVISION"
+          docker push "$IMAGE_REPOSITORY:$REVISION"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REPOSITORY:$REVISION")"
+          printf 'Revision: `%s`\n\nImmutable image: `%s`\n' "$REVISION" "$digest" >> "$GITHUB_STEP_SUMMARY"

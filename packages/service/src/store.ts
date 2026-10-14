@@ -10,7 +10,7 @@ import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
 const goalColumns = `id, owner_id AS "ownerId", repository, prompt, test_command AS "testCommand",
   max_attempts AS "maxAttempts", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
-  pull_request AS "pullRequest", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  pull_request AS "pullRequest", cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
 const artifactSchema = z.object({
   baseCommit: z.string(), patchBase64: z.string(),
@@ -127,77 +127,70 @@ export class Store {
     const result = await this.pool.query<Record<string, unknown>>('SELECT id::text,goal_id AS "goalId",type,message,created_at AS "createdAt" FROM goal_events WHERE goal_id=$1 AND id>$2 ORDER BY goal_events.id LIMIT 1000', [goalId, after]);
     return result.rows.map(row => eventSchema.extend({ id: z.string().transform(Number), createdAt: z.date().transform(d => d.toISOString()) }).parse(row));
   }
-  async control(id: string, ownerId: string, action: GoalAction, checkUnpublished?: (job: Job) => Promise<'absent'|'pull_request_exists'|'branch_exists'>): Promise<Goal> {
+  async control(id: string, ownerId: string, action: GoalAction): Promise<Goal> {
     return this.transaction(async client => {
       const goal = await goalFrom(client, id, true);
       if (!goal || goal.ownerId !== ownerId) throw new StoreError(404, 'Goal not found');
+      if (action === 'cancel') {
+        // Cancellation is a local durable decision, never dependent on GitHub or
+        // remote cleanup. Revoking every lease fences callbacks and future claims.
+        if (['cancelled','completed','failed'].includes(goal.state)) return goal;
+        const jobs = await client.query<{stage:string;lease_valid:boolean}>(
+          'SELECT stage,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 FOR UPDATE',[id]);
+        const uncertain = jobs.rows.some(j=>['publishing','awaiting_review','needs_attention'].includes(j.stage)||j.stage==='running'&&!j.lease_valid);
+        const active = jobs.rows.some(j=>j.stage==='running'&&j.lease_valid);
+        const cleanup = uncertain ? 'needs_attention' : active ? 'pending' : 'not_required';
+        await client.query("UPDATE jobs SET cancelled_worker=lease_owner,cancel_cleanup_deadline=clock_timestamp()+interval '5 minutes',stage='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE goal_id=$1 AND stage NOT IN ('completed','cancelled','failed')",[id]);
+        await client.query("UPDATE goals SET state='cancelled',stop_requested=NULL,cleanup_status=$2,updated_at=clock_timestamp() WHERE id=$1",[id,cleanup]);
+        await addEvent(client,id,'cancel','Goal cancelled. No further attempts or publication retries will start. Saved work and audit history retained.');
+        if(cleanup!=='not_required')await addEvent(client,id,'cleanup_required',cleanup==='pending'
+          ? 'Stopping the active sandbox. Cleanup confirmation is pending.'
+          : 'Remote work may remain. Cleanup requires attention; cancellation remains in effect.');
+        return (await goalFrom(client,id))!;
+      }
       const result = await client.query<Record<string, unknown>>('SELECT *, (lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 ORDER BY cycle DESC LIMIT 1 FOR UPDATE', [id]);
       const job = jobRow.parse(result.rows[0]);
-      if (job.stage === 'publishing') {
-        // Expiration alone cannot prove an interrupted publisher has stopped. Require
-        // a completed, released read-only reconciliation before checking remote state.
-        const reconciledAbsent='Publication remains unconfirmed during preflight_reconciliation (pull_request_not_found); reconciliation will check GitHub.';
-        if(action!=='cancel'||!checkUnpublished||goal.mode!=='live'||goal.state!=='needs_attention'
-          ||goal.error!==reconciledAbsent||job.lease_owner!==null||job.lease_expires_at!==null||goal.pullRequest)
-          throw conflict('Wait for publication reconciliation before changing this goal');
-        // Remote requests can outlive a lost lease or client timeout. Absence now
-        // is insufficient: every original publication must have released its lease
-        // after a positively identified pre-write failure, never crash recovery.
-        const history=await client.query<{type:string;message:string}>(
-          "SELECT type,message FROM goal_events WHERE goal_id=$1 AND created_at >= (SELECT created_at FROM jobs WHERE id=$2) ORDER BY id",[id,job.id]);
-        let publicationPending=false,knownPrewriteFailure=false;
-        for(const event of history.rows){
-          if(event.type==='publication_phase'&&['Publication phase: branch_push','Publication phase: pull_request_creation','Publication phase: publication_confirmation','Publication phase: state_persistence'].includes(event.message))
-            throw conflict('Publication may have issued remote writes; cancellation was refused');
-          if(event.type==='recovery_required')throw conflict('Interrupted work requires operator reconciliation before cancellation');
-          if(event.type==='publishing'){
-            if(publicationPending)throw conflict('Publication history is incomplete');
-            publicationPending=true;knownPrewriteFailure=false;
-          }
-          if(event.type==='publication_uncertain'&&publicationPending){
-            knownPrewriteFailure=/^Publication remains unconfirmed during (preflight_reconciliation|authorization|installation_token|existing_pr_check|git_preparation) \((github_unauthorized|github_forbidden|github_not_found|github_unavailable|git_preparation_failed|timeout|network_failure|database_failure|unexpected)\); reconciliation will check GitHub\.$/.test(event.message);
-            if(!knownPrewriteFailure)throw conflict('An earlier publication may have issued remote writes; cancellation was refused');
-            publicationPending=false;
-          }
-        }
-        if(publicationPending||!knownPrewriteFailure)throw conflict('No confirmed pre-write publication failure was recorded');
-        const decoded=decodeJob(job,goal);
-        if(!decoded.artifact||!hasValidPublicationEvidence(goal.repository,decoded.artifact))
-          throw conflict('The saved publication evidence is incomplete');
-        // Keep both row locks across these read-only calls: claim, retry, heartbeat,
-        // and reconciliation must not change this publication while it is checked.
-        const remote=await checkUnpublished(decoded);
-        if(remote!=='absent')throw conflict('A pull request or attempt branch exists; cancellation was refused');
-        await client.query("UPDATE jobs SET stage='cancelled' WHERE id=$1",[job.id]);
-        await client.query("UPDATE goals SET state='cancelled',stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",[id]);
-        await addEvent(client,id,'cancel','Cancelled after confirming the exact attempt PR and branch are absent; saved artifact retained');
-        const updated=await goalFrom(client,id);
-        if(!updated)throw new Error('Missing cancelled goal');
-        return updated;
-      }
-      if (action === 'cancel' && goal.state === 'cancelled' || action === 'pause' && (goal.state === 'paused' || goal.stopRequested === 'pause') || action === 'resume' && ['queued','running','awaiting_review'].includes(goal.state) && !goal.stopRequested) return goal;
-      if (['completed','cancelled','failed','needs_attention'].includes(goal.state) && action !== 'cancel') throw conflict(`Cannot ${action} a ${goal.state} goal`);
-      if (action === 'cancel' && ['completed','failed'].includes(goal.state)) throw conflict(`Cannot cancel a ${goal.state} goal`);
+      if(job.stage==='publishing')throw conflict('Wait for publication reconciliation before pausing or resuming this goal');
+      if (action === 'pause' && (goal.state === 'paused' || goal.stopRequested === 'pause') || action === 'resume' && ['queued','running','awaiting_review'].includes(goal.state) && !goal.stopRequested) return goal;
+      if (['completed','cancelled','failed','needs_attention'].includes(goal.state)) throw conflict(`Cannot ${action} a ${goal.state} goal`);
       if (action === 'resume') {
         if (goal.state !== 'paused' && goal.stopRequested !== 'pause') throw conflict('Goal is not paused');
         const state = job.stage === 'awaiting_review' ? 'awaiting_review' : job.stage === 'running' ? 'running' : 'queued';
         await client.query('UPDATE goals SET state=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1', [id, state]);
       } else if (job.stage === 'running') {
-        if (goal.stopRequested === 'cancel' && action === 'pause') throw conflict('Cancellation is already requested');
-        if (goal.stopRequested === action) return goal;
         await client.query('UPDATE goals SET stop_requested=$2,updated_at=clock_timestamp() WHERE id=$1', [id, action]);
       } else {
-        const state = action === 'pause' ? 'paused' : 'cancelled';
-        await client.query('UPDATE goals SET state=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1', [id, state]);
-        if (action === 'cancel') await client.query("UPDATE jobs SET stage='cancelled',artifact=NULL,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [job.id]);
-        else await client.query('UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [job.id]);
+        await client.query("UPDATE goals SET state='paused',stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1", [id]);
+        await client.query('UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [job.id]);
       }
-      await addEvent(client, id, action, `${action === 'resume' ? 'Resume' : action === 'pause' ? 'Pause' : 'Cancel'} requested`);
-      const updated = await goalFrom(client, id);
-      if (!updated) throw new Error('Missing controlled goal');
-      return updated;
+      await addEvent(client, id, action, `${action === 'resume' ? 'Resume' : 'Pause'} requested`);
+      return (await goalFrom(client,id))!;
     });
   }
+  // A fenced worker may report cleanup/evidence, but never revive the job or goal.
+  async finishCancelled(jobId:string,workerId:string,cleanup:'complete'|'needs_attention',changes?:DaytonaAttemptChanges,pullRequest?:Omit<PullRequest,'state'>):Promise<boolean>{
+    return this.transaction(async client=>{
+      const {row,goal}=await lockJob(client,jobId);
+      if(goal.state!=='cancelled'||row.stage!=='cancelled')return false;
+      const owner=await client.query('SELECT 1 FROM jobs WHERE id=$1 AND cancelled_worker=$2',[jobId,workerId]);
+      if(!owner.rowCount)return false;
+      if(changes){
+        const artifact=artifactSchema.parse({...changes,patchBase64:changes.patch.toString('base64')});
+        await client.query('UPDATE jobs SET artifact=COALESCE(artifact,$2) WHERE id=$1',[jobId,JSON.stringify(artifact)]);
+      }
+      if(pullRequest&&pullRequest.branch===row.branch){
+        const pr=goalSchema.shape.pullRequest.unwrap().parse({...pullRequest,state:'open'});
+        await client.query('UPDATE goals SET pull_request=$2 WHERE id=$1',[goal.id,JSON.stringify(pr)]);
+      }
+      // An uncertain publication cannot become clean merely because its caller returned.
+      const status=goal.cleanupStatus==='needs_attention'?'needs_attention':cleanup;
+      await client.query('UPDATE goals SET cleanup_status=$2,updated_at=clock_timestamp() WHERE id=$1',[goal.id,status]);
+      await client.query('UPDATE jobs SET cancelled_worker=NULL WHERE id=$1',[jobId]);
+      await addEvent(client,goal.id,'cancellation_cleanup',status==='complete'?'Sandbox deletion confirmed after cancellation. Saved work retained.':'Cancellation remains in effect. Remote cleanup or publication outcome requires attention.');
+      return true;
+    });
+  }
+
   async claim(workerId: string, leaseMs = 30_000, mode?: 'demo' | 'live'): Promise<Job | null> {
     z.number().int().positive().max(3_600_000).parse(leaseMs);
     return this.transaction(async client => {
@@ -312,6 +305,13 @@ export class Store {
   }
   async recoverExpired(): Promise<number> {
     return this.transaction(async client => {
+      const abandoned = await client.query<{id:string}>(`SELECT g.id FROM goals g JOIN jobs j ON j.goal_id=g.id
+        WHERE g.state='cancelled' AND g.cleanup_status='pending' AND j.cancel_cleanup_deadline<=clock_timestamp()
+        FOR UPDATE OF g,j SKIP LOCKED`);
+      for(const {id} of abandoned.rows){
+        await client.query("UPDATE goals SET cleanup_status='needs_attention',updated_at=clock_timestamp() WHERE id=$1",[id]);
+        await addEvent(client,id,'cleanup_required','Cleanup confirmation timed out. Goal remains cancelled; inspect remote resources.');
+      }
       const result = await client.query<Record<string, unknown>>(`SELECT j.id FROM jobs j JOIN goals g ON g.id=j.goal_id
         WHERE j.lease_expires_at<=clock_timestamp() AND j.stage IN ('running','ready','publishing')
         FOR UPDATE OF g,j SKIP LOCKED`);

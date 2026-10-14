@@ -67,7 +67,6 @@ integration('one worker claims work and a paused artifact resumes without repeat
   assert.equal(resumed.goal.attemptCount, 1);
   assert.deepEqual(resumed.artifact, changes);
   assert.equal(await store.beginPublication(resumed.id, 'another-worker'), true);
-  await assert.rejects(store.control(goal.id, owner, 'cancel'), /publication/);
   const published = await store.completePublication(resumed.id, 'another-worker', { url: 'https://github.com/example/repo/pull/1', number: 1, branch: resumed.branch });
   assert.equal(published.state, 'awaiting_review');
 });
@@ -176,17 +175,19 @@ integration('same-repository goals execute independently and keep multiple pull 
   assert.equal((await store.getGoal(second.id))?.state, 'awaiting_review');
 });
 
-integration('repeated cancellation is safe and discards an in-flight artifact before publication', async () => {
+integration('repeated cancellation fences an in-flight worker and retains its artifact separately', async () => {
   const owner = randomUUID();
   const { goal } = await store.createGoal(owner, input(), 'demo', randomUUID());
   const job = await store.claim('worker');
   assert.ok(job);
   await store.control(goal.id, owner, 'cancel');
   await store.control(goal.id, owner, 'cancel');
-  await assert.rejects(store.control(goal.id, owner, 'resume'), /paused/);
-  const finished = await store.saveArtifact(job.id, 'worker', { baseCommit: 'abc', patch: Buffer.from('discard me') });
-  assert.equal(finished.goal.state, 'cancelled');
-  assert.equal(finished.artifact, null);
+  await assert.rejects(store.control(goal.id, owner, 'resume'), /cancelled/);
+  const changes={baseCommit:'abc',patch:Buffer.from('retain me')};
+  await assert.rejects(store.saveArtifact(job.id,'worker',changes),/lease/);
+  assert.equal(await store.finishCancelled(job.id,'worker','complete',changes),true);
+  assert.equal((await store.getGoal(goal.id))?.cleanupStatus,'complete');
+  assert.ok((await store.pool.query('SELECT artifact FROM jobs WHERE id=$1',[job.id])).rows[0].artifact);
   assert.equal(await store.beginPublication(job.id, 'worker'), false);
   await store.control(goal.id, owner, 'cancel');
   assert.equal(await store.claim('worker'), null);
