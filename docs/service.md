@@ -8,7 +8,7 @@ never a checkout, and never runs generated code or repository hooks.
 
 ## Behavior and recovery
 
-One active goal per repository is enforced globally by a database unique index.
+Multiple active goals may target the same repository.
 Each goal allows 1–5 attempts. An attempt that creates a PR waits for review;
 merging it queues the next attempt up to the limit. Closing it without merging
 stops the goal. The final merge completes the goal. The service does not infer

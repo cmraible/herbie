@@ -61,16 +61,14 @@ test('an invalid submission stays editable; a failed attempt has visible durable
   await expect(detail(page).getByRole('button',{name:'Simulate merge'})).not.toBeVisible();
 });
 
-test('one active goal blocks another; cancel and close stop work visibly',async({page})=>{
+test('multiple active goals coexist; cancel and close stop work visibly',async({page})=>{
   await login(page);await start(page,'Review the cancellation behavior');
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'+ New goal'}).click();
   await page.getByLabel('What should Herbie work on?').fill('A second concurrent goal');
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
-  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/active goal/i);
-  await page.getByRole('button',{name:'Start goal',exact:false}).click();
-  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/active goal/i);
-  await page.getByRole('button',{name:'Close new goal'}).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(detail(page).getByRole('heading',{name:'A second concurrent goal'})).toBeVisible();
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
   await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
   await page.reload();

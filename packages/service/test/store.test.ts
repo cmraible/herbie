@@ -38,7 +38,9 @@ integration('goals survive a new store and creation replay is scoped to owner an
   assert.equal(replay.created, false);
   assert.equal(replay.goal.id, first.goal.id);
   await assert.rejects(store.createGoal(owner, { ...request, prompt: 'different' }, 'demo', key), /different request/);
-  await assert.rejects(store.createGoal('another-owner', request, 'demo', key), /active goal/);
+  const concurrent = await store.createGoal('another-owner', request, 'demo', key);
+  assert.equal(concurrent.created, true);
+  assert.notEqual(concurrent.goal.id, first.goal.id);
   assert.equal((await store.events(first.goal.id)).length, 1);
 });
 
@@ -133,7 +135,7 @@ integration('merge advances once within the attempt budget and close unmerged st
   assert.equal(await store.claim('worker'), null);
 });
 
-integration('concurrent replay creates one goal and competing repository requests have one winner', async () => {
+integration('concurrent replay creates one goal and distinct requests share a repository', async () => {
   const owner = randomUUID();
   const request = input();
   const key = randomUUID();
@@ -144,12 +146,12 @@ integration('concurrent replay creates one goal and competing repository request
   assert.ok(first);
   assert.equal((await store.events(first.goal.id)).length, 1);
   const repository = input().repository;
-  const competing = await Promise.allSettled([
+  const competing = await Promise.all([
     store.createGoal('owner-a', { ...input(), repository }, 'demo', randomUUID()),
     store.createGoal('owner-b', { ...input(), repository: repository.toUpperCase() }, 'demo', randomUUID()),
   ]);
-  assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(competing.filter(result => result.status === 'rejected').length, 1);
+  assert.ok(competing.every(result => result.created));
+  assert.equal(new Set(competing.map(result => result.goal.id)).size, 2);
 });
 
 integration('repeated cancellation is safe and discards an in-flight artifact before publication', async () => {

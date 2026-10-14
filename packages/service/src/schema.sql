@@ -14,8 +14,7 @@ CREATE TABLE IF NOT EXISTS goals (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS goals_one_active_repository ON goals (lower(repository))
-  WHERE state IN ('queued','running','paused','awaiting_review','needs_attention');
+DROP INDEX IF EXISTS goals_one_active_repository;
 CREATE TABLE IF NOT EXISTS goal_requests (
   owner_id text NOT NULL,
   request_key uuid NOT NULL,
