@@ -31,7 +31,7 @@ jobs:
       - name: Build and exercise the standalone container with an isolated database
         run: |
           tree="$(git rev-parse HEAD^{tree})"
-          docker build --platform linux/amd64 --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --label "io.herbie.source-tree=$tree" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
+          docker build --platform linux/amd64 --provenance=false --label "org.opencontainers.image.source=$REPOSITORY_URL" --label "org.opencontainers.image.revision=$REVISION" --label "io.herbie.source-tree=$tree" --build-arg HERBIE_RUNTIME_REVISION="$REVISION" -t herbie:smoke .
           bash scripts/test-portable-container.sh herbie:smoke "$REVISION"
       - name: Upload the tested PR image
         if: inputs.publish && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

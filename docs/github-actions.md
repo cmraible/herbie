@@ -39,8 +39,9 @@ requires `HERBIE_IMAGE_PUBLISH_ENABLED=true` and the `homelab-image` environment
 Both PR upload and main promotion use the short-lived GitHub token with
 `packages: write`; other PR checks have read-only access.
 
-A missing or mismatched candidate fails promotion. Keep PRs current with main and
-wait for **All tests passed** before merging. If another merge changes the resulting
+A missing or mismatched candidate fails promotion. The default-branch ruleset
+requires PRs to be current with main and **All tests passed** before merging.
+If another merge changes the resulting
 tree, update the PR and rerun its checks before merging. Direct pushes and fork PRs
 need a matching image built on a same-repository PR; there is no fallback build.
 
