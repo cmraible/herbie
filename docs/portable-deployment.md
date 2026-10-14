@@ -9,34 +9,32 @@ credential encryption key, database TLS verification, and explicit execution gat
 ## Image delivery
 
 `Portable image` builds and smoke-tests every PR without publishing credentials.
-It publishes only through an explicit main-branch `workflow_dispatch` with
-`publish=true` and repository variable `HERBIE_IMAGE_PUBLISH_ENABLED=true`.
+Every push to main runs the full CI suite. Only after all blocking checks pass,
+CI calls the portable workflow to build, smoke-test, and publish that exact commit.
+Publication retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
+existing `homelab-image` environment restrictions. The job rejects a commit if
+main has advanced before publication. Cloudflare deployment remains disabled.
+
 The image name is `ghcr.io/<repository-owner>/<repository-name>`, lowercased from
-GitHub repository context. Only the publication job has `packages: write`; its
-login step uses the automatic `GITHUB_TOKEN` after building and testing. No personal
-token, GCP identity, registry secret, or Kubernetes pull secret is needed.
+GitHub repository context. Only publication has `packages: write`, using the
+short-lived `GITHUB_TOKEN`; no infrastructure credential enters the public repo.
+A manual main-branch dispatch with `publish=true` still publishes a source-SHA tag
+for recovery, but cannot advance the automatic deployment channel.
 
-Keep the `homelab-image` environment's intended approval/main-branch restrictions.
-If a package with this name already exists, verify this repository has Actions
-write access to it. The source/revision OCI labels link the image to its public
-source. Image publication does not apply infrastructure. The Cloudflare deployment job
-is explicitly paused during migration, so merging cannot redeploy the old
-coordinator. The existing service continues running until the coordinated drain.
-Re-enabling Cloudflare deployments requires a reviewed workflow change after
-confirming the k3s coordinator is stopped.
+Successful CI publication also produces `main-<CI-run-number>-<source-SHA>`.
+The private infrastructure repository's Flux image policy selects the highest
+numeric CI sequence, reflects its digest, and commits both the immutable image
+reference and matching deployment tag. An older run finishing late cannot replace
+a newer selected release. Infrastructure commits do not trigger application CI,
+so this path has no commit loop. Public GHCR visibility permits anonymous image
+pulls; publishing does not change package visibility or registry permissions.
 
-**Public visibility is a separate operator step.** GHCR packages are private when
-first published, even from a public repository. After the separately approved
-first publication, set the package to public in GitHub Packages and verify an
-anonymous pull using a clean Docker configuration. This workflow does not change
-visibility. Do not enable Flux until that anonymous digest pull succeeds. See
-[GitHub's container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-Publishing records the source SHA and complete immutable image digest reference.
-Pin that digest in the private infrastructure repository; a source-SHA tag alone
-is not immutable. Set `HERBIE_DEPLOYMENT_ID` to the matching source SHA, never
-override baked `HERBIE_IMAGE_REVISION`, and compare both readiness fields after
-rollout. Retain approved digests for rollback.
+`HERBIE_DEPLOYMENT_ID` identifies the selected deployment tag while the baked
+`HERBIE_IMAGE_REVISION` remains the exact source SHA. Verify the running digest,
+source SHA, Flux readiness, and public health after rollout. To roll back, suspend
+the private image automation first, then restore an approved digest and deployment
+ID together; otherwise the policy will select the newer release again. Do not
+reset the CI run-number ordering or delete channel tags as part of a rollback.
 
 The Docker context is an allowlist of public source/manifests, excluding local
 .env files, Git metadata, deployment configuration, tests, and credentials. The
