@@ -82,6 +82,13 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     try{return branchSchema.parse(await request(`/repos/${repository}/branches/${encodeURIComponent(branch)}`,token)).commit.sha;}
     catch(error){if(error instanceof GithubError&&error.status===404)return null;throw error;}
   }
+  async function isAncestor(token:string,repository:string,ancestor:string,descendant:string):Promise<boolean>{
+    try {
+      const comparison=z.object({merge_base_commit:z.object({sha:z.string()})}).parse(
+        await request(`/repos/${repository}/compare/${encodeURIComponent(ancestor)}...${encodeURIComponent(descendant)}?per_page=1`,token));
+      return comparison.merge_base_commit.sha===ancestor;
+    } catch(error) {if(error instanceof GithubError&&error.status===404)return false;throw error;}
+  }
   async function installationToken(installationId:number, repository:string,permission:'read'|'write'='write') {
     if (!Number.isSafeInteger(installationId) || installationId<1 || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository installation');
     // Installation tokens can be stateless ghs_APPID_JWT values (base64url + dots).
@@ -91,7 +98,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: {api:string;o
     return value.token;
   }
   return {
-    repositories, authorize, findPullRequest, branchCommit, installationToken,
+    repositories, authorize, findPullRequest, branchCommit, isAncestor, installationToken,
     async installationUrl(state:string) {
       if(!/^[A-Za-z0-9_-]{43}$/.test(state))throw new Error('Invalid installation state');
       const app=appSchema.parse(await request('/app',jwt()));

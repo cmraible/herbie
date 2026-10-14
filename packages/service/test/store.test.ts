@@ -154,31 +154,26 @@ integration('concurrent replay creates one goal and distinct requests share a re
   assert.equal(new Set(competing.map(result => result.goal.id)).size, 2);
 });
 
-integration('same-repository goals wait through execution and review while other repositories run', async () => {
+integration('same-repository goals execute independently and keep multiple pull requests open', async () => {
   const owner = randomUUID();
   const request = { ...input(), maxAttempts: 1 };
   const { goal: first } = await store.createGoal(owner, request, 'demo', randomUUID());
   const { goal: second } = await store.createGoal(owner, { ...request, repository: request.repository.toUpperCase() }, 'demo', randomUUID());
-  const { goal: unrelated } = await store.createGoal(owner, input(), 'demo', randomUUID());
   const workers = ['worker-a', 'worker-b'];
   const claimed = await Promise.all(workers.map(worker => store.claim(worker)));
-  assert.deepEqual(new Set(claimed.map(job => job?.goal.id)), new Set([first.id, unrelated.id]));
-  assert.equal((await store.getGoal(second.id))?.attemptCount, 0);
-  const index = claimed.findIndex(job => job?.goal.id === first.id);
-  const job = claimed[index];
-  assert.ok(job);
-  const worker = workers[index]!;
-  await store.saveArtifact(job.id, worker, { baseCommit: 'abc', patch: Buffer.from('tested') });
-  assert.equal(await store.claim('waiting-worker'), null);
-  await store.beginPublication(job.id, worker);
-  assert.equal(await store.claim('waiting-worker'), null);
-  await store.completePublication(job.id, worker, { url: 'https://github.com/example/repo/pull/1', number: 1, branch: job.branch });
-  assert.equal(await store.claim('waiting-worker'), null);
-  await store.control(first.id, owner, 'pause');
-  assert.equal(await store.claim('waiting-worker'), null);
-  await store.control(first.id, owner, 'resume');
-  await store.reconcile(job.id, 'merged');
-  assert.equal((await store.claim('waiting-worker'))?.goal.id, second.id);
+  assert.deepEqual(new Set(claimed.map(job => job?.goal.id)), new Set([first.id, second.id]));
+  for (const [index, job] of claimed.entries()) {
+    assert.ok(job);
+    const worker = workers[index]!;
+    await store.saveArtifact(job.id, worker, { baseCommit: 'abc', patch: Buffer.from('tested') });
+    await store.beginPublication(job.id, worker);
+    await store.completePublication(job.id, worker, { url: `https://github.com/example/repo/pull/${index+1}`, number: index+1, branch: job.branch });
+  }
+  assert.equal((await store.reviewJobs()).length, 2);
+  const firstJob = claimed.find(job => job?.goal.id === first.id);
+  assert.ok(firstJob);
+  await store.reconcile(firstJob.id, 'merged');
+  assert.equal((await store.getGoal(second.id))?.state, 'awaiting_review');
 });
 
 integration('repeated cancellation is safe and discards an in-flight artifact before publication', async () => {
