@@ -13,6 +13,54 @@ async function executionFor(adapters: Adapters, job: Job, readOnly: boolean): Pr
   return {goal:job.goal, repository, attemptId:job.attemptId, branch:job.branch};
 }
 
+async function recoverPublication(
+  store: Store,
+  adapters: Adapters,
+  job: Job,
+  workerId: string,
+  execution: Execution,
+  changes: Job['artifact'],
+  requireLease: () => Promise<void>,
+  reportPhase: (phase: PublicationPhase) => Promise<void>,
+): Promise<{url:string;number:number;branch:string}|undefined> {
+  await reportPhase('preflight_reconciliation');
+  const existing = await adapters.reconcile(execution);
+  if (existing) {
+    await reportPhase('state_persistence');
+    await store.completePublication(job.id,workerId,existing);
+    return existing;
+  }
+
+  if (!changes || !hasValidPublicationEvidence(job.goal.repository,changes)) {
+    await store.blockPublication(job.id,workerId,'saved artifact lacks matching test and cleanup evidence');
+    return;
+  }
+  if (!adapters.checkPublicationRetry) {
+    await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
+    return;
+  }
+
+  const check = await adapters.checkPublicationRetry(execution,changes);
+  await requireLease();
+  if (check === 'branch_exists' || check === 'base_changed') {
+    const reason = check === 'branch_exists'
+      ? 'the attempt branch exists without a confirmed pull request; it will not be overwritten'
+      : 'repository history no longer contains the original base';
+    await store.blockPublication(job.id,workerId,reason);
+    return;
+  }
+  if (check === 'pull_request_exists') {
+    await store.publicationUncertain(job.id,workerId,'A pull request appeared during the safety check; reconciliation will confirm it.');
+    return;
+  }
+
+  const published = await adapters.publish(execution,changes,requireLease,reportPhase);
+  await requireLease();
+  await reportPhase('state_persistence');
+  await store.completePublication(job.id,workerId,published);
+  return published;
+}
+
 // One claim per tick. Saved publication retries require lease and remote-state checks.
 export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: string, timing = {leaseMs:30_000,heartbeatMs:5_000}): Promise<boolean> {
   const {leaseMs,heartbeatMs} = timing;
@@ -58,36 +106,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     await requireLease();
     if (recoveringPublication) {
       // Reconcile first, including after a crash or ambiguous remote write.
-      await reportPublicationPhase('preflight_reconciliation');
-      const existing = await adapters.reconcile(execution);
-      if (!existing) {
-        if(!changes||!hasValidPublicationEvidence(job.goal.repository,changes)){
-          await store.blockPublication(job.id,workerId,'saved artifact lacks matching test and cleanup evidence');
-          return true;
-        }
-        if(!adapters.checkPublicationRetry){
-          await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
-          return true;
-        }
-        const check=await adapters.checkPublicationRetry(execution,changes);
-        await requireLease();
-        if(check==='branch_exists'||check==='base_changed'){
-          await store.blockPublication(job.id,workerId,check==='branch_exists'?'the attempt branch exists without a confirmed pull request; it will not be overwritten':'repository history no longer contains the original base');
-          return true;
-        }
-        if(check==='pull_request_exists'){
-          await store.publicationUncertain(job.id,workerId,'A pull request appeared during the safety check; reconciliation will confirm it.');
-          return true;
-        }
-        published=await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
-        await requireLease();
-        await reportPublicationPhase('state_persistence');
-        await store.completePublication(job.id,workerId,published);
-      } else {
-        published = existing;
-        await reportPublicationPhase('state_persistence');
-        await store.completePublication(job.id,workerId,existing);
-      }
+      published = await recoverPublication(store,adapters,job,workerId,execution,changes,requireLease,reportPublicationPhase);
       return true;
     }
     controller.signal.throwIfAborted();
