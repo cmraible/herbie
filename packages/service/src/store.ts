@@ -112,15 +112,17 @@ export class Store {
     if(!result.created||request.name!==undefined)return result;
     // The saved request reserves naming for its creator without holding a database
     // connection during model I/O. Interrupted naming leaves the fallback intact.
-    const name=goalName.parse(await this.nameGoal(request.prompt));
-    result.goal=await this.transaction(async client=>{
-      const current=await goalFrom(client,result.goal.id,true);
-      if(!current)throw new Error('Missing created goal');
-      const renamed=await client.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='renamed' LIMIT 1",[current.id]);
-      if(renamed.rowCount||current.name===name)return current;
-      const updated=await client.query<Record<string,unknown>>(`UPDATE goals SET name=$2,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${goalColumns}`,[current.id,name]);
-      return databaseGoal.parse(updated.rows[0]);
-    });
+    try{
+      const name=goalName.parse(await this.nameGoal(request.prompt));
+      result.goal=await this.transaction(async client=>{
+        const current=await goalFrom(client,result.goal.id,true);
+        if(!current)throw new Error('Missing created goal');
+        const renamed=await client.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='renamed' LIMIT 1",[current.id]);
+        if(renamed.rowCount||current.name===name)return current;
+        const updated=await client.query<Record<string,unknown>>(`UPDATE goals SET name=$2,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${goalColumns}`,[current.id,name]);
+        return databaseGoal.parse(updated.rows[0]);
+      });
+    }catch(error){logFailure(error,{component:'goal-naming',goalId:result.goal.id});}
     return result;
   }
   async renameGoal(id: string, ownerId: string, name: string): Promise<Goal> {

@@ -361,3 +361,25 @@ integration('slow naming releases the only database connection and preserves int
     }
   }finally{await pool.end();}
 });
+
+integration('post-commit naming failures return the saved goal without duplicating work',async()=>{
+  for(const failure of ['model','database']){
+    const pool=new Pool({connectionString:databaseUrl,options:`-c search_path=${schema}`});
+    const namedStore=new Store(pool,Math.random,async()=>{
+      if(failure==='model')throw new Error('Naming unavailable');
+      await pool.end();
+      return 'Arithmetic cleanup';
+    });
+    try{
+      const owner=randomUUID(),key=randomUUID(),request=input();
+      const result=await namedStore.createGoal(owner,request,'live',key);
+      assert.equal(result.created,true);
+      assert.equal(result.goal.name,'Fix arithmetic');
+      const replay=await store.createGoal(owner,request,'live',key);
+      assert.equal(replay.created,false);
+      assert.equal(replay.goal.id,result.goal.id);
+      assert.equal((await store.listGoals(owner)).length,1);
+      assert.equal((await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[result.goal.id])).rowCount,1);
+    }finally{if(failure==='model')await pool.end();}
+  }
+});
