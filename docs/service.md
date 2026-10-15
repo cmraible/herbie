@@ -164,9 +164,8 @@ an integrated paid attempt. Before using live mode:
    encrypted credentials, or Git child environments.
 2. Register/configure a GitHub App with **Contents: read/write**, **Pull requests:
    read/write**, **Checks: read**, **Commit statuses: read**, **Actions: read**,
-   and **Metadata: read**, plus account **Email addresses: read-only** for
-   Better Auth GitHub sign-in. Use callback
-   `https://YOUR-HOST/api/identity/callback/github`, webhook
+   and **Metadata: read**. Keep the existing callback
+   `https://YOUR-HOST/api/auth/callback`, webhook
    `https://YOUR-HOST/api/webhooks/github`, and subscribe to **Pull request**,
    **Check run**, **Check suite**, and **Status** events. Existing installations must
    accept the added read permissions. These are App-wide subscriptions; Herbie
@@ -226,8 +225,10 @@ rejection and expiry release none. Codes are never prefilled from a URL. An
 invalid code cannot authorize a request; the form can be retried with the correct
 code. Do not approve unexpected requests or codes sent by someone else.
 
-When upgrading from custom auth, update the GitHub App callback URL above and
-add its email-read permission before switching traffic. Startup migrates the
+The existing GitHub callback URL and App permissions remain valid. For private
+email accounts without email-read permission, Better Auth stores a deterministic
+GitHub-ID noreply placeholder; it is never used for email sign-in or account linking.
+When upgrading from custom auth, startup migrates the
 version-pinned Better Auth tables inside the private `herbie` schema, under an
 advisory lock and the existing schema protection. `HERBIE_CREDENTIAL_KEY` derives
 a separate Better Auth secret, so no additional secret is required. Existing

@@ -196,7 +196,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
             clientId: env.GITHUB_CLIENT_ID!,
             clientSecret: env.GITHUB_CLIENT_SECRET!,
             privateKey: privateKey!,
-            callbackUrl: `${publicUrl}/api/identity/callback/github`,
+            callbackUrl: `${publicUrl}/api/auth/callback`,
             webhookSecret: env.GITHUB_WEBHOOK_SECRET!,
           }
         : undefined,

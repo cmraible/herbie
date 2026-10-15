@@ -63,7 +63,14 @@ export function createBetterAuth(
       github: {
         clientId: config.github.clientId,
         clientSecret: config.github.clientSecret,
-        mapProfileToUser: (profile) => ({ githubId: String(profile.id), login: profile.login }),
+        redirectURI: config.github.callbackUrl,
+        mapProfileToUser: (profile) => ({
+          githubId: String(profile.id),
+          login: profile.login,
+          // GitHub Apps without email-read permission can still identify the owner.
+          // This placeholder is never used for email sign-in or account linking.
+          email: profile.email || `${profile.id}@users.noreply.github.com`,
+        }),
       },
     },
     user: {
@@ -286,6 +293,11 @@ export function createBetterAuth(
           '<!doctype html><html lang="en"><title>Sign-in failed · Herbie</title><h1>Sign-in failed</h1><p>Sign in with the configured GitHub owner account. <a href="/">Return to Herbie</a> to try again.</p></html>',
           { status: 401, headers: { "content-type": "text/html; charset=utf-8" } },
         );
+      if (url.pathname === "/api/auth/callback" && request.method === "GET") {
+        const callback = new URL(request.url);
+        callback.pathname = `${basePath}/callback/github`;
+        return identity.handler(new Request(callback, request));
+      }
       // Expose only the OAuth callback. Provider tokens and account mutations stay server-side.
       if (url.pathname === `${basePath}/callback/github` && request.method === "GET")
         return identity.handler(request);

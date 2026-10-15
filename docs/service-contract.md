@@ -9,7 +9,7 @@ HTTP JSON on the same origin as web. Contracts in @herbie/contracts (Zod, source
 - GET /api/goals/:id -> Goal; GET /api/goals/:id/events?after=0 -> GoalEvent[]
 - POST /api/goals/:id/:action (pause/resume/cancel) -> Goal. Repeat safe; incompatible transition 409.
 - POST /api/auth/start {client:'web'|'cli'} -> {url,pollToken?,userCode?}; web navigate URL. CLI prints URL and terminal code, then polls GET /api/auth/poll?token= -> {status:'pending'|'complete'|'expired'|'rejected',token?}; bearer appears only after explicit approval and is delivered once. Store received bearer 0600. Web uses cookie.
-- GET /api/identity/callback/github?code=&state= is the Better Auth OAuth callback. Web login completes at /api/identity/complete and sets the Herbie session cookie. CLI login returns to /api/auth/cli with a browser session; no CLI bearer is issued yet. The old /api/auth/callback is unavailable in live mode.
+- GET /api/auth/callback?code=&state= dispatches to the Better Auth GitHub OAuth callback while preserving the registered App callback URL. Web login completes at /api/identity/complete and sets the Herbie session cookie. CLI login returns to /api/auth/cli with a browser session; no CLI bearer is issued yet.
 - GET /api/auth/cli -> sign in if needed, then server-rendered approval form with account/service/expiry context. POST /api/auth/cli requires an owner browser session, exact Origin, CSRF cookie/token, form decision approve/reject, and terminal code. Invalid codes authorize nothing. Reject/expiry release no bearer. Codes are not included in the OAuth URL or displayed by the form.
 - POST /api/auth/logout -> {ok:true}
 - POST /api/webhooks/github validates signature then reconciles stored PRs; no credentials/user input trusted from payload.

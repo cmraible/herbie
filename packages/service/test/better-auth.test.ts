@@ -31,7 +31,7 @@ async function fixture(t: TestContext) {
     clientId: "fixture",
     clientSecret: "fixture-secret",
     privateKey: "unused",
-    callbackUrl: `${origin}/api/identity/callback/github`,
+    callbackUrl: `${origin}/api/auth/callback`,
     webhookSecret: "fixture-secret",
   };
   const config = {
@@ -63,6 +63,7 @@ async function fixture(t: TestContext) {
       ),
   );
   let githubUserId = 7;
+  let privateEmail = false;
   const realFetch = globalThis.fetch;
   t.mock.method(
     globalThis,
@@ -80,9 +81,14 @@ async function fixture(t: TestContext) {
           id: githubUserId,
           login: "alice",
           name: "Alice",
-          email: "alice@example.com",
+          email: privateEmail ? null : "alice@example.com",
           avatar_url: "https://example.com/avatar",
         });
+      if (url === "https://api.github.com/user/emails" && privateEmail)
+        return Response.json(
+          { message: "Resource not accessible by integration" },
+          { status: 403 },
+        );
       if (url === "https://api.github.com/user/emails")
         return Response.json([{ email: "alice@example.com", primary: true, verified: true }]);
       return realFetch(input, init);
@@ -122,7 +128,7 @@ async function fixture(t: TestContext) {
     assert.equal(url.searchParams.get("redirect_uri"), githubConfig.callbackUrl);
     assert.ok(url.searchParams.get("code_challenge"));
     const callback = await request(
-      `/api/identity/callback/github?code=fixture&state=${url.searchParams.get("state")}`,
+      `/api/auth/callback?code=fixture&state=${url.searchParams.get("state")}`,
     );
     assert.equal(callback.status, 302, await callback.clone().text());
     assert.equal(callback.headers.get("location"), `${origin}/api/identity/complete`);
@@ -136,6 +142,9 @@ async function fixture(t: TestContext) {
     jar,
     request,
     login,
+    hideEmail: () => {
+      privateEmail = true;
+    },
     setGithubUserId: (id: number) => {
       githubUserId = id;
     },
@@ -193,7 +202,7 @@ test("passwords and provider-token endpoints are unavailable; non-owner GitHub s
   f.setGithubUserId(8);
   const start = await f.request("/api/auth/start", { client: "web" });
   const state = new URL((await start.json()).url).searchParams.get("state");
-  const result = await f.request(`/api/identity/callback/github?code=fixture&state=${state}`);
+  const result = await f.request(`/api/auth/callback?code=fixture&state=${state}`);
   assert.notEqual(result.headers.get("location"), `${origin}/api/identity/complete`);
   assert.equal((await f.pool.query("SELECT count(*) FROM identity_sessions")).rows[0].count, "0");
   await assert.rejects(f.auth.userToken("8"), /restricted/);
@@ -204,7 +213,7 @@ test("OAuth callback needs the initiating browser and cannot be replayed", async
   if (!f) return;
   const start = await f.request("/api/auth/start", { client: "web" });
   const state = new URL((await start.json()).url).searchParams.get("state");
-  const path = `/api/identity/callback/github?code=fixture&state=${state}`;
+  const path = `/api/auth/callback?code=fixture&state=${state}`;
   const result = await f.request(path, undefined, { cookies: false });
   assert.notEqual(result.headers.get("location"), `${origin}/api/identity/complete`);
   assert.equal((await f.pool.query("SELECT count(*) FROM identity_sessions")).rows[0].count, "0");
@@ -226,7 +235,7 @@ test("CLI receives a separate Better Auth session only after code entry and brow
   assert.equal(new URL(navigation.headers.get("location")!).origin, "https://github.com");
   const authorization = new URL(navigation.headers.get("location")!);
   const callback = await f.request(
-    `/api/identity/callback/github?code=fixture&state=${authorization.searchParams.get("state")}`,
+    `/api/auth/callback?code=fixture&state=${authorization.searchParams.get("state")}`,
   );
   assert.equal(callback.headers.get("location"), `${origin}/api/auth/cli`);
   const pending = await f.request(`/api/auth/poll?token=${pollToken}`);
@@ -291,4 +300,16 @@ test("CLI rejection, expiry, and missing browser consent never release a session
     (await (await f.request(`/api/auth/poll?token=${second.pollToken}`)).json()).status,
     "expired",
   );
+});
+
+test("GitHub accounts with private email need no additional App permission", async (t) => {
+  const f = await fixture(t);
+  if (!f) return;
+  f.hideEmail();
+  const token = await f.login();
+  assert.deepEqual(await f.auth.session(token), {
+    mode: "live",
+    user: { id: "7", login: "alice" },
+  });
+  assert.equal(await f.auth.userToken("7"), "ghu_fixture");
 });
