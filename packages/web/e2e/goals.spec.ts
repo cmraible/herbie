@@ -205,3 +205,16 @@ test('a legacy named draft can replay a create request after reload',async({page
   await expect(detail(page).getByRole('heading',{name:draft.name,exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
 });
+
+test('editing a legacy draft discards its hidden name',async({page})=>{
+  await login(page);
+  await page.evaluate(()=>sessionStorage.setItem('herbie-draft',JSON.stringify({
+    repository:'demo/example',name:'Obsolete name',prompt:'Old brief',requestId:crypto.randomUUID(),
+  })));
+  await page.goto('/#new');
+  await page.reload();
+  await page.getByLabel('What should Herbie work on?').fill('Name this updated brief automatically');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(detail(page).getByRole('heading',{name:'Name this updated brief automatically',exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+});

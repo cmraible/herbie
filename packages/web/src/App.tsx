@@ -116,7 +116,7 @@ export function App() {
         if (!alive) return;
         setRepositories(list); setRepositoriesResolved(true);
         setDraft(current => list.some(repository => repository.fullName === current.repository)
-          ? current : {...current,repository:list[0]?.fullName ?? '',requestId:crypto.randomUUID()});
+          ? current : {...current,name:undefined,repository:list[0]?.fullName ?? '',requestId:crypto.randomUUID()});
         if (sessionStorage.getItem(onboardingInstallKey)) {
           sessionStorage.removeItem(onboardingInstallKey);
           if (list.length === 0) void connectRepositories();
@@ -198,10 +198,10 @@ export function App() {
     try { const result=await api.installationStart();location.assign(result.url); }
     catch(failure) { setError(message(failure));setBusy(false); }
   }
-  function edit(change: Partial<Draft>) { setDraft(current => ({...current,...change,requestId:crypto.randomUUID()})); setFormError(null); }
+  function edit(change: Partial<Draft>) { setDraft(current => ({...current,...change,name:undefined,requestId:crypto.randomUUID()})); setFormError(null); }
   function openCreate() {
     if (!session || sessionState !== 'signed-in' || !goalsLoaded) return;
-    if (!draft.repository && repositories[0]) setDraft(current => ({...current,repository:repositories[0].fullName}));
+    if (!draft.repository && repositories[0]) setDraft(current => ({...current,name:undefined,repository:repositories[0].fullName,requestId:crypto.randomUUID()}));
     navigateToScreen('new'); setFormError(null);
   }
   async function createGoal(event: FormEvent<HTMLFormElement>) {
