@@ -10,8 +10,15 @@ never a checkout, and never runs generated code or repository hooks.
 
 Goals have a user-editable name (1–120 characters), separate from the execution
 prompt. Set it when creating a goal or rename any goal in the web UI or with
-`rename GOAL_ID --name TEXT` in the CLI. Omitted names and existing goals default
-to the first 120 characters of the brief. Renaming preserves the original create
+`rename GOAL_ID --name TEXT` in the CLI. In live mode, omitted or blank names are
+summarized into a few words by an AI model. Set `OPENAI_API_KEY` on the service
+(separately from the Daytona organization secret); `HERBIE_GOAL_NAME_MODEL`
+defaults to `gpt-6-luna`. Naming uses the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/text).
+Demo mode, missing credentials, or a failed naming request (10-second timeout)
+fall back to the first 120 characters of the brief. Existing goals keep their names.
+The goal is saved before naming, so concurrent retries can briefly show the
+fallback. A rename made while naming is in progress always takes precedence.
+Renaming preserves the original create
 request for safe retries and does not change the prompt or start work.
 
 Multiple active goals may target the same repository.
