@@ -243,3 +243,19 @@ test('a goal fills maxWip and merging a selected PR starts one replacement',asyn
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
   await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
 });
+
+for (const outcome of ['merge','close'] as const) test(`a cancelled demo goal can still ${outcome} its other published PR`,async({page})=>{
+  await login(page);
+  await start(page,`Track remaining PRs after cancellation: ${outcome}`,'2');
+  const cards = detail(page).locator('.pr-card');
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(2);
+  await cards.nth(0).getByRole('button',{name:'Simulate close'}).click();
+  await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
+  await cards.nth(1).getByRole('button',{name:`Simulate ${outcome}`}).click();
+  await expect(cards.nth(1)).toContainText(`Pull request ${outcome === 'merge' ? 'merged' : 'closed'}.`);
+  await page.reload();
+  await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
+  await expect(detail(page).getByText('Attempt 2 · Max WIP 2')).toBeVisible();
+  await expect(cards).toHaveCount(2);
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(0);
+});

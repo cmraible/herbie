@@ -34,7 +34,11 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     repositories: () => request('/api/repositories', z.array(repositorySchema)),
     goals: () => request('/api/goals', z.array(goalSchema)),
     goal: (id: string) => request(goalPath(id), goalSchema),
-    start: (input: GoalInput, requestId: string) => request('/api/goals', goalSchema, goalInput.parse(input), requestId),
+    start: (input: GoalInput, requestId: string) => {
+      const {maxWip,...goal} = goalInput.parse(input);
+      // The default must remain acceptable to older strict APIs during rolling upgrades.
+      return request('/api/goals', goalSchema, maxWip === 1 ? goal : {...goal,maxWip}, requestId);
+    },
     rename: (id: string, name: string) => request(`${goalPath(id)}/name`, goalSchema, goalRename.parse({name})),
     events: (id: string, after = 0) => request(`${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`, z.array(eventSchema)),
     action: (id: string, action: GoalAction) => request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),

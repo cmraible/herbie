@@ -550,3 +550,23 @@ for (const outcome of ['merged','closed'] as const) integration(`published sibli
   assert.equal(await store.claim('extra'),null);
   assert.deepEqual(await store.reviewJobs(),[]);
 });
+
+integration('a draining older coordinator can publish and reconcile after the PR backfill', async () => {
+  const {goal} = await store.createGoal('owner',input(),'demo',randomUUID());
+  const job = await store.claim('old-worker');
+  assert.ok(job);
+  await store.migrate();
+  // The pre-upgrade worker writes only the goal's PR column after migrations ran.
+  const pr = {url:'https://github.com/example/repo/pull/1',number:1,branch:job.branch,state:'open'};
+  await store.pool.query("UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",[job.id]);
+  await store.pool.query("UPDATE goals SET state='awaiting_review',pull_request=$2 WHERE id=$1",[goal.id,JSON.stringify(pr)]);
+  assert.deepEqual((await store.getGoal(goal.id))?.pullRequests,[pr]);
+  assert.deepEqual((await store.reviewJobs()).map(job => job.id),[job.id]);
+  // An old coordinator may also observe the merge while it is draining.
+  const merged = {...pr,state:'merged'};
+  await store.pool.query("UPDATE jobs SET stage='completed' WHERE id=$1",[job.id]);
+  await store.pool.query('UPDATE goals SET pull_request=$2 WHERE id=$1',[goal.id,JSON.stringify(merged)]);
+  assert.deepEqual((await store.getGoal(goal.id))?.pullRequests,[merged]);
+  await store.migrate();
+  assert.deepEqual((await store.getGoal(goal.id))?.pullRequests,[merged]);
+});
