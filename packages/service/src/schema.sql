@@ -99,3 +99,5 @@ ALTER TABLE ci_repairs DROP CONSTRAINT IF EXISTS ci_repairs_state_check;
 ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('running','waiting','completed','failed'));
 
 ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;
+
+ALTER TABLE goal_events ADD COLUMN IF NOT EXISTS job_id uuid REFERENCES jobs(id);

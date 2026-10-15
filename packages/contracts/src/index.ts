@@ -48,12 +48,31 @@ export const pullRequestSchema = z.object({
   state: z.enum(["open", "merged", "closed"]),
   branch: z.string(),
 });
+export const attemptSchema = z.object({
+  id: z.string().uuid(),
+  number: z.number().int().positive(),
+  state: z.enum([
+    "queued",
+    "running",
+    "ready",
+    "publishing",
+    "awaiting_review",
+    "completed",
+    "cancelled",
+    "failed",
+    "needs_attention",
+  ]),
+  createdAt: z.string(),
+  pullRequest: pullRequestSchema.nullable(),
+});
+export type Attempt = z.infer<typeof attemptSchema>;
 export const goalSchema = goalInput.extend({
   name: goalName,
   id: z.string().uuid(),
   ownerId: z.string(),
   state: goalState,
   attemptCount: z.number().int(),
+  attempts: z.array(attemptSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   mode: z.enum(["demo", "live"]),
@@ -66,6 +85,7 @@ export const goalSchema = goalInput.extend({
   error: z.string().nullable(),
 });
 export const eventSchema = z.object({
+  attemptId: z.string().uuid().nullable().optional(),
   id: z.number().int(),
   goalId: z.string().uuid(),
   type: z.string(),

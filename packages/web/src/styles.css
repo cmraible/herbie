@@ -70,45 +70,14 @@ h3 {
   color: #999;
   font-size: 12px;
 }
-.topbar {
-  min-height: 58px;
-  padding: 0 max(24px, calc((100vw - 820px) / 2));
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #292929;
-}
-.brand {
-  color: #fff;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  text-decoration: none;
-}
-.topbar-actions,
-.heading-actions,
-.controls {
+.heading-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.topbar-actions button {
-  font-size: 12px;
-  padding: 5px 9px;
-}
-.mode-pill,
-.user-name {
-  color: #999;
-  font-size: 12px;
-}
-.mode-pill {
-  border: 1px solid #333;
-  border-radius: 4px;
-  padding: 3px 7px;
-}
 .workspace {
   width: min(100% - 48px, 720px);
-  margin: 72px auto 100px;
+  margin: 0 auto 100px;
 }
 h1 {
   font-size: 30px;
@@ -216,20 +185,29 @@ h2 {
   margin: 0 5px 1px 0;
   padding: 0 !important;
   border-radius: 50%;
-  background: #999 !important;
+  background: var(--status-color, #aaa);
 }
-.status-running {
-  background: #70c998 !important;
+.status-running,
+.status-ready,
+.status-publishing,
+.status-completed {
+  --status-color: #70c998;
 }
 .status-awaiting_review {
-  background: #e4c36c !important;
+  --status-color: #e4c36c;
 }
 .status-needs_attention,
 .status-failed {
-  background: #e47d75 !important;
+  --status-color: #e47d75;
 }
 .status-queued {
-  background: #8eb6ec !important;
+  --status-color: #8eb6ec;
+}
+.status-paused {
+  --status-color: #c4a5ef;
+}
+.status-cancelled {
+  --status-color: #aaa;
 }
 .finished-toggle,
 .back-button {
@@ -271,6 +249,18 @@ h2 {
 .back-button {
   margin: 0 0 24px;
 }
+.page-heading .back-button {
+  margin: 0;
+}
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #aaa;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .detail-heading {
   display: flex;
   align-items: flex-start;
@@ -278,15 +268,42 @@ h2 {
   gap: 16px;
 }
 .detail-heading h2 {
-  margin-top: 5px;
+  margin: 8px 0 0;
   overflow-wrap: anywhere;
+}
+.goal-actions-trigger {
+  anchor-name: --goal-actions;
+  flex-shrink: 0;
+  padding: 0 10px;
+  font-size: 24px;
+  line-height: 32px;
+}
+.goal-actions-menu {
+  position-anchor: --goal-actions;
+  inset: auto;
+  top: anchor(bottom);
+  right: anchor(right);
+  margin: 6px 0 0;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #151515;
+  box-shadow: 0 8px 24px #0008;
+}
+.goal-actions-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
 }
 .badge {
   flex-shrink: 0;
-  border: 1px solid #444;
+  border: 1px solid var(--status-color, #aaa);
   border-radius: 4px;
   padding: 3px 7px;
-  color: #ddd;
+  color: var(--status-color, #aaa);
+  background: color-mix(in srgb, var(--status-color, #aaa) 12%, transparent);
   font-size: 11px;
 }
 .goal-brief {
@@ -298,12 +315,44 @@ h2 {
   margin-top: 10px;
   font-size: 12px;
 }
-.controls {
-  margin: 18px 0;
-  flex-wrap: wrap;
+.goal-divider {
+  border: 0;
+  border-top: 1px solid #444;
+  margin: 28px 0;
 }
-.controls button {
-  font-size: 12px;
+.attempts > h3 {
+  margin-bottom: 12px;
+}
+.attempt {
+  border-bottom: 1px solid #333;
+}
+.attempt h4 {
+  margin: 0;
+}
+.attempt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+.attempt-toggle > span:first-child {
+  flex: 1;
+}
+.attempt-chevron {
+  width: 16px;
+  text-align: center;
+  color: #aaa;
+}
+.attempt-body {
+  padding-bottom: 24px;
+}
+.attempt-body > .pr-card:first-child {
+  margin-top: 0;
 }
 .pr-card {
   display: flex;
@@ -407,14 +456,6 @@ input::placeholder,
 textarea::placeholder {
   color: #777;
 }
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.checkbox-label input {
-  accent-color: #fff;
-}
 .repository-discovery {
   display: flex;
   align-items: center;
@@ -440,12 +481,8 @@ textarea::placeholder {
 }
 
 @media (max-width: 560px) {
-  .topbar {
-    padding: 0 18px;
-  }
   .workspace {
     width: calc(100% - 36px);
-    margin-top: 48px;
   }
   .page-heading {
     align-items: flex-start;
@@ -459,9 +496,6 @@ textarea::placeholder {
   }
   .welcome {
     margin-top: 76px;
-  }
-  .user-name {
-    display: none;
   }
   .error-banner {
     width: calc(100% - 36px);

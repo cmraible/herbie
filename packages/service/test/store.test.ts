@@ -515,7 +515,10 @@ integration(
       );
     }
     await store.control(goal.id, owner, "cancel");
-    assert.equal((await store.renameGoal(goal.id, owner, "Finished work")).state, "cancelled");
+    await assert.rejects(
+      store.renameGoal(goal.id, owner, "Finished work"),
+      /Cancelled goals cannot be edited/,
+    );
   },
 );
 
@@ -1165,11 +1168,11 @@ integration(
     });
     assert.equal((await store.claim("next-worker"))?.goal.prompt, running.prompt);
     await store.control(goal.id, owner, "cancel");
-    assert.equal(
-      (await store.editGoalPrompt(goal.id, owner, "Final instructions")).state,
-      "cancelled",
+    await assert.rejects(
+      store.editGoalPrompt(goal.id, owner, "Final instructions"),
+      /Cancelled goals cannot be edited/,
     );
-    assert.equal((await store.events(goal.id)).at(-1)?.type, "prompt_updated");
+    assert.equal((await store.getGoal(goal.id))?.prompt, running.prompt);
   },
 );
 
@@ -1212,7 +1215,10 @@ integration(
     assert.equal((await store.updateGoal(goal.id, "owner", { maxWip: 3 })).state, "paused");
     assert.equal(await store.claim("worker"), null);
     await store.control(goal.id, "owner", "cancel");
-    assert.equal((await store.updateGoal(goal.id, "owner", { maxWip: 4 })).state, "cancelled");
-    assert.equal((await store.createGoal("owner", request, "demo", key)).goal.maxWip, 4);
+    await assert.rejects(
+      store.updateGoal(goal.id, "owner", { maxWip: 4 }),
+      /Cancelled goals cannot be edited/,
+    );
+    assert.equal((await store.createGoal("owner", request, "demo", key)).goal.maxWip, 3);
   },
 );

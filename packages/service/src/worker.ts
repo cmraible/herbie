@@ -154,7 +154,7 @@ export async function runWorkerOnce(
       // Authorization can outlive the lease; fence the paid operation after that read.
       await requireLease();
       changes = await adapters.attempt(execution, async (message) => {
-        await store.appendEvent(job.goal.id, "attempt", message.slice(0, 2000));
+        await store.appendEvent(job.goal.id, "attempt", message.slice(0, 2000), job.id);
       });
       await requireLease();
       await store.saveArtifact(job.id, workerId, changes);

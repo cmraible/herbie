@@ -36,6 +36,9 @@ packages/web/*
 !packages/web/package.json
 !packages/web/tsconfig.json
 !packages/web/vite.config.ts
+!packages/web/fixtures/
+packages/web/fixtures/*
+!packages/web/fixtures/api.ts
 !packages/web/index.html
 !packages/web/public/
 packages/web/public/*

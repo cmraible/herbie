@@ -33,6 +33,23 @@ async function fixture(t: TestContext) {
 }
 const changes = { baseCommit: "a".repeat(40), patch: Buffer.from("retained fixture") };
 
+test("cancelled goals reject edits without changing their saved definition", async (t) => {
+  const f = await fixture(t);
+  if (!f) return;
+  const { store, goal } = f;
+  const cancelled = await store.control(goal.id, "owner", "cancel");
+  const events = await store.events(goal.id);
+  for (const edit of [
+    () => store.renameGoal(goal.id, "owner", "Changed name"),
+    () => store.editGoalPrompt(goal.id, "owner", "Changed prompt"),
+    () => store.updateGoal(goal.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
+  ]) {
+    await assert.rejects(edit(), /Cancelled goals cannot be edited/);
+  }
+  assert.deepEqual(await store.getGoal(goal.id, "owner"), cancelled);
+  assert.deepEqual(await store.events(goal.id), events);
+});
+
 test("stuck publication with undecodable App key cancels without invoking reconciliation and stays fenced", async (t) => {
   const f = await fixture(t);
   if (!f) return;
