@@ -165,8 +165,9 @@ export function App() {
     return () => { alive = false; clearInterval(timer); };
   },[selected,session]);
 
-  function navigateToScreen(id: string) {
-    history.pushState(null,'',`#${id}`);
+  function navigateToScreen(id: string, replace = false) {
+    if (replace) history.replaceState(null,'',`#${id}`);
+    else history.pushState(null,'',`#${id}`);
     setScreen(id);
   }
   function navigateToList() {
@@ -206,7 +207,7 @@ export function App() {
     try {
       const result = await api.start(parseDraft(draft),draft.requestId);
       setGoals(current => [result,...current.filter(item => item.id !== result.id)]); setGoalsLoaded(true);
-      if (location.hash === '#new') navigateToScreen(result.id);
+      if (location.hash === '#new') navigateToScreen(result.id,true);
       setDraft(newDraft(draft.repository));
     } catch (failure) { setFormError(message(failure)); }
     finally { setBusy(false); }

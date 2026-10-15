@@ -274,3 +274,18 @@ test('direct creation waits for the initial goals request to succeed',async({pag
   await page.getByRole('button',{name:'Retry'}).click();
   await expect(start).toBeEnabled();
 });
+
+test('successful creation replaces the draft screen in browser history',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',route=>json(route,route.request().method()==='POST'?fixtureGoal:[]));
+  await page.goto('/');
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('What should Herbie work on?').fill(fixtureGoal.prompt);
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(page.getByRole('heading',{name:fixtureGoal.name,exact:true})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible({timeout:1000});
+});
