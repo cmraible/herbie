@@ -40,6 +40,8 @@ test('failed, incomplete, empty, and invalid model responses preserve goal creat
     new Response('not JSON'),
     Response.json({status:'incomplete',output:[]}),
     Response.json(completion('   ')),
+    Response.json(completion('Refactor')),
+    Response.json(completion('Fix signup')),
     Response.json(completion('x'.repeat(121))),
     Response.json(completion('one two three four five six seven')),
     Response.json({status:'completed',output:[{type:'message',content:[{type:'refusal',refusal:'No'}]}]}),

@@ -29,7 +29,8 @@ export function createGoalNamer(apiKey?:string,model='gpt-6-luna',request:typeof
       const name=goalName.parse(result.output.filter(item=>item.type==='message')
         .flatMap(item=>item.content??[]).filter(part=>part.type==='output_text').map(part=>part.text??'').join('')
         .trim().replace(/^["“]|["”]$/g,'').replace(/\s+/g,' '));
-      if(name.split(' ').length>6)throw new Error('Goal name is too verbose');
+      const words=name.split(' ').length;
+      if(words<3||words>6)throw new Error('Goal name must contain 3–6 words');
       return name;
     }catch{
       console.warn('Goal naming unavailable; using the prompt as a fallback.');
