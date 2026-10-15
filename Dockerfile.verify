@@ -1,0 +1,19 @@
+# Local CI tools are cached separately from source so every run executes tests.
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+WORKDIR /app
+RUN node -e 'const fs=require("node:fs");fs.mkdirSync("/etc/ssl/certs",{recursive:true});fs.writeFileSync("/etc/ssl/certs/ca-certificates.crt",require("node:tls").rootCertificates.join("\n"))' \
+    && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends git curl util-linux ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && npm install -g pnpm@10.34.6
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
+COPY packages/cli/package.json packages/cli/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/demo/package.json packages/demo/
+COPY packages/loop/package.json packages/loop/
+COPY packages/service/package.json packages/service/
+COPY packages/web/package.json packages/web/
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @herbie/web exec playwright install --with-deps chromium --only-shell
+COPY packages/ packages/
+COPY scripts/ scripts/
+CMD ["bash", "scripts/ci-verify.sh", "all"]

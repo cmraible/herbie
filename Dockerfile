@@ -34,7 +34,10 @@ ENV HERBIE_IMAGE_REVISION=$HERBIE_RUNTIME_REVISION
 ENV NODE_ENV=production HERBIE_HOST=0.0.0.0 HERBIE_PORT=8787
 WORKDIR /app
 # The trusted publisher uses native Git; generated code is never executed here.
+# Bootstrap HTTPS trust from Node until Debian's CA package is installed.
 RUN --mount=type=secret,id=proxy_ca \
+    node -e 'const fs=require("node:fs");fs.mkdirSync("/etc/ssl/certs",{recursive:true});fs.writeFileSync("/etc/ssl/certs/ca-certificates.crt",require("node:tls").rootCertificates.join("\n"))'; \
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
     if [ -f /run/secrets/proxy_ca ]; then \
       apt-get -o Acquire::https::CaInfo=/run/secrets/proxy_ca update; \
     else apt-get update; fi; \

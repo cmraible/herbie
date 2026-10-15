@@ -1,0 +1,17 @@
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!packages/
+!packages/**
+!scripts/
+!scripts/**
+**/node_modules
+**/dist
+**/test-results
+**/.env
+**/.env.*
+**/.herbie
+**/*.log
+**/*.tsbuildinfo

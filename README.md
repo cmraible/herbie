@@ -6,6 +6,11 @@ exits. Postgres owns goals, attempts, jobs, captured artifacts, PRs and events.
 
 ## Service, web UI and CLI
 
+Run **`pnpm verify`** for all CI validation locally, including PostgreSQL,
+browser, CLI and production container checks. Docker provisions the test tools
+and disposable databases. After the initial tool/image downloads, runs target
+under two minutes. See [local CI requirements and logs](docs/github-actions.md).
+
 Requires Node.js 24+, pnpm 10, and Postgres 17 (Docker is convenient locally).
 
 ```sh
