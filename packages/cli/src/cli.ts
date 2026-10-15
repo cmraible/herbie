@@ -20,7 +20,7 @@ export type CliIO = {
 function serviceUrl(value: string): string {
   const url = new URL(value);
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.username || url.password || url.search || url.hash || url.pathname !== "/")
+  if ([url.username, url.password, url.search, url.hash, url.pathname !== "/"].some(Boolean))
     throw new Error("Service URL must be an origin, without credentials, query, or path");
   if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))
     throw new Error("Use HTTPS, or HTTP on loopback for local development");
