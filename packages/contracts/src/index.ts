@@ -3,7 +3,7 @@ export const goalState = z.enum(['queued', 'running', 'paused', 'awaiting_review
 export const goalName = z.string().trim().min(1).refine(name => Array.from(name).length <= 120, 'Name must be at most 120 characters');
 export const goalRename = z.object({name:goalName}).strict();
 export const goalInput = z.object({
-  name: goalName.optional(),
+  name: z.string().trim().transform(name=>name || undefined).pipe(goalName.optional()).optional(),
   repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   prompt: z.string().trim().min(1).max(8000),
   maxAttempts: z.number().int().min(1).max(5).default(1),

@@ -1,4 +1,5 @@
 import {publicationBackoffMs} from './publication-backoff.js';
+import {fallbackGoalName} from './goal-name.js';
 import {logFailure} from './diagnostic-log.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -70,7 +71,7 @@ async function insertJob(client: PoolClient, goalId: string, cycle: number): Pro
 }
 
 export class Store {
-  constructor(readonly pool: Pool, private readonly retryRandom:()=>number=Math.random) {}
+  constructor(readonly pool: Pool, private readonly retryRandom:()=>number=Math.random, private readonly nameGoal:(prompt:string)=>string|Promise<string>=fallbackGoalName) {}
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try { await client.query('BEGIN'); const result = await work(client); await client.query('COMMIT'); return result; }
@@ -99,7 +100,8 @@ export class Store {
         return { goal, created: false };
       }
       const id = randomUUID();
-      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode, request.name ?? (Array.from(request.prompt.replaceAll('[demo:fail]', '').trim()).slice(0,120).join('').trim() || 'Untitled goal')]);
+      const name=request.name??goalName.parse(await this.nameGoal(request.prompt));
+      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode, name]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
       await addEvent(client, id, 'queued', 'Goal queued for a durable worker');

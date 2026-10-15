@@ -5,6 +5,7 @@ import {StartupConfigurationError,startupDiagnostic} from './startup-diagnostic.
 import {z} from 'zod';
 import {readConfig} from './config.js';
 import {Store} from './store.js';
+import {createGoalNamer} from './goal-name.js';
 import {PgAuthStore} from './auth-store.js';
 import {createAuth} from './auth.js';
 import {createGithub} from './github.js';
@@ -24,7 +25,7 @@ export async function createRuntime(startup?:StartupProgress){
   })();
   const pool=new pg.Pool(poolConfig);
   pool.on('error',error=>{logFailure(error,{component:'database-pool'});console.error(`Herbie database pool error: ${startupDiagnostic(error)} causes=${safeStartupCauses(error)}.`);});
-  const store=new Store(pool);
+  const store=new Store(pool,Math.random,createGoalNamer(config.mode==='live'?process.env.OPENAI_API_KEY:undefined,process.env.HERBIE_GOAL_NAME_MODEL));
   try {
     startup?.begin('database-connect');
     const connection=await pool.connect();connection.release();

@@ -290,8 +290,8 @@ integration('names persist independently of prompts and original create requests
   await assert.rejects(store.renameGoal(goal.id,'another-owner','Private rename'), /Goal not found/);
   for (const name of ['', '   ', 'x'.repeat(121)]) {
     await assert.rejects(store.renameGoal(goal.id,owner,name));
-    await assert.rejects(store.createGoal(owner,{...request,name},'demo',randomUUID()));
   }
+  await assert.rejects(store.createGoal(owner,{...request,name:'x'.repeat(121)},'demo',randomUUID()));
   const renamed = await store.renameGoal(goal.id,owner,'  Better arithmetic  ');
   assert.equal(renamed.name,'Better arithmetic');
   assert.equal(renamed.prompt,goal.prompt);
@@ -315,4 +315,21 @@ integration('omitted names use the brief and replay after renaming', async () =>
   assert.equal(goal.name,'a'.repeat(120));
   await store.renameGoal(goal.id,owner,'Short name');
   assert.equal((await store.createGoal(owner,request,'demo',key)).goal.name,'Short name');
+});
+
+integration('blank names are summarized once across concurrent requests and replays preserve renames',async()=>{
+  const prompts:string[]=[];
+  const namedStore=new Store(store.pool,Math.random,async prompt=>{prompts.push(prompt);return 'Arithmetic cleanup';});
+  const owner=randomUUID(),key=randomUUID(),request={...input(),name:'   '};
+  const results=await Promise.all(Array.from({length:3},()=>namedStore.createGoal(owner,request,'live',key)));
+  assert.equal(results.filter(result=>result.created).length,1);
+  assert.ok(results.every(result=>result.goal.name==='Arithmetic cleanup'&&result.goal.prompt===request.prompt));
+  assert.deepEqual(prompts,[request.prompt]);
+  const goal=results[0]!.goal;
+  await namedStore.renameGoal(goal.id,owner,'My new name');
+  assert.equal((await namedStore.createGoal(owner,{...request,name:undefined},'live',key)).goal.name,'My new name');
+  await assert.rejects(namedStore.createGoal(owner,{...request,prompt:'Different task'},'live',key),/different request/);
+  const explicit=await namedStore.createGoal(owner,{...request,name:' My own name '},'live',randomUUID());
+  assert.equal(explicit.goal.name,'My own name');
+  assert.deepEqual(prompts,[request.prompt]);
 });
