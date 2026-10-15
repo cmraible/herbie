@@ -39,6 +39,46 @@ async function save(path: string, value: z.infer<typeof savedSession>) {
   }
 }
 
+async function login(url: string | undefined, demo: boolean, configPath: string, io: CliIO): Promise<void> {
+  const print = (value: unknown) => io.stdout(JSON.stringify(value, null, 2) + "\n");
+  const baseUrl = serviceUrl(url ?? "http://127.0.0.1:8787");
+  const client = createClient({ baseUrl, origin: baseUrl });
+  if (demo) {
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(baseUrl).hostname))
+      throw new Error("Demo login is only available on loopback");
+    const result = await client.demoCliLogin();
+    await save(configPath, { baseUrl, token: result.token });
+    print(result.session);
+    return;
+  }
+  const auth = await client.authStart("cli");
+  if (!auth.pollToken) throw new Error("Service did not provide a CLI login token");
+  if (!auth.userCode)
+    throw new Error("Service did not provide a CLI approval code; no session saved");
+  io.stderr(
+    `Service: ${baseUrl}\nApproval code: ${auth.userCode}\nOnly approve if you started this login on this computer. Enter this code in the browser. Never approve a code sent by someone else.\nOpen this URL to sign in with GitHub:\n${auth.url}\nWaiting for browser authorization…\n`,
+  );
+  for (let count = 0; count < 150; count++) {
+    const result = await client.authPoll(auth.pollToken);
+    if (result.status === "expired") throw new Error("Login expired; run login again");
+    if (result.status === "rejected")
+      throw new Error("CLI authorization rejected; no session saved");
+    if (result.status === "complete") {
+      if (!result.token) throw new Error("Service did not provide a session");
+      const session = await createClient({
+        baseUrl,
+        origin: baseUrl,
+        token: result.token,
+      }).session();
+      await save(configPath, { baseUrl, token: result.token });
+      print(session);
+      return;
+    }
+    await setTimeout(2000);
+  }
+  throw new Error("Login timed out; run login again");
+}
+
 export async function runCli(args: string[], io: CliIO): Promise<number> {
   try {
     const { values, positionals } = parseArgs({
@@ -69,42 +109,8 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
       join(homedir(), ".config", "herbie", "session.json");
     const print = (value: unknown) => io.stdout(JSON.stringify(value, null, 2) + "\n");
     if (command === "login") {
-      const baseUrl = serviceUrl(values.url ?? "http://127.0.0.1:8787");
-      const client = createClient({ baseUrl, origin: baseUrl });
-      if (values.demo) {
-        if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(baseUrl).hostname))
-          throw new Error("Demo login is only available on loopback");
-        const result = await client.demoCliLogin();
-        await save(configPath, { baseUrl, token: result.token });
-        print(result.session);
-        return 0;
-      }
-      const auth = await client.authStart("cli");
-      if (!auth.pollToken) throw new Error("Service did not provide a CLI login token");
-      if (!auth.userCode)
-        throw new Error("Service did not provide a CLI approval code; no session saved");
-      io.stderr(
-        `Service: ${baseUrl}\nApproval code: ${auth.userCode}\nOnly approve if you started this login on this computer. Enter this code in the browser. Never approve a code sent by someone else.\nOpen this URL to sign in with GitHub:\n${auth.url}\nWaiting for browser authorization…\n`,
-      );
-      for (let count = 0; count < 150; count++) {
-        const result = await client.authPoll(auth.pollToken);
-        if (result.status === "expired") throw new Error("Login expired; run login again");
-        if (result.status === "rejected")
-          throw new Error("CLI authorization rejected; no session saved");
-        if (result.status === "complete") {
-          if (!result.token) throw new Error("Service did not provide a session");
-          const session = await createClient({
-            baseUrl,
-            origin: baseUrl,
-            token: result.token,
-          }).session();
-          await save(configPath, { baseUrl, token: result.token });
-          print(session);
-          return 0;
-        }
-        await setTimeout(2000);
-      }
-      throw new Error("Login timed out; run login again");
+      await login(values.url, values.demo, configPath, io);
+      return 0;
     }
     if (values.demo) throw new Error("--demo is only valid with login");
     const metadata = await lstat(configPath).catch(() => null);
