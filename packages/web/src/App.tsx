@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createClient, ApiError } from '@herbie/contracts/client';
 import { type Goal, type GoalEvent, type GoalAction, type Repository, type Session } from '@herbie/contracts';
 import { draftSchema, newDraft, parseDraft, type Draft } from './draft.js';
@@ -14,6 +14,45 @@ function message(error: unknown) { return error instanceof Error ? error.message
 function time(value: string) { return new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function initialDraft() { try { return draftSchema.parse(JSON.parse(sessionStorage.getItem('herbie-draft') ?? 'null')); } catch { return newDraft(); } }
 function Badge({goal}: {goal: Goal}) { return <span className="badge">{labels[goal.state]}</span>; }
+
+function GoalName({goal,onSave}: {goal: Goal;onSave: (goal: Goal) => void}) {
+  const [draft,setDraft] = useState<string|null>(null);
+  const initialCaret = useRef<number|null>(null);
+  const [saving,setSaving] = useState(false);
+  const [error,setError] = useState<string|null>(null);
+  async function save() {
+    if (draft === null || saving) return;
+    const name = draft.trim();
+    if (!name) { setError('Enter a goal name.'); return; }
+    if (name === goal.name) { setDraft(null); setError(null); return; }
+    setSaving(true); setError(null);
+    try { onSave(await api.rename(goal.id,name)); setDraft(null); }
+    catch (failure) { setError(message(failure)); }
+    finally { setSaving(false); }
+  }
+  return <>
+    <h2>{draft === null
+      ? <button className="goal-name" title="Edit goal name" onPointerDown={event => {
+          const position = document.caretPositionFromPoint?.(event.clientX,event.clientY);
+          const range = position ? null : document.caretRangeFromPoint?.(event.clientX,event.clientY);
+          const node = position?.offsetNode ?? range?.startContainer;
+          initialCaret.current = node && event.currentTarget.contains(node)
+            ? position?.offset ?? range!.startOffset : goal.name.length;
+        }} onClick={() => { initialCaret.current ??= goal.name.length; setDraft(goal.name); }}>{goal.name}</button>
+      : <textarea className="goal-name" aria-label="Goal name" aria-invalid={Boolean(error)} aria-describedby={error ? 'goal-name-error' : undefined}
+          autoFocus rows={1} readOnly={saving} value={draft}
+          ref={element => { if (element) { element.style.height = 'auto'; element.style.height = `${element.scrollHeight}px`;
+            if (initialCaret.current !== null) { element.setSelectionRange(initialCaret.current,initialCaret.current); initialCaret.current = null; } } }}
+          onChange={event => { setDraft(event.target.value.replace(/\r?\n/g,' ')); setError(null); }}
+          onBlur={() => { void save(); }}
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing || saving) return;
+            if (event.key === 'Enter') { event.preventDefault(); void save(); }
+            if (event.key === 'Escape') { event.preventDefault(); setDraft(null); setError(null); }
+          }}/>}</h2>
+    {error && <div id="goal-name-error" className="status-message" role="alert">{error}</div>}
+  </>;
+}
 
 export function App() {
   const [revision,setRevision] = useState<string|null>(null);
@@ -39,8 +78,6 @@ export function App() {
   const [eventsError,setEventsError] = useState<string|null>(null);
   const [error,setError] = useState<string|null>(null);
   const [busy,setBusy] = useState(false);
-  const [rename,setRename] = useState<{id:string;name:string}|null>(null);
-  const [renameError,setRenameError] = useState<string|null>(null);
   const creating = screen === 'new';
   const selected = creating ? null : screen;
   const [draft,setDraft] = useState<Draft>(initialDraft);
@@ -216,17 +253,6 @@ export function App() {
     } catch (failure) { setFormError(message(failure)); }
     finally { setBusy(false); }
   }
-  async function renameGoal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!rename) return;
-    setBusy(true); setRenameError(null);
-    try {
-      const result = await api.rename(rename.id,rename.name);
-      setGoals(current => current.map(item => item.id === result.id ? result : item));
-      setRename(null);
-    } catch (failure) { setRenameError(message(failure)); }
-    finally { setBusy(false); }
-  }
   async function control(action: GoalAction|'merge'|'close', branch?: string) {
     if (!goal) return;
     setBusy(true); setError(null);
@@ -272,7 +298,7 @@ export function App() {
         </>}
         {selected && goal && <section className="goal-detail" aria-label="Selected goal" aria-busy={eventsState === 'loading'}>
           <button className="back-button" onClick={navigateToList}>← All goals</button>
-          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><h2>{goal.name}</h2><button className="text-button" disabled={busy} onClick={() => { setRename({id:goal.id,name:goal.name}); setRenameError(null); }}>Rename</button></div><Badge goal={goal}/></div>
+          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><GoalName key={goal.id} goal={goal} onSave={result => setGoals(current => current.map(item => item.id === result.id ? result : item))}/></div><Badge goal={goal}/></div>
           <p className="goal-brief">{goal.prompt.replace('[demo:fail]', '').trim()}</p>
           <p className="goal-meta">Attempt {goal.attemptCount} <span>·</span> Max WIP {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}</p>
           {goal.error && <div className="status-message" role="alert">{goal.error}</div>}
@@ -290,6 +316,5 @@ export function App() {
       </>}
     </main>
     <footer className="version-footer">{revision ? <>Version <a href={`https://github.com/cmraible/herbie/commit/${revision}`} title={revision} target="_blank" rel="noreferrer"><code>{revision.slice(0,7)}</code></a></> : 'Version unavailable'}</footer>
-    {rename && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><h2 id="rename-title">Rename goal</h2><form onSubmit={event => { void renameGoal(event); }}><label>Goal name<input autoFocus required disabled={busy} value={rename.name} onChange={event => { setRename({...rename,name:event.target.value}); setRenameError(null); }}/></label>{renameError && <div className="status-message" role="alert">{renameError}</div>}<div className="dialog-footer"><button type="button" disabled={busy} onClick={() => setRename(null)}>Cancel</button><button className="primary" type="submit" disabled={busy || !rename.name.trim()}>{busy ? 'Saving…' : 'Save name'}</button></div></form></section></div>}
   </div>;
 }
