@@ -4,6 +4,7 @@ import { type Goal, type GoalEvent, type GoalAction, type Repository, type Sessi
 import { draftSchema, newDraft, parseDraft, type Draft } from './draft.js';
 
 import {sortRepositories} from './repositories.js';
+import {RepositorySelect} from './RepositorySelect.js';
 
 const api = createClient();
 const terminal = new Set(['completed','cancelled','failed']);
@@ -115,7 +116,7 @@ export function App() {
         if (!alive) return;
         setRepositories(list); setRepositoriesResolved(true);
         setDraft(current => list.some(repository => repository.fullName === current.repository)
-          ? current : {...current,repository:list[0]?.fullName ?? '',requestId:crypto.randomUUID()});
+          ? current : {...current,name:undefined,repository:list[0]?.fullName ?? '',requestId:crypto.randomUUID()});
         if (sessionStorage.getItem(onboardingInstallKey)) {
           sessionStorage.removeItem(onboardingInstallKey);
           if (list.length === 0) void connectRepositories();
@@ -197,10 +198,10 @@ export function App() {
     try { const result=await api.installationStart();location.assign(result.url); }
     catch(failure) { setError(message(failure));setBusy(false); }
   }
-  function edit(change: Partial<Draft>) { setDraft(current => ({...current,...change,requestId:crypto.randomUUID()})); setFormError(null); }
+  function edit(change: Partial<Draft>) { setDraft(current => ({...current,...change,name:undefined,requestId:crypto.randomUUID()})); setFormError(null); }
   function openCreate() {
     if (!session || sessionState !== 'signed-in' || !goalsLoaded) return;
-    if (!draft.repository && repositories[0]) setDraft(current => ({...current,repository:repositories[0].fullName}));
+    if (!draft.repository && repositories[0]) setDraft(current => ({...current,name:undefined,repository:repositories[0].fullName,requestId:crypto.randomUUID()}));
     navigateToScreen('new'); setFormError(null);
   }
   async function createGoal(event: FormEvent<HTMLFormElement>) {
@@ -282,7 +283,7 @@ export function App() {
         </section>}
         {selected && !goal && goalsLoaded && <section className="empty-state"><h2>Goal not found</h2><button className="text-button" onClick={navigateToList}>Back to goals</button></section>}
         </>}
-        {creating && <section aria-label="New goal"><form onSubmit={event => { void createGoal(event); }}><label>Repository<select autoFocus required disabled={repositoryLoading || busy} value={draft.repository} onChange={event => edit({repository:event.target.value})}><option value="" disabled>Choose a repository</option>{repositories.map(repo => <option key={repo.fullName}>{repo.fullName}</option>)}</select></label><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}><span>{repositoryLoading ? 'Checking repository access…' : 'Repository access is checked when you start a goal.'}</span>{mode === 'live' && <button type="button" className="text-button" disabled={busy} onClick={() => { void connectRepositories(); }}>Add repositories</button>}<button type="button" disabled={repositoryLoading || busy} onClick={() => setRepositoryRefresh(current => current+1)}>Refresh</button></div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access.</div>}<label>Goal name<input placeholder={mode === 'demo' ? 'Optional — defaults to the brief' : 'Optional — AI names it from your prompt'} value={draft.name} onChange={event => edit({name:event.target.value})}/></label><label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}{formError && <div className="status-message" role="alert">{formError}</div>}<div className="form-actions"><button className="primary" type="submit" disabled={busy || !goalsLoaded || repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError)}>{busy ? 'Starting…' : 'Start goal'}</button></div></form></section>}
+        {creating && <section aria-label="New goal"><form onSubmit={event => { void createGoal(event); }}><RepositorySelect repositories={repositories} value={draft.repository} onChange={repository => edit({repository})} loading={repositoryLoading} disabled={busy} onRefresh={() => setRepositoryRefresh(current => current+1)}/><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}>{repositoryLoading && <span>Checking repository access…</span>}{mode === 'live' && <button type="button" className="text-button" disabled={busy} onClick={() => { void connectRepositories(); }}>Add repositories</button>}</div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access.</div>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}{formError && <div className="status-message" role="alert">{formError}</div>}<div className="form-actions"><button className="primary" type="submit" disabled={busy || !goalsLoaded || repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError)}>{busy ? 'Starting…' : 'Start goal'}</button></div></form></section>}
       </>}
     </main>
     {rename && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><h2 id="rename-title">Rename goal</h2><form onSubmit={event => { void renameGoal(event); }}><label>Goal name<input autoFocus required disabled={busy} value={rename.name} onChange={event => { setRename({...rename,name:event.target.value}); setRenameError(null); }}/></label>{renameError && <div className="status-message" role="alert">{renameError}</div>}<div className="dialog-footer"><button type="button" disabled={busy} onClick={() => setRename(null)}>Cancel</button><button className="primary" type="submit" disabled={busy || !rename.name.trim()}>{busy ? 'Saving…' : 'Save name'}</button></div></form></section></div>}

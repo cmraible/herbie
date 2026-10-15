@@ -205,6 +205,8 @@ test('mobile loading and repeated refresh clicks remain within the viewport',asy
 });
 
 test('repository refresh keeps alphabetical order and the current selection',async({page})=>{
+  const policyErrors:string[]=[];
+  page.on('console',message=>{if(message.text().includes('Content Security Policy'))policyErrors.push(message.text());});
   await routeSignedIn(page,[]);
   const names=['zebra/App','alpha/zebra','Beta/repo','alpha/Repo','Alpha/repo','alpha/apple'];
   let requests=0;
@@ -216,14 +218,31 @@ test('repository refresh keeps alphabetical order and the current selection',asy
   await page.goto('/');
   await page.getByRole('button',{name:'New goal',exact:true}).click();
   const select=page.getByRole('combobox',{name:/^Repository/});
-  const expected=['Choose a repository','alpha/apple','Alpha/repo','alpha/Repo','alpha/zebra','Beta/repo','zebra/App'];
-  await expect(select.locator('option')).toHaveText(expected);
-  await select.selectOption('Beta/repo');
+  await expect(page.locator('.repository-select__control')).toHaveCSS('display','flex');
+  const promptY=(await page.getByLabel('What should Herbie work on?').boundingBox())!.y;
+  const expected=['alpha/apple','Alpha/repo','alpha/Repo','alpha/zebra','Beta/repo','zebra/App'];
+  await select.click();
+  await expect(page.getByRole('option')).toHaveText(expected.map(name=>name.replace('/', ' / ')));
+  await expect(page.locator('.repository-select__menu')).toHaveCSS('position','absolute');
+  expect((await page.getByLabel('What should Herbie work on?').boundingBox())!.y).toBe(promptY);
+  await expect(page.getByRole('log')).toHaveCSS('position','absolute');
+  expect(policyErrors).toEqual([]);
+  await page.screenshot({path:'test-results/repository-picker-open.png'});
+  await select.fill('btrp');
+  await expect(page.getByRole('option')).toHaveCount(1);
+  await select.press('ArrowDown');
+  await select.press('Enter');
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await expect.poll(()=>requests).toBe(2);
   await expect(select).toBeEnabled();
-  await expect(select.locator('option')).toHaveText(expected);
-  await expect(select).toHaveValue('Beta/repo');
+  await expect(page.locator('.repository-select__single-value')).toHaveText('Beta / repo');
+  await select.click();
+  await expect(page.getByRole('option')).toHaveText(expected.map(name=>name.replace('/', ' / ')));
+  await select.fill('nonexistent-repository');
+  await expect(page.getByText('No matching repositories', {exact:true})).toBeVisible();
+  await select.press('Escape');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await expect(page.locator('.repository-select__single-value')).toHaveText('Beta / repo');
 });
 
 test('a pending creation respects browser Back navigation',async({page})=>{

@@ -1,6 +1,7 @@
 import {logFailure} from './diagnostic-log.js';
 import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
+import {randomBytes} from 'node:crypto';
 import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
@@ -49,7 +50,8 @@ export function createApiServer(options:ApiOptions){
   async function handle(request:IncomingMessage,response:ServerResponse):Promise<void>{
     response.setHeader('x-content-type-options','nosniff');
     response.setHeader('referrer-policy','no-referrer');
-    response.setHeader('content-security-policy',"default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    const styleNonce=randomBytes(16).toString('base64');
+    response.setHeader('content-security-policy',`default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     const url=new URL(request.url??'/',origin);
     const method=request.method??'GET';
     const bearer=request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
@@ -182,6 +184,9 @@ export function createApiServer(options:ApiOptions){
     if(!file.startsWith(`${resolve(web)}/`)&&file!==resolve(web))throw new HttpError(404,'Not found');
     const requested=extname(file)?file:resolve(web,'index.html');
     let data:Buffer;try{data=await readFile(requested);}catch(error){logFailure(error,{component:'web-file-read'});throw new HttpError(404,'Web UI not built. Run pnpm build.');}
+    if(extname(requested)==='.html'){
+      data=Buffer.from(data.toString('utf8').replace('<head>',`<head><meta name="style-nonce" content="${styleNonce}"/>`));
+    }
     const mime:Record<string,string>={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'};
     response.writeHead(200,{'content-type':`${mime[extname(requested)]??'application/octet-stream'}; charset=utf-8`,'cache-control':'no-cache'});response.end(method==='HEAD'?undefined:data);
   }

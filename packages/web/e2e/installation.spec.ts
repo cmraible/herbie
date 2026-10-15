@@ -41,7 +41,7 @@ test('repository setup runs during onboarding, refreshes access, and survives Ba
   await expect(page).toHaveURL(`${baseUrl}/`);
   expect(repositoryRequests).toBeGreaterThanOrEqual(2);
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
+  await expect(page.locator('.repository-select__single-value')).toHaveText('public-sample / project');
   await expect(page.getByRole('button',{name:'Add repositories'})).toBeVisible();
   await page.getByRole('button',{name:'Back to goals'}).click();
 
@@ -54,5 +54,5 @@ test('repository setup runs during onboarding, refreshes access, and survives Ba
   await expect(page.getByRole('button',{name:'Sign out'}).first()).toBeEnabled();
   await page.getByRole('button',{name:'New goal',exact:true}).click();
   await expect(page.getByRole('button',{name:'Back to goals'})).toBeEnabled();
-  await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
+  await expect(page.locator('.repository-select__single-value')).toHaveText('public-sample / project');
 });

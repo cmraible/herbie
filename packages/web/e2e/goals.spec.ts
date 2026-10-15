@@ -142,20 +142,20 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
   await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
 });
 
-test('a custom name can be edited without changing the brief and survives reload',async({page})=>{
+test('an automatic name can be edited without changing the brief and survives reload',async({page})=>{
   await login(page);
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  await page.getByLabel('Goal name',{exact:true}).fill('Signup validation');
+  await expect(page.getByLabel('Goal name',{exact:true})).toHaveCount(0);
   await page.getByLabel('What should Herbie work on?').fill('Validate email addresses and show helpful errors.');
   await page.getByRole('button',{name:'Start goal',exact:true}).click();
-  await expect(detail(page).getByRole('heading',{name:'Signup validation',exact:true})).toBeVisible();
+  await expect(detail(page).getByRole('heading',{name:'Validate email addresses and show helpful errors.',exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Rename goal'});
   await dialog.getByLabel('Goal name').fill('   ');
   await expect(dialog.getByRole('button',{name:'Save name'})).toBeDisabled();
   await dialog.getByLabel('Goal name').fill('Discard this name');
   await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
-  await expect(detail(page).getByRole('heading',{name:'Signup validation',exact:true})).toBeVisible();
+  await expect(detail(page).getByRole('heading',{name:'Validate email addresses and show helpful errors.',exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
   await dialog.getByLabel('Goal name').fill('  Better signup errors  ');
   await dialog.getByRole('button',{name:'Save name'}).click();
@@ -172,11 +172,9 @@ test('web names support the same Unicode length limit as the API',async({page})=
   await login(page);
   const name='🥁'.repeat(120);
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  await page.getByLabel('Goal name',{exact:true}).fill(name);
-  await expect(page.getByLabel('Goal name',{exact:true})).toHaveValue(name);
   await page.getByLabel('What should Herbie work on?').fill('Exercise Unicode goal names');
   await page.getByRole('button',{name:'Start goal',exact:true}).click();
-  await expect(detail(page).getByRole('heading',{name,exact:true})).toBeVisible();
+  await expect(detail(page).getByRole('heading',{name:'Exercise Unicode goal names',exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Rename goal'});
   await dialog.getByLabel('Goal name').fill(name+'🥁');
@@ -187,4 +185,36 @@ test('web names support the same Unicode length limit as the API',async({page})=
   await expect(dialog.getByLabel('Goal name')).toHaveValue(renamed);
   await dialog.getByRole('button',{name:'Save name'}).click();
   await expect(detail(page).getByRole('heading',{name:renamed,exact:true})).toBeVisible();
+});
+
+test('a legacy named draft can replay a create request after reload',async({page})=>{
+  await login(page);
+  const draft={repository:'demo/example',name:'Legacy custom name',prompt:'Recover a legacy named request',requestId:crypto.randomUUID()};
+  const response=await page.request.post('/api/goals',{
+    headers:{origin:url,'idempotency-key':draft.requestId},
+    data:{repository:draft.repository,name:draft.name,prompt:draft.prompt},
+  });
+  expect(response.ok()).toBeTruthy();
+  const created=goalSchema.parse(await response.json());
+  await page.evaluate(draft=>sessionStorage.setItem('herbie-draft',JSON.stringify(draft)),draft);
+  await page.goto('/#new');
+  await page.reload();
+  await expect(page.getByLabel('Goal name',{exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(page).toHaveURL(new RegExp(`#${created.id}$`));
+  await expect(detail(page).getByRole('heading',{name:draft.name,exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+});
+
+test('editing a legacy draft discards its hidden name',async({page})=>{
+  await login(page);
+  await page.evaluate(()=>sessionStorage.setItem('herbie-draft',JSON.stringify({
+    repository:'demo/example',name:'Obsolete name',prompt:'Old brief',requestId:crypto.randomUUID(),
+  })));
+  await page.goto('/#new');
+  await page.reload();
+  await page.getByLabel('What should Herbie work on?').fill('Name this updated brief automatically');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(detail(page).getByRole('heading',{name:'Name this updated brief automatically',exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
 });
