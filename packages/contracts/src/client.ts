@@ -29,7 +29,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
   }
   const goalPath = (id: string) => `/api/goals/${z.uuid().parse(id)}`;
   return {
-    health: () => request('/api/health', z.object({mode: z.enum(['demo','live'])})),
+    health: () => request('/api/health', z.object({mode: z.enum(['demo','live']), deploymentId: z.string().optional(), imageRevision: z.string().optional()})),
     session: () => request('/api/session', sessionSchema),
     repositories: () => request('/api/repositories', z.array(repositorySchema)),
     goals: () => request('/api/goals', z.array(goalSchema)),

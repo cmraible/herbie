@@ -24,7 +24,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 a { color: inherit; }
 p, h1, h2, h3 { margin: 0; }
 
-.app { min-height: 100vh; }
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.version-footer { margin-top: auto; padding: 16px 24px; text-align: center; color: #999; font-size: 12px; }
 .topbar {
   min-height: 58px;
   padding: 0 max(24px, calc((100vw - 820px) / 2));
