@@ -266,8 +266,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           status,
           changes: patch!
             .split("\n")
-            .filter((line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("\\"))
-            .filter((line) => !line.startsWith("+++") && !line.startsWith("---")),
+            .filter(
+              (line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("\\"),
+            ),
         })),
       );
       if (batch.length < 100)
