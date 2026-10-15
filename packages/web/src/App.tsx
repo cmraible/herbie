@@ -39,14 +39,24 @@ export function App() {
   const [eventsError,setEventsError] = useState<string|null>(null);
   const [error,setError] = useState<string|null>(null);
   const [busy,setBusy] = useState(false);
-  const [rename,setRename] = useState<{id:string;name:string}|null>(null);
-  const [renameError,setRenameError] = useState<string|null>(null);
+  const [goalEdit,setGoalEdit] = useState<(Draft & {id:string})|null>(null);
   const creating = screen === 'new';
-  const selected = creating ? null : screen;
+  const editing = Boolean(screen?.endsWith('/edit'));
+  const selected = creating ? null : editing ? screen!.slice(0,-5) : screen;
   const [draft,setDraft] = useState<Draft>(initialDraft);
   const [formError,setFormError] = useState<string|null>(null);
   const [installationNotice,setInstallationNotice] = useState<string|null>(null);
   const goal = goals.find(item => item.id === selected) ?? null;
+  const formDraft = editing ? goalEdit : draft;
+  useEffect(() => {
+    setFormError(null);
+    if (!editing) setGoalEdit(null);
+  },[screen]);
+  useEffect(() => {
+    if (editing && goal) setGoalEdit(current => current?.id === goal.id ? current : {
+      ...newDraft(goal.repository),id:goal.id,name:goal.name,prompt:goal.prompt,maxWip:String(goal.maxWip),
+    });
+  },[editing,goal]);
   const visibleGoals = goals.filter(item => showFinished || !['completed','cancelled'].includes(item.state));
   const finishedCount = goals.filter(item => ['completed','cancelled'].includes(item.state)).length;
 
@@ -216,16 +226,20 @@ export function App() {
     } catch (failure) { setFormError(message(failure)); }
     finally { setBusy(false); }
   }
-  async function renameGoal(event: FormEvent<HTMLFormElement>) {
+  async function saveGoalEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!rename) return;
-    setBusy(true); setRenameError(null);
+    if (!goalEdit) return;
+    setBusy(true); setFormError(null);
     try {
-      const result = await api.rename(rename.id,rename.name);
+      const result = await api.update(goalEdit.id,{name:goalEdit.name,prompt:goalEdit.prompt,maxWip:Number(goalEdit.maxWip)});
       setGoals(current => current.map(item => item.id === result.id ? result : item));
-      setRename(null);
-    } catch (failure) { setRenameError(message(failure)); }
+      if (location.hash === `#${goalEdit.id}/edit`) navigateToScreen(result.id,true);
+    } catch (failure) { setFormError(message(failure)); }
     finally { setBusy(false); }
+  }
+  function editForm(change: Partial<Draft>) {
+    if (editing) { setGoalEdit(current => current ? {...current,...change} : current); setFormError(null); }
+    else edit(change);
   }
   async function control(action: GoalAction|'merge'|'close'|'retry', branch?: string) {
     if (!goal) return;
@@ -246,7 +260,7 @@ export function App() {
       </div>
     </header>
     {error && <div className="error-banner" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError(null)}>×</button></div>}
-    <main className={`workspace${creating ? ' workspace-create' : ''}`}>
+    <main className={`workspace${creating || editing ? ' workspace-create' : ''}`}>
       {sessionState !== 'signed-in' ? <section className="welcome" aria-busy={sessionState === 'pending'}>
         <h1>Herbie</h1>
         <p>Give a coding goal a clear brief. Herbie works on it and brings back a result for you to review.</p>
@@ -255,13 +269,14 @@ export function App() {
         {sessionState === 'signed-out' && healthState === 'ready' && <><button className="primary" onClick={() => { void login(mode === 'demo'); }} disabled={busy}>{mode === 'demo' ? 'Enter demo' : 'Continue with GitHub'}</button><p className="fineprint">{mode === 'demo' ? 'Demo jobs and pull requests are simulated.' : 'GitHub access is checked separately for each repository.'}</p></>}
       </section> : <>
         {creating && <button className="back-button" onClick={navigateToList} disabled={busy}>← Back to goals</button>}
-        <section className="page-heading"><div><h1>{creating ? 'New goal' : selected ? 'Goal' : 'Goals'}</h1>{!creating && !selected && <p>Work that keeps moving.</p>}</div>{!creating && <div className="heading-actions"><button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div>}</section>
+        {editing && <button className="back-button" disabled={busy} onClick={() => navigateToScreen(selected!,true)}>← Back to goal</button>}
+        <section className="page-heading"><div><h1>{creating ? 'New goal' : editing ? 'Edit goal' : selected ? 'Goal' : 'Goals'}</h1>{!creating && !selected && <p>Work that keeps moving.</p>}</div>{!creating && !editing && <div className="heading-actions"><button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>New goal</button></div>}</section>
         {installationNotice && <div className="status-message" role="status">{{connected: 'GitHub connected. Repositories are refreshing.', permissions: 'The app needs Contents and Pull requests write permissions. Update its GitHub permissions, then connect again.', cancelled: 'GitHub connection was cancelled.', expired: 'That installation link expired. Connect repositories again.', failed: 'Herbie could not verify the installation. Try connecting again.'}[installationNotice] ?? 'GitHub installation status updated.'}</div>}
         {mode === 'demo' && <p className="subtle-note">Demo mode: attempts and pull requests are simulated.</p>}
         {healthState === 'error' && <div className="status-message" role="alert">{startupError ?? 'Herbie could not connect.'}<button onClick={() => setStartupRefresh(value => value + 1)}>Retry</button></div>}
         {!goalsLoaded && !goalsError && <p className="subtle-note" role="status">Loading goals…</p>}
         {goalsError && <div className="status-message" role="alert">{goalsLoaded && 'Couldn’t refresh goals. Showing the latest saved progress. '}{goalsError}<button onClick={() => setGoalsRefresh(value => value + 1)}>Retry</button></div>}
-        {!creating && <>
+        {!creating && !editing && <>
         {!selected && goalsLoaded && goals.length === 0 && <section className="empty-state"><h2>No goals yet</h2><p>Start with one useful change.</p><button className="text-button" onClick={openCreate}>Create a goal</button></section>}
         {!selected && goals.length > 0 && <>
           <section className="goal-list" aria-label="Goals" aria-busy={!goalsLoaded}>
@@ -272,8 +287,9 @@ export function App() {
         </>}
         {selected && goal && <section className="goal-detail" aria-label="Selected goal" aria-busy={eventsState === 'loading'}>
           <button className="back-button" onClick={navigateToList}>← All goals</button>
-          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><h2>{goal.name}</h2><button className="text-button" disabled={busy} onClick={() => { setRename({id:goal.id,name:goal.name}); setRenameError(null); }}>Rename</button></div><Badge goal={goal}/></div>
+          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><h2>{goal.name}</h2><button className="text-button" disabled={busy} onClick={() => navigateToScreen(`${goal.id}/edit`)}>Edit goal</button></div><Badge goal={goal}/></div>
           <p className="goal-brief">{goal.prompt.replace('[demo:fail]', '').trim()}</p>
+
           <p className="goal-meta">Attempt {goal.attemptCount} <span>·</span> Max WIP {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}</p>
           {goal.error && <div className="status-message" role="alert">{goal.error}</div>}
           {['failed','needs_attention'].includes(goal.state) && <div className="status-message"><span>Retry recovers saved work when possible, or starts a new attempt.</span><button className="primary" disabled={busy} onClick={() => { void control('retry'); }}>{busy ? 'Retrying…' : 'Retry'}</button></div>}
@@ -287,10 +303,19 @@ export function App() {
         </section>}
         {selected && !goal && goalsLoaded && <section className="empty-state"><h2>Goal not found</h2><button className="text-button" onClick={navigateToList}>Back to goals</button></section>}
         </>}
-        {creating && <section aria-label="New goal"><form onSubmit={event => { void createGoal(event); }}><RepositorySelect repositories={repositories} value={draft.repository} onChange={repository => edit({repository})} loading={repositoryLoading} disabled={busy} onRefresh={() => setRepositoryRefresh(current => current+1)}/><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}>{repositoryLoading && <span>Checking repository access…</span>}{mode === 'live' && <button type="button" className="text-button" disabled={busy} onClick={() => { void connectRepositories(); }}>Add repositories</button>}</div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access.</div>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label><label>Maximum work in progress<input type="number" min="1" max="2147483647" required value={draft.maxWip} onChange={event => edit({maxWip:event.target.value})}/><span>Open pull requests and the attempt preparing the next one.</span></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}{formError && <div className="status-message" role="alert">{formError}</div>}<div className="form-actions"><button className="primary" type="submit" disabled={busy || !goalsLoaded || repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError)}>{busy ? 'Starting…' : 'Start goal'}</button></div></form></section>}
+        {editing && !goal && goalsLoaded && <section className="empty-state"><h2>Goal not found</h2><button className="text-button" onClick={navigateToList}>Back to goals</button></section>}
+        {(creating || editing && goal) && formDraft && <section aria-label={editing ? 'Edit goal' : 'New goal'}><form onSubmit={event => { void (editing ? saveGoalEdit(event) : createGoal(event)); }}>
+          {editing ? <label>Repository<input readOnly value={formDraft.repository}/><span>Existing attempts and pull requests belong to this repository.</span></label> : <><RepositorySelect repositories={repositories} value={draft.repository} onChange={repository => edit({repository})} loading={repositoryLoading} disabled={busy} onRefresh={() => setRepositoryRefresh(current => current+1)}/><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}>{repositoryLoading && <span>Checking repository access…</span>}{mode === 'live' && <button type="button" className="text-button" disabled={busy} onClick={() => { void connectRepositories(); }}>Add repositories</button>}</div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access.</div>}</>}
+          {editing && <label>Goal name<input autoFocus required disabled={busy} value={formDraft.name ?? ''} onChange={event => editForm({name:event.target.value})}/></label>}
+          <label>What should Herbie work on?<textarea disabled={busy} required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={formDraft.prompt} onChange={event => editForm({prompt:event.target.value})}/></label><label>Maximum work in progress<input disabled={busy} type="number" min="1" max="2147483647" required value={formDraft.maxWip} onChange={event => editForm({maxWip:event.target.value})}/><span>Open pull requests and the attempt preparing the next one.</span></label>{mode === 'demo' && <label className="checkbox-label"><input disabled={busy} type="checkbox" checked={formDraft.prompt.includes('[demo:fail]')} onChange={event => editForm({prompt:event.target.checked ? `[demo:fail] ${formDraft.prompt}` : formDraft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}
+          {editing && <p className="subtle-note">Prompt changes apply to future attempts. Existing work will finish before a lower work limit takes effect.</p>}
+          {formError && <div className="status-message" role="alert">{formError}</div>}
+          <div className="form-actions">{editing && <button type="button" disabled={busy} onClick={() => navigateToScreen(selected!,true)}>Cancel</button>}<button className="primary" type="submit" disabled={busy || !goalsLoaded || (editing ? !formDraft.name?.trim() || !formDraft.prompt.trim() : repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError))}>{busy ? editing ? 'Saving…' : 'Starting…' : editing ? 'Save changes' : 'Start goal'}</button></div>
+        </form></section>}
+
       </>}
     </main>
     <footer className="version-footer">{revision ? <>Version <a href={`https://github.com/cmraible/herbie/commit/${revision}`} title={revision} target="_blank" rel="noreferrer"><code>{revision.slice(0,7)}</code></a></> : 'Version unavailable'}</footer>
-    {rename && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><h2 id="rename-title">Rename goal</h2><form onSubmit={event => { void renameGoal(event); }}><label>Goal name<input autoFocus required disabled={busy} value={rename.name} onChange={event => { setRename({...rename,name:event.target.value}); setRenameError(null); }}/></label>{renameError && <div className="status-message" role="alert">{renameError}</div>}<div className="dialog-footer"><button type="button" disabled={busy} onClick={() => setRename(null)}>Cancel</button><button className="primary" type="submit" disabled={busy || !rename.name.trim()}>{busy ? 'Saving…' : 'Save name'}</button></div></form></section></div>}
+
   </div>;
 }

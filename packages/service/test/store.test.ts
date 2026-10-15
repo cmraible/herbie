@@ -62,6 +62,10 @@ integration('migration removes old limits and preserves goals, artifacts, and re
   await assert.rejects(store.createGoal('owner',request,'demo',key), /different request/);
   assert.ok((await store.createGoal('owner',input(),'live',randomUUID())).created);
   assert.deepEqual((await store.pool.query('SELECT test_command FROM goals WHERE id=$1',[id])).rows[0].test_command,['npm','test']);
+  await store.editGoalPrompt(id,'owner','Updated legacy goal');
+  await store.editGoalPrompt(id,'owner','Updated again');
+  assert.equal((await store.createGoal('owner',request,'live',key)).goal.prompt,'Updated again');
+  await assert.rejects(store.createGoal('owner',{...request,prompt:'Updated again'},'live',key), /different request/);
 
   const baseCommit = 'a'.repeat(40), patch = Buffer.from('legacy patch');
   const evidence = {version:2,repoUrl:'https://github.com/example/repo.git',baseCommit,
@@ -570,4 +574,63 @@ integration('a draining older coordinator can publish and reconcile after the PR
   assert.deepEqual((await store.getGoal(goal.id))?.pullRequests,[merged]);
   await store.migrate();
   assert.deepEqual((await store.getGoal(goal.id))?.pullRequests,[merged]);
+});
+
+integration('prompt edits persist, preserve request replays, and apply to subsequent claims', async () => {
+  const owner = randomUUID(), key = randomUUID(), request = {...input(),maxWip:2};
+  const {goal} = await store.createGoal(owner,request,'demo',key);
+  await assert.rejects(store.editGoalPrompt(goal.id,'another-owner','Private edit'), /Goal not found/);
+  for (const prompt of ['', '   ', 'x'.repeat(8001)]) await assert.rejects(store.editGoalPrompt(goal.id,owner,prompt));
+  const edited = await store.editGoalPrompt(goal.id,owner,'  Updated instructions  ');
+  assert.equal(edited.prompt,'Updated instructions');
+  assert.equal(edited.name,goal.name);
+  assert.equal(edited.state,goal.state);
+  assert.equal(edited.attemptCount,0);
+  assert.equal((await new Store(store.pool).getGoal(goal.id))?.prompt,edited.prompt);
+  const replay = await store.createGoal(owner,request,'demo',key);
+  assert.equal(replay.created,false);
+  assert.equal(replay.goal.prompt,edited.prompt);
+  await assert.rejects(store.createGoal(owner,{...request,prompt:edited.prompt},'demo',key), /different request/);
+  const job = await store.claim('worker');
+  assert.ok(job);
+  assert.equal(job.goal.prompt,edited.prompt);
+  const running = await store.editGoalPrompt(goal.id,owner,'Instructions for the next attempt');
+  assert.equal(running.state,'running');
+  assert.equal(job.goal.prompt,edited.prompt);
+  await store.saveArtifact(job.id,'worker',{baseCommit:'abc',patch:Buffer.from('saved work')});
+  await store.beginPublication(job.id,'worker');
+  await store.completePublication(job.id,'worker',{url:'https://github.com/example/repo/pull/1',number:1,branch:job.branch});
+  assert.equal((await store.claim('next-worker'))?.goal.prompt,running.prompt);
+  await store.control(goal.id,owner,'cancel');
+  assert.equal((await store.editGoalPrompt(goal.id,owner,'Final instructions')).state,'cancelled');
+  assert.equal((await store.events(goal.id)).at(-1)?.type,'prompt_updated');
+});
+
+
+integration('goal settings update atomically and WIP changes respect existing and paused work', async () => {
+  const request = input(), key = randomUUID();
+  const {goal} = await store.createGoal('owner',request,'demo',key);
+  await assert.rejects(store.updateGoal(goal.id,'other',{name:'Private edit'}), /Goal not found/);
+  await assert.rejects(store.updateGoal(goal.id,'owner',{name:'Changed',prompt:'Changed',maxWip:0}));
+  assert.deepEqual(await store.getGoal(goal.id),goal);
+  const first = await publishNext(1);
+  assert.equal(await store.claim('worker'),null);
+  const edited = await store.updateGoal(goal.id,'owner',{name:'New name',prompt:'New prompt',maxWip:2});
+  assert.equal(edited.name,'New name');
+  assert.equal(edited.prompt,'New prompt');
+  assert.equal(edited.state,'queued');
+  // Reducing capacity must also hold work already queued under the higher limit.
+  await store.updateGoal(goal.id,'owner',{maxWip:1});
+  assert.equal(await store.claim('worker'),null);
+  await store.reconcile(first.id,'merged');
+  const running = await store.claim('worker');
+  assert.ok(running);
+  assert.equal(running.goal.prompt,'New prompt');
+  await store.control(goal.id,'owner','pause');
+  await store.saveArtifact(running.id,'worker',{baseCommit:'abc',patch:Buffer.from('saved')});
+  assert.equal((await store.updateGoal(goal.id,'owner',{maxWip:3})).state,'paused');
+  assert.equal(await store.claim('worker'),null);
+  await store.control(goal.id,'owner','cancel');
+  assert.equal((await store.updateGoal(goal.id,'owner',{maxWip:4})).state,'cancelled');
+  assert.equal((await store.createGoal('owner',request,'demo',key)).goal.maxWip,4);
 });
