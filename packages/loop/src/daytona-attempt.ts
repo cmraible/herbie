@@ -17,7 +17,7 @@ import {
   type AttemptDiagnostic,
 } from "./attempt-diagnostics.js";
 
-import { installDaytonaRuntime, configureDaytonaRuntime } from "./daytona-runtime.js";
+import { installDaytonaRuntime, configureDaytonaRuntime, daytonaPath } from "./daytona-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
 
 type AttemptSandbox = Pick<Sandbox, "id" | "delete"> & {
@@ -231,7 +231,7 @@ export async function runDaytonaAttempt(
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
     request.signal?.throwIfAborted();
     const result = await sandbox.process.executeCommand(
-      `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`,
+      `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} node ${directory}/daytona-runner.js`,
       directory,
       undefined,
       22 * 60,

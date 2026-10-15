@@ -265,16 +265,24 @@ const changes = await runDaytonaAttempt(
 ```
 
 Without a snapshot, the adapter creates Ubuntu 22.04 with 1 CPU, 1 GiB RAM, and
-3 GiB disk, then installs Git, Node 24.19.0 and Codex 0.159.2 inside that disposable
-sandbox. The Node/Codex archive digests are verified before extraction. This reuses
+3 GiB disk, then installs Git, Node 24.19.0, Python 3.15.0 with pip, and Codex 0.159.2
+inside that disposable sandbox. Archive digests are verified before extraction. This reuses
 the runtime pins from the successful compatibility probe; it does not build a custom
 reusable snapshot or install repository dependencies. An optional snapshot must be
-a root-accessible Ubuntu-compatible runtime with Node 24+, Git, Codex and `runuser`.
-The adapter runs Codex as the unprivileged `compat` user.
+a root-accessible Ubuntu-compatible runtime with Node 24+, Python 3 with pip, Git,
+Codex and `runuser`. Use standalone Python that permits user installs; externally managed system Python
+is rejected during preflight. Snapshot tools must be exposed in `/usr/local/bin`,
+`/usr/bin`, or `/bin`. Custom image `PATH` and `VIRTUAL_ENV` settings are not
+inherited by the agent; virtual-environment snapshots are not supported.
+The adapter runs Codex as the unprivileged `compat` user. Its user tool directory
+(`~/.local/bin`) follows system directories on `PATH`, so the agent can install optional tools with
+`python3 -m pip install --user lizard`. Lizard is not preinstalled.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
-needs the Ubuntu package repositories, nodejs.org and registry.npmjs.org; the goal
+needs the Ubuntu package repositories, nodejs.org, registry.npmjs.org, and GitHub
+release downloads (`github.com` and `release-assets.githubusercontent.com`);
+Python package installation needs pypi.org and files.pythonhosted.org. The goal
 needs the public Git repository and api.openai.com. A blocked setup fails and deletes
 the sandbox rather than changing network policy.
 

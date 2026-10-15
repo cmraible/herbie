@@ -152,7 +152,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.ok(input);
   assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, goal: request.goal });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
-    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${root}/daytona-runner.js`,
+    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
     root,
     undefined,
     22 * 60,
@@ -309,7 +309,7 @@ async function localFixture(t: TestContext, edits = "") {
   sandbox.process.executeCommand.mock.mockImplementation(async (command, cwd) => {
     if (!cwd) return { exitCode: 0, result: "fixture preflight" };
     // Execute the uploaded coding runner with a local fake Codex.
-    const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node `;
+    const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node `;
     const runner = command.slice(prefix.length);
     assert.equal(command, `${prefix}${cwd}/daytona-runner.js`);
     const { stdout } = await promisify(execFile)(process.execPath, [runner], {
