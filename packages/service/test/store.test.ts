@@ -529,6 +529,24 @@ integration('closing a sibling PR during publication pauses when publication fin
   assert.ok(await store.claim('worker'));
 });
 
+integration('a sibling merge preserves the closure pause until publication finishes', async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:3},'demo',randomUUID());
+  const first = await publishNext(1);
+  const second = await publishNext(2);
+  const third = await store.claim('worker');
+  assert.ok(third);
+  await store.saveArtifact(third.id,'worker',{baseCommit:'abc',patch:Buffer.from('saved')});
+  await store.beginPublication(third.id,'worker');
+  await store.reconcile(first.id,'closed');
+  const merging = await store.reconcile(second.id,'merged');
+  assert.equal(merging.stopRequested,'pause');
+  const after = await store.completePublication(third.id,'worker',{url:'https://github.com/example/repo/pull/3',number:3,branch:third.branch});
+  assert.equal(after.state,'paused');
+  assert.equal(await store.claim('extra'),null);
+  await store.control(goal.id,'owner','resume');
+  assert.ok(await store.claim('worker'));
+});
+
 for (const recovery of ['uncertain','expired','blocked'] as const) integration(`closure pause survives ${recovery} publication recovery`, async () => {
   const {goal} = await store.createGoal('owner',{...input(),name:'Recovery fixture',maxWip:2},'live',randomUUID());
   const first = await publishNext(1);

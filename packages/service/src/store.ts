@@ -84,7 +84,7 @@ async function advanceGoal(client: PoolClient, goal: Goal): Promise<void> {
     await insertJob(client, goal.id, cycle + 1);
     pending = {stage:'queued',cycle:cycle+1};
   }
-  const state = goal.state === 'paused' || goal.stopRequested === 'pause' && pending?.stage !== 'running' ? 'paused'
+  const state = goal.state === 'paused' || goal.stopRequested === 'pause' && !['running','publishing'].includes(pending?.stage ?? '') ? 'paused'
     : pending ? ['running','publishing'].includes(pending.stage) ? 'running' : 'queued' : 'awaiting_review';
   await client.query("UPDATE goals SET state=$2,stop_requested=CASE WHEN $2='paused' THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1", [goal.id,state]);
 }
