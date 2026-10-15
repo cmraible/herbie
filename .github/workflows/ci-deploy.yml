@@ -9,6 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect Markdown-only changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      markdown-only: ${{ steps.diff.outputs.markdown-only }}
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Include both sides of renames so moving code to a .md file runs tests.
+          changes="$(git diff --name-only --no-renames "$BASE...$HEAD" -- . ':(exclude)*.md')"
+          markdown_only=false
+          if [[ -z "$changes" ]]; then markdown_only=true; fi
+          echo "markdown-only=$markdown_only" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify
     if: github.event_name == 'pull_request'
@@ -44,7 +67,8 @@ jobs:
 
   unit-verification:
     name: Unit and PostgreSQL integration tests
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.markdown-only == 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -90,7 +114,8 @@ jobs:
 
   cli-verification:
     name: Compiled CLI end-to-end
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.markdown-only == 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -136,7 +161,8 @@ jobs:
 
   browser-verification:
     name: Browser verification
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.markdown-only == 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -188,6 +214,7 @@ jobs:
 
   container-verification:
     name: Portable container verification
+    # Every PR needs a tested image for promotion after merge, including docs-only PRs.
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -199,6 +226,7 @@ jobs:
   all-tests-passed:
     name: All tests passed
     needs:
+      - changes
       - verify
       - unit-verification
       - cli-verification
@@ -210,6 +238,8 @@ jobs:
     steps:
       - name: Require every blocking check to pass
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          MARKDOWN_ONLY: ${{ needs.changes.outputs.markdown-only }}
           BUILD_RESULT: ${{ needs.verify.result }}
           UNIT_RESULT: ${{ needs.unit-verification.result }}
           CLI_RESULT: ${{ needs.cli-verification.result }}
@@ -217,9 +247,12 @@ jobs:
           CONTAINER_RESULT: ${{ needs.container-verification.result }}
         run: |
           failed=0
-          for check in BUILD UNIT CLI BROWSER CONTAINER; do
+          for check in CHANGES BUILD UNIT CLI BROWSER CONTAINER; do
             result_var="${check}_RESULT"
             result="${!result_var}"
+            if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(UNIT|CLI|BROWSER)$ ]]; then
+              continue
+            fi
             if [[ "$result" != success ]]; then
               printf '%s verification result: %s\n' "$check" "$result" >&2
               failed=1
