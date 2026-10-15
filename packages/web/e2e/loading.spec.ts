@@ -221,3 +221,56 @@ test('repository refresh keeps alphabetical order and the current selection',asy
   await expect(select.locator('option')).toHaveText(expected);
   await expect(select).toHaveValue('Beta/repo');
 });
+
+test('a pending creation respects browser Back navigation',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let created=false;
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',async route=>{
+    if(route.request().method()==='POST'){
+      await gate;
+      created=true;
+      await json(route,fixtureGoal);
+    }else await json(route,created?[fixtureGoal]:[]);
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('What should Herbie work on?').fill(fixtureGoal.prompt);
+  const request=page.waitForRequest(request=>request.method()==='POST'&&new URL(request.url()).pathname==='/api/goals');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await request;
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  release();
+  await expect(page.getByRole('button',{name:'Sign out'})).toBeEnabled();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible({timeout:1000});
+  await expect(page.getByRole('button',{name:/Keep loaded work visible/})).toBeVisible();
+});
+
+test('direct creation waits for the initial goals request to succeed',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let fail=true;
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',async route=>{
+    await gate;
+    await (fail?json(route,{error:'goals unavailable'},503):json(route,[]));
+  });
+  await page.goto('/#new');
+  await expect(page.getByLabel('Repository')).toBeEnabled();
+  const start=page.getByRole('button',{name:'Start goal',exact:true});
+  await expect(start).toBeDisabled({timeout:1000});
+  release();
+  await expect(page.getByRole('alert')).toContainText('goals unavailable');
+  await expect(start).toBeDisabled();
+  fail=false;
+  await page.getByRole('button',{name:'Retry'}).click();
+  await expect(start).toBeEnabled();
+});
