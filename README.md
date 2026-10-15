@@ -270,15 +270,18 @@ inside that disposable sandbox. Archive digests are verified before extraction. 
 the runtime pins from the successful compatibility probe; it does not build a custom
 reusable snapshot or install repository dependencies. An optional snapshot must be
 a root-accessible Ubuntu-compatible runtime with Node 24+, Python 3 with pip, Git,
-Codex and `runuser`.
+Codex and `runuser`. Python must permit user installs (standalone Python or a
+writable virtual environment); externally managed system Python is rejected during preflight.
 The adapter runs Codex as the unprivileged `compat` user. Its user tool directory
-(`~/.local/bin`) is on `PATH`, so the agent can install optional tools with
-`python3 -m pip install --user lizard`; Lizard is not preinstalled.
+(`~/.local/bin`) follows system directories on `PATH`, so the agent can install optional tools with
+`python3 -m pip install --user lizard` in the default runtime; omit `--user` for
+a writable virtual-environment snapshot. Lizard is not preinstalled.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
 needs the Ubuntu package repositories, nodejs.org, registry.npmjs.org, and GitHub
-release downloads; Python package installation needs pypi.org and files.pythonhosted.org. The goal
+release downloads (`github.com` and `release-assets.githubusercontent.com`);
+Python package installation needs pypi.org and files.pythonhosted.org. The goal
 needs the public Git repository and api.openai.com. A blocked setup fails and deletes
 the sandbox rather than changing network policy.
 
