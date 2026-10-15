@@ -8,7 +8,7 @@ on:
       release_sequence:
         description: Monotonic sequence from the main CI run
         type: string
-        default: '0'
+        default: "0"
   workflow_dispatch:
     inputs:
       publish:

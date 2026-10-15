@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '24.19.0'
+          node-version: "24.19.0"
           package-manager-cache: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -32,7 +32,7 @@ jobs:
           cache: true
           cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Build and typecheck every package
+      - name: Check lint, formatting, build, and types
         run: bash scripts/ci-verify.sh build
       - name: Save failure evidence
         if: failure()
@@ -57,7 +57,7 @@ jobs:
           POSTGRES_USER: herbie
           POSTGRES_PASSWORD: herbie-local-only
           POSTGRES_DB: herbie
-        ports: ['55432:5432']
+        ports: ["55432:5432"]
         options: >-
           --health-cmd "pg_isready -U herbie"
           --health-interval 2s --health-timeout 2s --health-retries 15
@@ -69,7 +69,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '24.19.0'
+          node-version: "24.19.0"
           package-manager-cache: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -103,7 +103,7 @@ jobs:
           POSTGRES_USER: herbie
           POSTGRES_PASSWORD: herbie-local-only
           POSTGRES_DB: herbie
-        ports: ['55432:5432']
+        ports: ["55432:5432"]
         options: >-
           --health-cmd "pg_isready -U herbie"
           --health-interval 2s --health-timeout 2s --health-retries 15
@@ -115,7 +115,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '24.19.0'
+          node-version: "24.19.0"
           package-manager-cache: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -149,7 +149,7 @@ jobs:
           POSTGRES_USER: herbie
           POSTGRES_PASSWORD: herbie-local-only
           POSTGRES_DB: herbie
-        ports: ['55432:5432']
+        ports: ["55432:5432"]
         options: >-
           --health-cmd "pg_isready -U herbie"
           --health-interval 2s --health-timeout 2s --health-retries 15
@@ -161,7 +161,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '24.19.0'
+          node-version: "24.19.0"
           package-manager-cache: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:

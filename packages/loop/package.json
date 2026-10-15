@@ -2,12 +2,14 @@
   "name": "@herbie/loop",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "license": "MIT",
-  "engines": {
-    "node": ">=24"
-  },
   "description": "A controller for managing AI loops.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./daytona-attempt": "./dist/daytona-attempt.js",
+    "./publish-patch": "./dist/publish-patch.js",
+    "./diagnostic-log": "./dist/diagnostic-log.js"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsc",
@@ -19,9 +21,7 @@
   "dependencies": {
     "@daytona/sdk": "0.220.0"
   },
-  "exports": {
-    "./daytona-attempt": "./dist/daytona-attempt.js",
-    "./publish-patch": "./dist/publish-patch.js",
-    "./diagnostic-log": "./dist/diagnostic-log.js"
+  "engines": {
+    "node": ">=24"
   }
 }
