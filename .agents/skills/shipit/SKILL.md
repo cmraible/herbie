@@ -10,7 +10,7 @@ Carry the current work through to a verified merge. A user request to run `$ship
 ## Prepare the PR
 
 1. Read applicable repository instructions. Inspect staged, unstaged, and untracked changes, branch commits, remotes, and any existing PR. Establish the intended base branch and the full diff being shipped. Preserve concurrent or unrelated work; ask only when scope or target is genuinely ambiguous.
-2. Run the repository's relevant local checks and fix failures caused by the change. Commit the intended changes. If on the base branch or detached HEAD, create a feature branch using repository conventions. If there is no diff to ship and no open PR to continue, report that and stop.
+2. Run the repository's relevant local checks and fix failures caused by the change. If on the base branch or detached HEAD, create and switch to a feature branch using repository conventions before committing. Commit the intended changes on the feature branch. If there is no diff to ship and no open PR to continue, report that and stop.
 3. Push and reuse the branch's open PR, or create one following repository title/body conventions. Mark it ready when prepared so CI and review can run. Attach its URL to the chat when the app supports it.
 
 ## Wait, review, and repair
