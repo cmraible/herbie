@@ -436,15 +436,19 @@ export class Store {
     const pr = goal.pullRequests.find(pr => pr.branch === row.branch);
     if (row.stage === 'completed' || row.stage === 'cancelled' && pr?.state !== 'open') return goal;
     if (!['awaiting_review','cancelled'].includes(row.stage) || !pr) throw conflict('Only a published pull request can be reconciled');
-    const cancelled = outcome === 'closed';
+    const closed = outcome === 'closed';
     const updatedPr = JSON.stringify({...pr,state:outcome});
-    await client.query('UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed',updatedPr]);
+    await client.query('UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, closed ? 'cancelled' : 'completed',updatedPr]);
     await client.query("UPDATE goals SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1", [goal.id,row.branch,updatedPr]);
-    if (cancelled && goal.state !== 'cancelled') await cancelGoal(client,goal);
-    else await advanceGoal(client,goal);
+    if (closed && !['cancelled','failed','needs_attention'].includes(goal.state)) {
+      const active = await client.query("SELECT 1 FROM jobs WHERE goal_id=$1 AND stage IN ('running','publishing')", [goal.id]);
+      await client.query("UPDATE goals SET state=$2,stop_requested=$3,updated_at=clock_timestamp() WHERE id=$1",
+        [goal.id, active.rowCount ? 'running' : 'paused', active.rowCount ? 'pause' : null]);
+      if (!active.rowCount) await client.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE goal_id=$1 AND stage IN ('queued','ready')", [goal.id]);
+    } else await advanceGoal(client,goal);
     const updated = await goalFrom(client, goal.id);
     if (!updated) throw new Error('Missing reconciled goal');
-    await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged');
+    await addEvent(client, goal.id, closed ? 'pull_request_closed' : 'pull_request_merged', closed ? 'Pull request closed without merging; goal pause requested' : 'Pull request merged');
     return updated;
   }
 

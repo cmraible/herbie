@@ -162,7 +162,7 @@ integration('expired attempts require attention and expired publications only re
   assert.equal(await store.claim('restarted-worker'), null);
 });
 
-integration('merge advances once beyond five iterations and close unmerged stops a paused goal', async () => {
+integration('merge advances once beyond five iterations and close unmerged preserves a paused goal', async () => {
   const owner = randomUUID();
   const { goal } = await store.createGoal(owner, input(), 'demo', randomUUID());
   async function publish() {
@@ -194,7 +194,7 @@ integration('merge advances once beyond five iterations and close unmerged stops
   }
   const unmerged = await publish();
   await store.control(unmerged.goal.id, owner, 'pause');
-  assert.equal((await store.reconcile(unmerged.id, 'closed')).state, 'cancelled');
+  assert.equal((await store.reconcile(unmerged.id, 'closed')).state, 'paused');
   assert.equal(await store.claim('worker'), null);
 });
 
@@ -475,19 +475,69 @@ integration('a merge during an attempt preserves its reservation and a requested
   assert.equal(await store.claim('overflow'),null);
 });
 
-integration('closing an older PR cancels the goal and fences its active attempt', async () => {
+integration('closing an older PR pauses after the active attempt and preserves resumable work', async () => {
   const {goal} = await store.createGoal('owner',{...input(),maxWip:3},'demo',randomUUID());
   const first = await publishNext(1);
   await publishNext(2);
   const third = await store.claim('worker');
   assert.ok(third);
-  const cancelled = await store.reconcile(first.id,'closed');
-  assert.equal(cancelled.state,'cancelled');
-  assert.equal(cancelled.cleanupStatus,'needs_attention');
-  assert.deepEqual(cancelled.pullRequests.map(pr => pr.state),['closed','open']);
-  assert.equal(await store.heartbeat(third.id,'worker'),false);
-  await assert.rejects(store.saveArtifact(third.id,'worker',{baseCommit:'abc',patch:Buffer.from('late')}), /lease/);
+  const pausing = await store.reconcile(first.id,'closed');
+  assert.equal(pausing.state,'running');
+  assert.equal(pausing.stopRequested,'pause');
+  assert.equal(pausing.cleanupStatus,'not_required');
+  assert.deepEqual(pausing.pullRequests.map(pr => pr.state),['closed','open']);
+  assert.equal(await store.heartbeat(third.id,'worker'),true);
+  await store.saveArtifact(third.id,'worker',{baseCommit:'abc',patch:Buffer.from('held')});
+  assert.equal((await store.getGoal(goal.id))?.state,'paused');
+  assert.equal(await store.beginPublication(third.id,'worker'),false);
   assert.equal(await store.claim('extra'),null);
+  await store.control(goal.id,'owner','resume');
+  const resumed = await store.claim('worker');
+  assert.equal(resumed?.id,third.id);
+  assert.equal(resumed?.goal.attemptCount,3);
+  assert.equal(resumed?.artifact?.patch.toString(),'held');
+});
+
+integration('closing a sibling PR holds a saved artifact and releases it for resume', async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
+  const first = await publishNext(1);
+  const second = await store.claim('worker');
+  assert.ok(second);
+  await store.saveArtifact(second.id,'worker',{baseCommit:'abc',patch:Buffer.from('saved')});
+  assert.equal((await store.reconcile(first.id,'closed')).state,'paused');
+  assert.equal(await store.beginPublication(second.id,'worker'),false);
+  await store.control(goal.id,'owner','resume');
+  assert.equal((await store.claim('resumed'))?.id,second.id);
+});
+
+integration('closing a sibling PR during publication pauses when publication finishes', async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
+  const first = await publishNext(1);
+  const second = await store.claim('worker');
+  assert.ok(second);
+  await store.saveArtifact(second.id,'worker',{baseCommit:'abc',patch:Buffer.from('saved')});
+  await store.beginPublication(second.id,'worker');
+  assert.equal((await store.reconcile(first.id,'closed')).stopRequested,'pause');
+  const paused = await store.completePublication(second.id,'worker',{url:'https://github.com/example/repo/pull/2',number:2,branch:second.branch});
+  assert.equal(paused.state,'paused');
+  assert.equal(await store.claim('extra'),null);
+  await store.control(goal.id,'owner','resume');
+  assert.ok(await store.claim('worker'));
+});
+
+integration('closing a PR pauses a goal until resumed and repeated reconciliation is harmless', async () => {
+  const {goal} = await store.createGoal('owner',input(),'demo',randomUUID());
+  const first = await publishNext(1);
+  assert.equal((await store.reconcile(first.id,'closed')).state,'paused');
+  assert.equal(await store.claim('extra'),null);
+  const events = await store.events(goal.id);
+  assert.equal(events.at(-1)?.message,'Pull request closed without merging; goal pause requested');
+  assert.equal(events.some(event => event.type === 'cancel'),false);
+  await store.control(goal.id,'owner','resume');
+  assert.equal((await store.reconcile(first.id,'closed')).state,'queued');
+  const next = await store.claim('worker');
+  assert.ok(next);
+  assert.notEqual(next.id,first.id);
 });
 
 integration('merges still reconcile during failure or publication recovery without clearing the stop', async () => {
@@ -537,6 +587,7 @@ for (const outcome of ['merged','closed'] as const) integration(`published sibli
   const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
   const first = await publishNext(1);
   const second = await publishNext(2);
+  await store.control(goal.id,'owner','cancel');
   await store.reconcile(first.id,'closed');
   assert.equal((await store.getGoal(goal.id))?.state,'cancelled');
   assert.deepEqual((await store.reviewJobs()).map(job => job.id),[second.id]);

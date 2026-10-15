@@ -31,7 +31,7 @@ branch advances. That base must remain in the default branch's history. Reposito
 CI and PR review validate the changes and their integration with the current base.
 An attempt that creates a PR waits for review; merging it queues the next attempt.
 There is no total attempt limit. Pause or cancel a goal to stop continued work;
-closing a PR without merging also stops it. Failed attempts still stop for attention
+closing a PR without merging pauses it so it can be resumed. Failed attempts still stop for attention
 rather than retrying automatically. The service does not infer that the entire
 open-ended prompt is solved. Previously completed goals remain stopped after upgrade.
 

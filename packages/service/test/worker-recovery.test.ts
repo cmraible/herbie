@@ -226,7 +226,7 @@ for (const recovering of [false,true]) for (const outcome of ['closed','merged']
     assert.equal(observedState,outcome);
     if (outcome === 'closed') {
       assert.equal(competing,null);
-      assert.equal((await store.getGoal(goal.id))?.state,'cancelled');
+      assert.equal((await store.getGoal(goal.id))?.state,'paused');
       assert.equal((await store.getGoal(goal.id))?.attemptCount,1);
       assert.equal((await store.pool.query('SELECT count(*)::int n FROM jobs WHERE goal_id=$1',[goal.id])).rows[0].n,1);
     } else {
