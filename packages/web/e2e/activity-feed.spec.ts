@@ -11,6 +11,8 @@ test("activity feed shows clear run progress and hides internal system events", 
     url: "https://github.com/owner/repo/pull/42",
     state: "open",
   };
+  const rawFailure =
+    "Attempt failed (runtime_preparation: command_failed; exit 28). Sandbox deletion confirmed. No automatic retry. Reference: db3a91ad-09c8-44ea-a2d8-f002570936cf";
   const goal = {
     id: goalId,
     ownerId: "fixture",
@@ -43,6 +45,7 @@ test("activity feed shows clear run progress and hides internal system events", 
     ["attempt", "Attempt stage: repository_clone"],
     ["attempt", "Attempt stage: model_execution"],
     ["attempt", "Goal completed in sandbox abc123"],
+    ["failed", rawFailure],
     ["publication_phase", "Publication phase: state_persistence"],
     ["pull_request_opened", "Pull request #42 awaits review"],
     [
@@ -76,10 +79,15 @@ test("activity feed shows clear run progress and hides internal system events", 
     "Agent started working",
     "Preparing pull request",
     "Pull request #42 opened",
+    "Run failed. No patches were saved.",
   ])
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   const ready = page.getByRole("link", { name: "Pull request #42 is ready for review" });
   await expect(ready).toHaveAttribute("href", pullRequest.url);
   await expect(page.getByText("Attempt stage: sandbox_creation")).toHaveCount(0);
   await expect(page.getByText("Publication phase: state_persistence")).toHaveCount(0);
+  await expect(page.getByText(rawFailure)).toHaveCount(0);
+  await page.getByText("Error reference").click();
+  await expect(page.getByText("db3a91ad-09c8-44ea-a2d8-f002570936cf")).toBeVisible();
+  await expect(page.getByText(rawFailure)).toHaveCount(0);
 });

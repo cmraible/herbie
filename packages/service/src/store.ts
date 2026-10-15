@@ -461,16 +461,23 @@ export class Store {
         throw conflict(
           "Saved work must finish publication recovery before a new attempt can start",
         );
+      const reviewing = await client.query(
+        "SELECT 1 FROM jobs WHERE goal_id=$1 AND stage='awaiting_review' LIMIT $2",
+        [id, goal.maxWip],
+      );
+      if (reviewing.rows.length >= goal.maxWip)
+        throw conflict("Review or close an open pull request before retrying this project");
       await client.query(
         "UPDATE goals SET state='queued',error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
         [id],
       );
       await advanceGoal(client, { ...goal, state: "queued", error: null, stopRequested: null });
       const next = await client.query<{ id: string; cycle: number }>(
-        "SELECT id,cycle FROM jobs WHERE goal_id=$1 ORDER BY cycle DESC LIMIT 1",
+        "SELECT id,cycle FROM jobs WHERE goal_id=$1 AND stage='queued' ORDER BY cycle DESC LIMIT 1",
         [id],
       );
-      await addEvent(client, id, "retry", `Run #${next.rows[0].cycle} queued`, next.rows[0].id);
+      if (next.rows[0])
+        await addEvent(client, id, "retry", `Run #${next.rows[0].cycle} queued`, next.rows[0].id);
       return (await goalFrom(client, id))!;
     });
   }
@@ -1289,6 +1296,46 @@ export class Store {
   }
   async reconcile(jobId: string, outcome: "merged" | "closed"): Promise<Goal> {
     return this.transaction((client) => this.reconcileReview(client, jobId, outcome));
+  }
+  async reconcilePullRequestHead(jobId: string, headSha: string): Promise<boolean> {
+    return this.transaction(async (client) => {
+      const { row, goal } = await lockJob(client, jobId);
+      const pr = goal.pullRequests.find((item) => item.branch === row.branch);
+      if (row.stage !== "awaiting_review" || pr?.state !== "open") return false;
+      if (!pr.headSha) {
+        await client.query(
+          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
+          [jobId, headSha],
+        );
+        await client.query(
+          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
+          [goal.id, row.branch, headSha],
+        );
+        return false;
+      }
+      if (pr.headSha === headSha || !["queued", "running", "awaiting_review"].includes(goal.state))
+        return false;
+      const active = await client.query(
+        "SELECT 1 FROM jobs WHERE goal_id=$1 AND stage IN ('running','publishing') LIMIT 1",
+        [goal.id],
+      );
+      await client.query(
+        "UPDATE goals SET state=$2,stop_requested=$3,updated_at=clock_timestamp() WHERE id=$1",
+        [goal.id, active.rowCount ? "running" : "paused", active.rowCount ? "pause" : null],
+      );
+      await client.query(
+        "UPDATE ci_repairs SET state='completed',lease_owner=NULL,lease_expires_at=NULL WHERE job_id=$1 AND state IN ('waiting','running')",
+        [jobId],
+      );
+      await addEvent(
+        client,
+        goal.id,
+        "external_change_paused",
+        `Pull request #${pr.number} was changed outside Herbie. Agent paused.`,
+        jobId,
+      );
+      return true;
+    });
   }
   private async reconcileReview(
     client: PoolClient,

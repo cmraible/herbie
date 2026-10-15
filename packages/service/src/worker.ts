@@ -269,7 +269,9 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
   for (const job of await store.reviewJobs(adapters.mode)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
-      if (current && current.state !== "open") await store.reconcile(job.id, current.state);
+      if (current?.state === "open" && current.headSha)
+        await store.reconcilePullRequestHead(job.id, current.headSha);
+      else if (current && current.state !== "open") await store.reconcile(job.id, current.state);
     } catch (error) {
       logFailure(error, { component: "review-reconciliation", goalId: job.goal.id, jobId: job.id });
       // Transient GitHub failures do not change the durable review state. Poll again later.

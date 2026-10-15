@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Goal, GoalEvent } from "@herbie/contracts";
 import { attemptLabels, groupAttempts } from "./attempts.js";
-import { activityMessage } from "./activity-message.js";
+import { activityMessage, errorReference } from "./activity-message.js";
 
 export function AttemptHistory({
   goal,
@@ -121,12 +121,10 @@ export function AttemptHistory({
                           )}
                         </span>
                         <time>{time(event.createdAt)}</time>
-                        {(event.message.includes("Reference:") ||
-                          ((event.type === "failed" || event.type === "needs_attention") &&
-                            event.message !== text)) && (
+                        {errorReference(event.message) && (
                           <details>
-                            <summary>Technical details</summary>
-                            <p>{event.message}</p>
+                            <summary>Error reference</summary>
+                            <p>{errorReference(event.message)}</p>
                           </details>
                         )}
                       </li>

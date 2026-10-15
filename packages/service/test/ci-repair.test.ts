@@ -12,6 +12,8 @@ for (const outcome of [
   "success",
   "failure",
   "stale",
+  "external-change",
+  "retry-at-capacity",
   "cancel",
   "lease",
   "crash",
@@ -56,6 +58,54 @@ for (const outcome of [
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
     const pr = job.goal.pullRequests[0]!;
+    if (outcome === "retry-at-capacity") {
+      await store.pool.query("UPDATE goals SET state='failed',error='synthetic' WHERE id=$1", [
+        goal.id,
+      ]);
+      await assert.rejects(
+        store.retryAttempt(goal.id, "demo-user"),
+        /Review or close an open pull request before retrying this project/,
+      );
+      assert.equal((await store.getGoal(goal.id))?.state, "failed");
+      assert.equal(
+        (
+          await store.pool.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='retry'", [
+            goal.id,
+          ])
+        ).rowCount,
+        0,
+      );
+      return;
+    }
+    if (outcome === "external-change") {
+      const originalHead = "a".repeat(40);
+      await store.pool.query(
+        "UPDATE goals SET pull_requests=jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true) WHERE id=$1",
+        [goal.id, originalHead],
+      );
+      await store.pool.query(
+        "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
+        [job.id, originalHead],
+      );
+      const adapters: Adapters = {
+        ...demo,
+        mode: "live",
+        reconcile: async () => ({ ...pr, state: "open", headSha: "b".repeat(40) }),
+      };
+      await reconcileReviews(store, adapters);
+      await reconcileReviews(store, adapters);
+      assert.equal((await store.getGoal(goal.id))?.state, "paused");
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='external_change_paused'",
+            [goal.id],
+          )
+        ).rowCount,
+        1,
+      );
+      return;
+    }
     if (outcome.startsWith("audit-")) {
       await store.beginReadiness(job.id);
       if (outcome === "audit-cancelled") await store.control(goal.id, "demo-user", "cancel");

@@ -11,6 +11,7 @@ import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
+import { errorReference } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 
 const api = createClient();
@@ -684,10 +685,12 @@ export function App() {
                     {goal.error && (
                       <div className="status-message" role="alert">
                         {goalErrorMessage(goal)}
-                        <details>
-                          <summary>Technical details</summary>
-                          <p>{goal.error}</p>
-                        </details>
+                        {errorReference(goal.error) && (
+                          <details>
+                            <summary>Error reference</summary>
+                            <p>{errorReference(goal.error)}</p>
+                          </details>
+                        )}
                       </div>
                     )}
                     {["failed", "needs_attention"].includes(goal.state) && (

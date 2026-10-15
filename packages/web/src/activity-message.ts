@@ -1,5 +1,9 @@
 import type { Goal, GoalEvent } from "@herbie/contracts";
 
+export function errorReference(message: string): string | null {
+  return /Reference:\s*([a-z0-9-]+)/i.exec(message)?.[1] ?? null;
+}
+
 export function activityMessage(goal: Goal, event: GoalEvent): string | null {
   const run = goal.attempts?.find((attempt) => attempt.id === event.attemptId);
   const runNumber = run?.number ?? Number(/Run #(\d+)/.exec(event.message)?.[1] ?? 1);
