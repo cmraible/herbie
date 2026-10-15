@@ -86,9 +86,7 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
         return "Live runs aren't configured yet";
       return event.message.startsWith("Run failed. Your patches are saved")
         ? "Run failed. Your patches are saved."
-        : event.message.startsWith("Run failed.") || event.message.startsWith("Attempt failed")
-          ? "Run failed. No patches were saved."
-          : event.message;
+        : "Run failed. No patches were saved.";
     case "pull_request_merged":
       return prNumber ? `Pull request #${prNumber} merged` : "Pull request merged";
     case "pull_request_closed":

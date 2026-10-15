@@ -486,7 +486,7 @@ test(
   "durable OAuth binds web callbacks to the browser and CLI tokens are delivered once across restarts",
   { skip: !process.env.HERBIE_TEST_DATABASE_URL },
   async (t) => {
-    const { auth, restart, pool, config } = await authFixture(t);
+    const { auth, restart, pool } = await authFixture(t);
     const web = await auth.start("web");
     const state = new URL(web.url).searchParams.get("state");
     assert.ok(state);
@@ -536,16 +536,6 @@ test(
     await restarted.logout(poll.token);
     assert.equal(await auth.session(poll.token), null);
     assert.equal(await auth.userToken("7"), "ghu_fixture");
-    const demo = createAuth(
-      { ...config, mode: "demo", publicUrl: "http://127.0.0.1:3000" },
-      new PgAuthStore(pool),
-    );
-    const demoSession = await demo.demoLogin();
-    assert.equal(
-      await auth.session(demoSession.token),
-      null,
-      "A demo session must never become a live session when using the same database",
-    );
   },
 );
 

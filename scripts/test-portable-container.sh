@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disposable demo database only. Never pass production runtime configuration here.
+# Disposable test database only. Never pass production runtime configuration here.
 set -euo pipefail
 image="${1:?Pass a locally built Herbie image}"
 revision="${2:?Pass its expected image revision}"
@@ -28,7 +28,7 @@ docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U fixture >/dev/null
 docker run -d --name "$prefix-app" --network "$prefix" \
   --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
-  -e HERBIE_MODE=demo -e HERBIE_HOST=127.0.0.1 -e HERBIE_EXECUTION_ENABLED=false \
+  -e HERBIE_MODE=live -e HERBIE_HOST=127.0.0.1 -e HERBIE_EXECUTION_ENABLED=false \
   -e DATABASE_URL=postgresql://fixture:fixture@postgres:5432/fixture \
   -e HERBIE_DEPLOYMENT_ID="$revision" "$image" >/dev/null
 for ((i=0;i<75;i++)); do

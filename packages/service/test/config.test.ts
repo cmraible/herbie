@@ -37,19 +37,16 @@ test("hosted live configuration accepts an injected private key and leaves execu
   assert.equal(config.imageRevision, "image-revision");
 });
 
-test("live startup requires one canonical immutable owner ID; demo does not", async () => {
+test("live startup requires one canonical immutable owner ID and rejects demo mode", async () => {
   for (const id of [undefined, "", "owner-login", "0", "01", "7,8", " 7", "7\n"]) {
     await assert.rejects(readConfig({ ...live, HERBIE_ALLOWED_GITHUB_USER_ID: id }));
   }
   assert.equal((await readConfig(live)).allowedGithubUserId, "7");
-  assert.equal(
-    (
-      await readConfig({
-        HERBIE_MODE: "demo",
-        DATABASE_URL: "postgresql://fixture:fixture@localhost/db",
-      })
-    ).allowedGithubUserId,
-    undefined,
+  await assert.rejects(
+    readConfig({
+      HERBIE_MODE: "demo",
+      DATABASE_URL: "postgresql://fixture:fixture@localhost/db",
+    }),
   );
 });
 
@@ -85,7 +82,7 @@ test("validates live execution credentials before creating a runtime", async () 
     DAYTONA_API_KEY: "key",
     HERBIE_DAYTONA_OPENAI_SECRET: "secret",
   });
-  assert.equal(config.daytona.apiKey, "key");
+  assert.equal(config.daytona?.apiKey, "key");
 });
 
 test("rejects invalid origins, database URLs, conflicting sources, and unreadable files", async () => {
@@ -151,7 +148,7 @@ test("rejects unsupported Daytona URLs during environment validation", async () 
   }
   assert.equal(
     (await readConfig({ ...environment, DAYTONA_API_URL: "https://daytona.example/api" })).daytona
-      .apiUrl,
+      ?.apiUrl,
     "https://daytona.example/api",
   );
 });

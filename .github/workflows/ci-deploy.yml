@@ -149,7 +149,7 @@ jobs:
           cache: true
           cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Build and run the CLI against local demo service
+      - name: Build and verify CLI flows
         run: bash scripts/ci-verify.sh cli
       - name: Save failure evidence
         if: failure()

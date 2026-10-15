@@ -6,9 +6,12 @@ import { pathToFileURL } from "node:url";
 import { createRuntime } from "./runtime.js";
 import { createApiServer } from "./http.js";
 import { runExclusiveWorker } from "./worker.js";
+import type { Auth } from "./auth.js";
 
 type Runtime = Awaited<ReturnType<typeof createRuntime>>;
-export type HostedRuntime = Pick<Runtime, "store" | "auth" | "adapters" | "github"> & {
+export type HostedRuntime = Pick<Runtime, "store" | "adapters"> & {
+  auth: Auth;
+  github?: Runtime["github"];
   config: {
     host: string;
     port: number;

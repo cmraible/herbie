@@ -166,7 +166,7 @@ export function createApiServer(options: ApiOptions) {
         return;
       }
       json(response, 200, {
-        mode: adapters.mode,
+        mode: "live",
         executionEnabled,
         deploymentId: options.deploymentId,
         imageRevision: options.imageRevision,

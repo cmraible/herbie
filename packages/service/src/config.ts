@@ -114,16 +114,12 @@ export const environmentSchema = z
       "GITHUB_CLIENT_SECRET",
       "GITHUB_WEBHOOK_SECRET",
       "OPENAI_API_KEY",
-      "DAYTONA_API_KEY",
-      "HERBIE_DAYTONA_OPENAI_SECRET",
     ] as const) {
       if (!env[name]) issue(name, "Required for live runs");
     }
-    if (env.HERBIE_EXECUTION_ENABLED === "false")
-      issue(
-        "HERBIE_EXECUTION_ENABLED",
-        "Live runs must be enabled; simulated runs are not supported",
-      );
+    if (env.HERBIE_EXECUTION_ENABLED === "true")
+      for (const name of ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"] as const)
+        if (!env[name]) issue(name, "Required when live runs are enabled");
     if (!env.GITHUB_PRIVATE_KEY && !env.GITHUB_PRIVATE_KEY_FILE)
       issue(
         "GITHUB_PRIVATE_KEY",
@@ -196,7 +192,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
             webhookSecret: env.GITHUB_WEBHOOK_SECRET!,
           }
         : undefined,
-    executionEnabled: true,
+    executionEnabled: env.HERBIE_EXECUTION_ENABLED === "true",
     allowedGithubUserId: mode === "live" ? env.HERBIE_ALLOWED_GITHUB_USER_ID : undefined,
     deploymentId: env.HERBIE_DEPLOYMENT_ID,
     imageRevision: env.HERBIE_IMAGE_REVISION,
@@ -204,11 +200,14 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseCaFile: env.HERBIE_DATABASE_CA_FILE,
     openaiApiKey: mode === "live" ? env.OPENAI_API_KEY : undefined,
     goalNameModel: env.HERBIE_GOAL_NAME_MODEL,
-    daytona: {
-      apiKey: env.DAYTONA_API_KEY!,
-      apiUrl: env.DAYTONA_API_URL,
-      openaiSecretName: env.HERBIE_DAYTONA_OPENAI_SECRET!,
-      snapshot: env.HERBIE_DAYTONA_SNAPSHOT,
-    },
+    daytona:
+      env.DAYTONA_API_KEY && env.HERBIE_DAYTONA_OPENAI_SECRET
+        ? {
+            apiKey: env.DAYTONA_API_KEY,
+            apiUrl: env.DAYTONA_API_URL,
+            openaiSecretName: env.HERBIE_DAYTONA_OPENAI_SECRET,
+            snapshot: env.HERBIE_DAYTONA_SNAPSHOT,
+          }
+        : undefined,
   };
 }

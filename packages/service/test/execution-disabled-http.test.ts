@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
-import { goalSchema, sessionSchema } from "@herbie/contracts";
+import { goalSchema } from "@herbie/contracts";
 import { Store } from "../src/store.js";
-import { PgAuthStore, migrateAuth } from "../src/auth-store.js";
-import { createAuth } from "../src/auth.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { createApiServer } from "../src/http.js";
+import { testAuth, testSessionToken } from "./test-auth.js";
 
 test("execution-disabled HTTP blocks creation and resume before authorization while reads and stop controls remain usable", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
@@ -18,12 +17,8 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
   const pool = new pg.Pool({ connectionString: database, options: `-c search_path=${schema}` });
   const store = new Store(pool);
   await store.migrate();
-  await migrateAuth(pool);
   const origin = "http://localhost:8787";
-  const auth = createAuth(
-    { mode: "demo", publicUrl: origin, credentialKey: Buffer.alloc(32, 7).toString("base64") },
-    new PgAuthStore(pool),
-  );
+  const auth = testAuth("test-owner");
   const demo = createDemoAdapters();
   let authorizationCalls = 0;
   const adapters = {
@@ -53,15 +48,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}`;
-  const login = await fetch(`${base}/api/demo/login`, {
-    method: "POST",
-    headers: { origin, "content-type": "application/json" },
-    body: "{}",
-  });
-  assert.equal(login.status, 200);
-  const session = sessionSchema.parse(await login.json());
-  const cookie = login.headers.get("set-cookie")?.split(";")[0];
-  assert.ok(cookie);
+  const cookie = `herbie_session=${testSessionToken}`;
   const headers = {
     cookie,
     origin,
@@ -84,14 +71,14 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
   assert.deepEqual(await (await fetch(`${base}/api/goals`, { headers: { cookie } })).json(), []);
   assert.equal(await store.claim("disabled-http-test", 30_000, "demo"), null);
   assert.deepEqual(await (await fetch(`${base}/api/health`)).json(), {
-    mode: "demo",
+    mode: "live",
     executionEnabled: false,
   });
   assert.equal((await fetch(`${base}/api/session`, { headers: { cookie } })).status, 200);
   assert.equal((await fetch(`${base}/api/repositories`, { headers: { cookie } })).status, 200);
 
   // Existing work can still be observed and stopped while execution is disabled.
-  const { goal } = await store.createGoal(session.user.id, input, "demo", randomUUID());
+  const { goal } = await store.createGoal("test-owner", input, "demo", randomUUID());
   const control = (action: string) =>
     fetch(`${base}/api/goals/${goal.id}/${action}`, { method: "POST", headers });
   const pause = await control("pause");

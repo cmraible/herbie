@@ -56,7 +56,11 @@ export async function createRuntime(startup?: StartupProgress) {
     const auth = identity?.auth ?? createAuth(config, new PgAuthStore(pool), github);
     startup?.begin("adapter-setup");
     if (!github) throw new Error("Live runs require GitHub configuration");
-    const adapters = createLiveAdapters(config.daytona, github, auth);
+    const adapters = createLiveAdapters(
+      config.executionEnabled ? config.daytona : undefined,
+      github,
+      auth,
+    );
     return { config, store, auth, adapters, github };
   } catch (error) {
     startup?.failure(error);

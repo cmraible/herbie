@@ -109,17 +109,12 @@ function fixtures() {
     message: string,
     createdAt = new Date().toISOString(),
   ) => events.push({ id: ++sequence, goalId, attemptId, type, message, createdAt });
-  log(base.id, null, "queued", "Goal created", date(12, 45));
+  log(base.id, null, "queued", "Run #1 queued", date(12, 45));
   for (const a of attempts) {
     const hour = 12 + a.number;
-    log(base.id, a.id, "attempt_started", `Attempt ${a.number} started`, date(hour));
-    log(
-      base.id,
-      a.id,
-      "attempt",
-      "Reviewed the signup form, validation helpers, and existing tests.",
-      date(hour, 2),
-    );
+    log(base.id, a.id, "attempt_started", `Run #${a.number} started`, date(hour));
+    log(base.id, a.id, "attempt", "Attempt stage: repository_clone", date(hour, 2));
+    log(base.id, a.id, "attempt", "Attempt stage: model_execution", date(hour, 3));
     if (a.number === 2) {
       log(
         base.id,
@@ -136,64 +131,38 @@ function fixtures() {
         date(hour, 9),
       );
     } else {
-      log(
-        base.id,
-        a.id,
-        "attempt",
-        a.number === 1
-          ? "Added email validation and kept field values intact after submission errors."
-          : "Replaced generic error messages with field-specific guidance and added focus handling.",
-        date(hour, 7),
-      );
-      log(
-        base.id,
-        a.id,
-        "attempt",
-        "Validation passed: 24 unit tests, 6 browser tests, and type checking.",
-        date(hour, 12),
-      );
+      log(base.id, a.id, "attempt", "Goal completed in sandbox preview", date(hour, 7));
+      log(base.id, a.id, "attempt", "Publication phase: state_persistence", date(hour, 12));
       log(
         base.id,
         a.id,
         "pull_request_opened",
-        `Opened pull request #${a.pullRequest!.number}.`,
+        `Pull request #${a.pullRequest!.number} awaits review: ${a.pullRequest!.url}`,
         date(hour, 15),
       );
       if (a.number === 1)
-        log(
-          base.id,
-          a.id,
-          "pull_request_merged",
-          "Pull request #142 merged into main.",
-          date(hour, 25),
-        );
+        log(base.id, a.id, "pull_request_merged", "Pull request #142 merged.", date(hour, 25));
       else
         log(
           base.id,
           a.id,
           "pull_request_ready",
-          "All checks passed. Ready for review.",
+          `Pull request #${a.pullRequest!.number} is ready for review: ${a.pullRequest!.url}`,
           date(hour, 18),
         );
     }
   }
   for (const g of goals.slice(1)) {
+    log(g.id, g.attempts![0]!.id, "attempt_started", "Run #1 started", g.attempts![0]!.createdAt);
     log(
       g.id,
       g.attempts![0]!.id,
-      "attempt_started",
-      "Attempt 1 started",
-      g.attempts![0]!.createdAt,
-    );
-    log(
-      g.id,
-      g.attempts![0]!.id,
-      g.state,
+      "attempt",
       g.state === "running"
-        ? "Inspecting the search query and measuring repeated lookups."
+        ? "Attempt stage: model_execution"
         : g.state === "paused"
-          ? "Changes saved. Waiting for the goal to resume."
-          : "Attempt stopped after the goal was cancelled.",
+          ? "Goal completed in sandbox preview"
+          : "Attempt stage: sandbox_deletion",
       date(15, 25),
     );
   }
@@ -248,7 +217,7 @@ export function fixtureApi(): Plugin {
               error: null,
             };
             goals.unshift(goal);
-            log(goal.id, null, "queued", "Goal created");
+            log(goal.id, null, "queued", "Run #1 queued");
             return send(goal);
           }
           const match = /^\/api\/goals\/([^/]+)(?:\/(\w+))?$/.exec(url.pathname);

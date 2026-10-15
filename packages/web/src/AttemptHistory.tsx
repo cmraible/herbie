@@ -121,7 +121,9 @@ export function AttemptHistory({
                           )}
                         </span>
                         <time>{time(event.createdAt)}</time>
-                        {event.message.includes("Reference:") && (
+                        {(event.message.includes("Reference:") ||
+                          ((event.type === "failed" || event.type === "needs_attention") &&
+                            event.message !== text)) && (
                           <details>
                             <summary>Technical details</summary>
                             <p>{event.message}</p>

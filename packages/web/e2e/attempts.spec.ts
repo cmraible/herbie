@@ -18,7 +18,7 @@ test("attempt accordion shows independent statuses, PRs and events with one pane
     name: "Attempt history",
     repository: "demo/example",
     prompt: "Review each attempt independently",
-    mode: "demo",
+    mode: "live",
     state: "awaiting_review",
     attemptCount: 2,
     createdAt: "2026-10-15",
@@ -39,35 +39,35 @@ test("attempt accordion shows independent statuses, PRs and events with one pane
     ],
   };
   const events = [
-    { id: 1, attemptId: first, message: "First attempt log" },
-    { id: 2, attemptId: second, message: "Second attempt log" },
-    { id: 3, attemptId: first, message: "Older PR merged after attempt two started" },
-    { id: 4, attemptId: null, message: "Goal renamed" },
-  ].map((e) => ({ ...e, goalId, type: "activity", createdAt: "2026-10-15" }));
+    { id: 1, attemptId: first, type: "attempt_started", message: "Run #1 started" },
+    { id: 2, attemptId: second, type: "attempt_started", message: "Run #2 started" },
+    { id: 3, attemptId: first, type: "pull_request_merged", message: "Pull request merged" },
+    { id: 4, attemptId: null, type: "renamed", message: "Project renamed" },
+  ].map((e) => ({ ...e, goalId, createdAt: "2026-10-15" }));
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/health", (r) =>
-    r.fulfill(json({ mode: "demo", executionEnabled: true })),
+    r.fulfill(json({ mode: "live", executionEnabled: true })),
   );
   await page.route("**/api/session", (r) =>
-    r.fulfill(json({ mode: "demo", user: { id: "fixture", login: "fixture" } })),
+    r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
   );
   await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
   await page.route("**/api/repositories", (r) => r.fulfill(json([])));
   await page.route("**/api/goals/*/events**", (r) => r.fulfill(json(events)));
   await page.setViewportSize({ width: 796, height: 824 });
   await page.goto(`/#${goalId}`);
-  const one = page.getByRole("button", { name: "Attempt 1 Merged" });
-  const two = page.getByRole("button", { name: "Attempt 2 Ready for review" });
+  const one = page.getByRole("button", { name: "Run 1 Merged" });
+  const two = page.getByRole("button", { name: "Run 2 Ready for review" });
   await expect(two).toHaveAttribute("aria-expanded", "true");
   await expect(one).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByText("Second attempt log", { exact: true })).toBeVisible();
-  await expect(page.getByText("First attempt log", { exact: true })).not.toBeVisible();
+  await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
+  await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
   await one.focus();
   await page.keyboard.press("Enter");
   await expect(one).toHaveAttribute("aria-expanded", "true");
   await expect(two).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByText("Older PR merged after attempt two started")).toBeVisible();
+  await expect(page.getByText("Pull request #1 merged")).toBeVisible();
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveAttribute(
     "href",
     "https://demo.invalid/pr/1",
