@@ -94,3 +94,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS ci_repairs_one_running ON ci_repairs(job_id) W
 
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ci_reviewed_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS readiness_pending boolean NOT NULL DEFAULT false;
+
+ALTER TABLE ci_repairs DROP CONSTRAINT IF EXISTS ci_repairs_state_check;
+ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('running','waiting','completed','failed'));

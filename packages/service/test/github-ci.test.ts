@@ -13,7 +13,8 @@ test("CI context uses current PR head and merge checks, waits for pending checks
     graphError = false,
     writes = 0;
   let mergeable: boolean | null = true;
-  let headChecks = false;
+  let headChecks = false,
+    mergeChecks = true;
   const paths: string[] = [];
   const server = createServer(async (req, res) => {
     const path = req.url!;
@@ -32,13 +33,19 @@ test("CI context uses current PR head and merge checks, waits for pending checks
     else if (path.includes("/check-runs?"))
       data = {
         check_runs:
-          !noChecks && (path.includes("b".repeat(40)) || headChecks)
+          !noChecks &&
+          ((path.includes("b".repeat(40)) && mergeChecks) ||
+            (path.includes("a".repeat(40)) && headChecks))
             ? [
                 {
                   id: 7,
                   name: "verify",
-                  status: pending ? "in_progress" : "completed",
-                  conclusion,
+                  status: path.includes("a".repeat(40))
+                    ? "completed"
+                    : pending
+                      ? "in_progress"
+                      : "completed",
+                  conclusion: path.includes("a".repeat(40)) ? "success" : conclusion,
                   details_url: "https://github.com/owner/repo/actions/runs/8/job/9",
                   output: { title: null, summary: "assertion failed", text: null },
                 },
@@ -123,6 +130,10 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(await ready(), false);
   mergeable = true;
   pending = false;
+  mergeChecks = false;
+  assert.equal(await get(), null, "successful head cannot substitute for absent merge checks");
+  assert.equal(await ready(), false);
+  mergeChecks = true;
   headChecks = false;
   noChecks = true;
   assert.equal(await get(), null);
@@ -149,6 +160,11 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(writes, 2);
   assert.equal(await ready(), true);
   assert.equal(writes, 2, "already-ready PR is not mutated again");
+  pending = true;
+  assert.equal(await github.isReady("token", "owner/repo", 1), true);
+  state = "closed";
+  assert.equal(await github.isReady("token", "owner/repo", 1), true);
+  pending = false;
   draft = true;
   state = "closed";
   assert.equal(await ready(), false);

@@ -45,6 +45,16 @@ export function createLiveAdapters(
     mode: "live",
     ...(config
       ? {
+          async isReady(execution: Execution) {
+            const pr = execution.goal.pullRequests.find((pr) => pr.branch === execution.branch);
+            if (!pr) return false;
+            const token = await github.installationToken(
+              execution.repository.installationId,
+              execution.repository.repository,
+              "read",
+            );
+            return github.isReady(token, execution.repository.repository, pr.number);
+          },
           async markReady(execution: Execution, head: string, beforeWrite: () => Promise<void>) {
             const pr = execution.goal.pullRequests.find(
               (pr) => pr.branch === execution.branch && pr.state === "open",

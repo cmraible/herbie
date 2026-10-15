@@ -85,7 +85,9 @@ it cannot undo an external call already in flight.
   GitHub Actions steps, including checks on GitHub's current test merge commit.
   Repairs wait while checks are pending. The agent reproduces the failure and writes
   verification commands; the sandbox runner executes them after the agent exits and
-  rejects missing commands or any nonzero result. Verification has a ten-minute
+  rejects missing commands, any nonzero result, or changes to repository files during
+  verification. A verified artifact waits durably if CI is rerunning and is resumed
+  without a second agent session when the rerun fails. Verification has a ten-minute
   deadline; repair execution allows 32 minutes and uses a 45-minute sandbox TTL.
 - After verification and confirmed sandbox deletion, the host saves the patch and
   pushes a child commit to the same PR branch, with an exact-head Git lease. A changed
@@ -94,10 +96,12 @@ it cannot undo an external call already in flight.
 - Once current CI passes, the worker marks the tracked draft PR ready for review,
   including PRs that never needed a repair. It rechecks CI, the PR head, owner access,
   and the active goal before the GitHub write. Pending, cancelled, unknown, or absent
-  checks leave the PR as draft; at least one check/status must succeed, with other
+  checks leave the PR as draft; a known test-merge commit must also have CI evidence; at least one check/status must succeed, with other
   checks successful, neutral, or skipped. Already-ready PRs are left alone. This
   Readiness intent is saved before the mutation; retries reconcile an already-ready
-  PR and record the confirmation once if the response or event write was lost. This
+  PR and record the confirmation once if the response or event write was lost.
+  Intent recovery runs independently of CI eligibility, including closed PRs and
+  stopped goals. This
   transition uses the existing Pull requests write permission and launches no model
   session. GitHub's [ready-for-review mutation](https://docs.github.com/en/graphql/reference/pulls#markpullrequestreadyforreview)
   has no atomic expected-head condition; a concurrent external push after the final

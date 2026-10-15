@@ -27,6 +27,7 @@ export async function runCiRepairOnce(
     const failure = await adapters.ciStatus(execution);
     if (!failure) return true;
     if (failure.state === "passed") {
+      await store.discardWaitingCi(job.id);
       const ready = await adapters.markReady?.(execution, failure.head, () =>
         store.beginReadiness(job.id),
       );
@@ -56,16 +57,24 @@ export async function runCiRepairOnce(
         });
     }, 5000);
     await requireLease();
-    const changes = await adapters.attempt(execution, (message) =>
-      store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000)),
-    );
-    await requireLease();
-    await store.saveCiArtifact(id, workerId, changes);
+    let changes = await store.ciArtifact(id);
+    if (!changes) {
+      changes = await adapters.attempt(execution, (message) =>
+        store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000)),
+      );
+      await requireLease();
+      await store.saveCiArtifact(id, workerId, changes);
+    }
     if (!changes.verification?.localChecksPassed || changes.baseCommit !== failure.head)
       throw new Error("CI repair lacks matching local verification");
     // A rerun may have passed, or the PR may have changed while the agent worked.
     const current = await adapters.ciStatus(execution);
-    if (current?.state !== "failed" || current.head !== failure.head) {
+    await requireLease();
+    if (!current) {
+      await store.waitForCi(id, workerId);
+      return true;
+    }
+    if (current.state !== "failed" || current.head !== failure.head) {
       await store.finishCiRepair(
         id,
         workerId,

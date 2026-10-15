@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 import { Store } from "../src/store.js";
-import { runWorkerOnce } from "../src/worker.js";
+import { runWorkerOnce, reconcileReviews } from "../src/worker.js";
 import { runCiRepairOnce } from "../src/ci-repair.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { StaleRepairError, type Adapters } from "../src/adapters.js";
@@ -17,6 +17,9 @@ for (const outcome of [
   "crash",
   "queue",
   "late-stale",
+  "audit-closed",
+  "audit-pending",
+  "rerun",
 ] as const) {
   test(`durable CI repair: ${outcome}`, async (t) => {
     const database = process.env.HERBIE_TEST_DATABASE_URL;
@@ -45,6 +48,36 @@ for (const outcome of [
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
     const pr = job.goal.pullRequests[0]!;
+    if (outcome === "audit-closed" || outcome === "audit-pending") {
+      await store.beginReadiness(job.id);
+      if (outcome === "audit-closed") await store.reconcile(job.id, "closed");
+      const adapters: Adapters = {
+        ...demo,
+        mode: "live",
+        isReady: async () => true,
+        ciStatus: async () => null,
+        authorize: async () => {
+          throw new Error("User authorization unavailable");
+        },
+      };
+      await reconcileReviews(store, adapters);
+      await reconcileReviews(store, adapters);
+      assert.equal(
+        (await store.pool.query("SELECT readiness_pending FROM jobs WHERE id=$1", [job.id])).rows[0]
+          .readiness_pending,
+        false,
+      );
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='pull_request_ready'",
+            [goal.id],
+          )
+        ).rowCount,
+        1,
+      );
+      return;
+    }
     if (outcome === "queue") {
       for (let i = 0; i < 2; i++) {
         await store.createGoal(
@@ -105,15 +138,19 @@ for (const outcome of [
       pushes = 0,
       reads = 0;
     let head = "a".repeat(40);
+    let rerunning = outcome === "rerun";
     const adapters: Adapters = {
       ...demo,
       mode: "live",
-      ciStatus: async () => ({
-        state: "failed",
-        head: outcome === "stale" && ++reads > 1 ? "b".repeat(40) : head,
-        pullRequest: pr,
-        details: "test addition failed",
-      }),
+      ciStatus: async () =>
+        rerunning && attempts > 0
+          ? null
+          : {
+              state: "failed",
+              head: outcome === "stale" && ++reads > 1 ? "b".repeat(40) : head,
+              pullRequest: pr,
+              details: "test addition failed",
+            },
       attempt: async (execution) => {
         attempts++;
         assert.equal(execution.ciRepair?.head, head);
@@ -128,7 +165,15 @@ for (const outcome of [
         return {
           ...changes,
           baseCommit: head,
-          verification: { ...changes.verification!, localChecksPassed: true },
+          verification: {
+            version: 3,
+            repoUrl: "https://github.com/demo/example.git",
+            baseCommit: head,
+            patchSha256: "fixture",
+            goalCompleted: true,
+            sandboxDeleted: true,
+            localChecksPassed: true,
+          },
         };
       },
       publish: async (_execution, _changes, requireLease) => {
@@ -150,6 +195,17 @@ for (const outcome of [
       assert.equal(attempts, 1);
     }
     assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
+    if (outcome === "rerun") {
+      assert.equal(
+        (await store.pool.query("SELECT state FROM ci_repairs")).rows[0].state,
+        "waiting",
+      );
+      rerunning = false;
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "after-restart");
+      assert.equal(attempts, 1, "resume saved verified artifact without another paid session");
+      assert.equal(pushes, 1);
+    }
     if (outcome === "late-stale") {
       head = "b".repeat(40);
       await store.requestCiReview();
@@ -216,7 +272,7 @@ for (const outcome of [
       events.rows.some(
         (row) =>
           row.type ===
-          (["success", "stale", "late-stale"].includes(outcome)
+          (["success", "stale", "late-stale", "rerun"].includes(outcome)
             ? "ci_repair_completed"
             : "ci_repair_failed"),
       ),

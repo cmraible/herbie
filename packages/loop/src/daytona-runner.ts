@@ -31,7 +31,7 @@ try {
   const verificationInstructions = verifyLocally
     ? `
 This is a CI repair. Reproduce the failing checks, make the smallest fix, and run the relevant verification locally. Do not disable checks, weaken tests, or claim success when verification is unavailable.
-Write the exact verification commands to ${fileURLToPath(verificationFile)} outside the repository. Use a bash script that exits nonzero on any failure; the runner will execute it after you exit, from the repository root, with a ten-minute deadline. Include the failing checks and relevant regression coverage. Do not push or open another PR. Then exit.`
+Write the exact verification commands to ${fileURLToPath(verificationFile)} outside the repository. Use a bash script that exits nonzero on any failure; the runner will execute it after you exit, from the repository root, with a ten-minute deadline. Include the failing checks and relevant regression coverage. Verification must not modify repository files; run generators and auto-fixers before verification. Do not push or open another PR. Then exit.`
     : "";
   const goal = `${input.goal}
 ${verificationInstructions}
@@ -46,6 +46,8 @@ Explain the specific change you actually made, why you chose it, and how it help
     disposableDaytona: true,
   });
   if (verifyLocally) {
+    await git("add", "--all");
+    const verifiedTree = (await git("write-tree")).trim();
     if (!(await readFile(verificationFile, "utf8")).trim())
       throw new Error("Missing local verification commands");
     await promisify(execFile)("bash", ["-euo", "pipefail", fileURLToPath(verificationFile)], {
@@ -54,6 +56,9 @@ Explain the specific change you actually made, why you chose it, and how it help
       killSignal: "SIGKILL",
       maxBuffer: 8 * 1024 * 1024,
     });
+    await git("add", "--all");
+    if ((await git("write-tree")).trim() !== verifiedTree)
+      throw new Error("Verification modified repository files; the repair is not verified");
   }
   const pullRequestTitle = (await readFile(titleFile, "utf8")).trim();
   if (!pullRequestTitle || pullRequestTitle.length > 256 || /[\r\n]/.test(pullRequestTitle))

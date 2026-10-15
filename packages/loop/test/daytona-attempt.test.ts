@@ -824,9 +824,14 @@ for (const title of [undefined, "", "   ", 123, "x".repeat(257), "First\nSecond"
   });
 }
 
-for (const verification of ["pass", "fail", "missing"] as const) {
+for (const verification of ["pass", "fail", "missing", "mutates"] as const) {
   test(`CI repair requires local verification: ${verification}`, async (t) => {
-    const script = verification === "pass" ? "node --test" : "exit 1";
+    const script =
+      verification === "pass"
+        ? "node --test"
+        : verification === "mutates"
+          ? "node --test\nprintf modified > add.mjs"
+          : "exit 1";
     const edits =
       `const fs = await import('node:fs'); fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }\\n');` +
       (verification === "missing"

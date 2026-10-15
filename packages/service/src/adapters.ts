@@ -52,6 +52,7 @@ export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
+  isReady?(execution: Execution): Promise<boolean>;
   ciStatus?(execution: Execution): Promise<CiStatus | null>;
   markReady?(
     execution: Execution,

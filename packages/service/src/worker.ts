@@ -251,6 +251,22 @@ export async function runWorkerOnce(
 }
 
 export async function reconcileReviews(store: Store, adapters: Adapters): Promise<void> {
+  // Recovery of a past write must not depend on current CI, goal state, or PR state.
+  if (adapters.isReady)
+    for (const job of await store.reviewJobs(adapters.mode, true)) {
+      try {
+        if (await adapters.isReady(await executionFor(adapters, job, true))) {
+          const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
+          if (pr) await store.confirmReadiness(job.id, pr.url);
+        }
+      } catch (error) {
+        logFailure(error, {
+          component: "readiness-reconciliation",
+          goalId: job.goal.id,
+          jobId: job.id,
+        });
+      }
+    }
   for (const job of await store.reviewJobs(adapters.mode)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));

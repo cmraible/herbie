@@ -49,6 +49,7 @@ const artifactSchema = z.object({
       patchSha256: z.string(),
       goalCompleted: z.literal(true),
       sandboxDeleted: z.literal(true),
+      localChecksPassed: z.literal(true).optional(),
     })
     .optional(),
 });
@@ -115,18 +116,22 @@ function requestFingerprint(
     )
     .digest("hex");
 }
+function decodeArtifact(
+  encoded: z.infer<typeof artifactSchema> | null,
+): DaytonaAttemptChanges | null {
+  if (!encoded) return null;
+  const { patchBase64, ...metadata } = encoded;
+  return { ...metadata, patch: Buffer.from(patchBase64, "base64") };
+}
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
-  const encoded = row.artifact;
-  const artifact = encoded
-    ? {
-        baseCommit: encoded.baseCommit,
-        patch: Buffer.from(encoded.patchBase64, "base64"),
-        ...(encoded.pullRequestTitle ? { pullRequestTitle: encoded.pullRequestTitle } : {}),
-        ...(encoded.pullRequestBody ? { pullRequestBody: encoded.pullRequestBody } : {}),
-        ...(encoded.verification ? { verification: encoded.verification } : {}),
-      }
-    : null;
-  return { id: row.id, attemptId: row.id, branch: row.branch, stage: row.stage, artifact, goal };
+  return {
+    id: row.id,
+    attemptId: row.id,
+    branch: row.branch,
+    stage: row.stage,
+    artifact: decodeArtifact(row.artifact),
+    goal,
+  };
 }
 async function goalFrom(client: Pool | PoolClient, id: string, lock = false): Promise<Goal | null> {
   const result = await client.query<Record<string, unknown>>(
@@ -997,6 +1002,16 @@ export class Store {
         !["queued", "running", "awaiting_review"].includes(goal.state)
       )
         return null;
+      await client.query(
+        "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state='waiting' AND head<>$2",
+        [jobId, head],
+      );
+      const resumed = await client.query<{ id: string }>(
+        `UPDATE ci_repairs SET state='running',lease_owner=$3,lease_expires_at=clock_timestamp()+interval '30 seconds'
+        WHERE job_id=$1 AND head=$2 AND state='waiting' RETURNING id`,
+        [jobId, head, workerId],
+      );
+      if (resumed.rows[0]) return resumed.rows[0].id;
       const previous = await client.query<{ head: string; state: string }>(
         "SELECT head,state FROM ci_repairs WHERE job_id=$1",
         [jobId],
@@ -1032,6 +1047,30 @@ export class Store {
       [id, workerId],
     );
     return result.rowCount === 1;
+  }
+
+  async ciArtifact(id: string): Promise<DaytonaAttemptChanges | null> {
+    const result = await this.pool.query<{ artifact: unknown }>(
+      "SELECT artifact FROM ci_repairs WHERE id=$1",
+      [id],
+    );
+    return decodeArtifact(artifactSchema.nullable().parse(result.rows[0]?.artifact));
+  }
+
+  async waitForCi(id: string, workerId: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE ci_repairs SET state='waiting' WHERE id=$1 AND lease_owner=$2
+      AND state='running' AND lease_expires_at>clock_timestamp() AND artifact IS NOT NULL`,
+      [id, workerId],
+    );
+    if (result.rowCount !== 1) throw conflict("CI repair lease lost");
+  }
+
+  async discardWaitingCi(jobId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state='waiting'",
+      [jobId],
+    );
   }
 
   async saveCiArtifact(
@@ -1086,10 +1125,10 @@ export class Store {
     });
   }
 
-  async reviewJobs(mode?: "demo" | "live"): Promise<Job[]> {
+  async reviewJobs(mode?: "demo" | "live", pendingReadiness = false): Promise<Job[]> {
     const result = await this.pool.query<Record<string, unknown>>(
       `SELECT j.*, (j.lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs j JOIN goals g ON g.id=j.goal_id
-      WHERE j.stage IN ('awaiting_review','cancelled') AND j.pull_request->>'state'='open'
+      WHERE ${pendingReadiness ? "j.readiness_pending" : "j.stage IN ('awaiting_review','cancelled') AND j.pull_request->>'state'='open'"}
       AND ($1::text IS NULL OR g.mode=$1) ORDER BY j.created_at`,
       [mode ?? null],
     );

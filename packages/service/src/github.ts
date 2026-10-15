@@ -299,6 +299,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       ]),
     ];
     for (const sha of refs) {
+      let evidence = false;
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI check listing exceeds supported limit");
         const checks = z
@@ -324,6 +325,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               token,
             ),
           ).check_runs;
+        if (checks.length) evidence = true;
         for (const check of checks) {
           if (check.status !== "completed") pending = true;
           if (check.conclusion === "success") succeeded = true;
@@ -383,6 +385,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           ),
         })
         .parse(await request(`/repos/${repository}/commits/${sha}/status?per_page=100`, token));
+      if (sha !== pr.head.sha && !evidence && statuses.total_count === 0) pending = true;
       if (statuses.total_count > 100) throw new Error("CI status listing exceeds supported limit");
       if (statuses.statuses.some((status) => status.state === "pending")) pending = true;
       if (statuses.statuses.some((status) => status.state === "success")) succeeded = true;
@@ -415,6 +418,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     branchCommit,
     isAncestor,
     installationToken,
+    async isReady(token: string, repository: string, number: number): Promise<boolean> {
+      const pr = z
+        .object({ draft: z.boolean() })
+        .parse(await request(`/repos/${repository}/pulls/${number}`, token));
+      return !pr.draft;
+    },
     async markReady(
       token: string,
       repository: string,
