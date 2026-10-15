@@ -81,8 +81,8 @@ release check, not a claim that a generic secret scan can prove absence of secre
 - Startup has its own 60-second deadline. Allow about 90 seconds for the startup
   probe including process overhead. A database outage must not cause restart churn.
 - SIGTERM closes the listener and stops new claims, then waits for active bounded
-  work and cleanup before closing the pool. Allow 20 minutes of termination grace
-  for the roughly 15-minute attempt lifecycle plus publication/database overhead.
+  work and cleanup before closing the pool. Allow 40 minutes of termination grace
+  for the roughly 35-minute attempt lifecycle plus publication/database overhead.
   This is an operating allowance, not a new global deadline. Never force-delete
   an active coordinator or assume a terminated process proves sandbox cleanup.
 - One steady replica with a rolling strategy using `maxUnavailable: 0` and

@@ -108,7 +108,7 @@ export async function runDaytonaAttempt(
       name, ...(request.snapshot ? { snapshot: request.snapshot }
         : { image: 'ubuntu:22.04', resources: { cpu: 1, memory: 1, disk: 3 } }),
       ...(request.domainAllowList ? { domainAllowList: request.domainAllowList } : {}),
-      secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 15,
+      secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 35,
     }, { timeout: 120 });
   } catch (cause) {
     const error=new DaytonaAttemptError([cause], `Creation failed for ${name}; cleanup is unconfirmed. Check Daytona by name.`, { cause });
@@ -149,7 +149,7 @@ export async function runDaytonaAttempt(
     await emit(`Running goal in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
     request.signal?.throwIfAborted();
-    const result = await sandbox.process.executeCommand(`chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`, directory, undefined, 240);
+    const result = await sandbox.process.executeCommand(`chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`, directory, undefined, 22 * 60);
     if(result.exitCode!==0)throw new AttemptCommandError(result.exitCode,result.result);
     if(result.result!=='herbie-attempt-completed\n')throw new AttemptResultError('Invalid goal completion marker',result.result);
     await emit(`Goal completed in sandbox ${sandbox.id}`);
