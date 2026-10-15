@@ -9,7 +9,7 @@ import { goalInput, actionSchema } from '@herbie/contracts';
 import { createClient, ApiError } from '@herbie/contracts/client';
 
 const savedSession = z.object({baseUrl: z.string().url(), token: z.string().min(1)}).strict();
-const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--max-wip 1] [--request-id UUID]\n  rename GOAL_ID --name TEXT\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n  retry-publication GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
+const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--max-wip 1] [--request-id UUID]\n  rename GOAL_ID --name TEXT\n  edit GOAL_ID --prompt TEXT\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n  retry-publication GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
 
 export type CliIO = {configPath?: string; stdout: (value: string) => void; stderr: (value: string) => void};
 
@@ -98,6 +98,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
       print(await client.start(input, requestId)); return 0;
     }
     if (!id) throw new Error(`${command} requires a goal ID`);
+    if (command === 'edit') { print(await client.editPrompt(id, z.string().parse(values.prompt))); return 0; }
     if (command === 'rename') { print(await client.rename(id, z.string().parse(values.name))); return 0; }
     if (command === 'logs') { print(await client.events(id, Number(values.after ?? 0))); return 0; }
     if (command === 'retry-publication') { print(await client.retryPublication(id)); return 0; }

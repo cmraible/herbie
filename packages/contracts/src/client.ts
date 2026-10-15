@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { goalRename, goalInput, goalSchema, eventSchema, sessionSchema, repositorySchema, authStartSchema, installationStartSchema, authPollSchema, actionSchema, type GoalInput, type GoalAction } from './index.js';
+import { goalUpdate, type GoalUpdate, goalPromptEdit, goalRename, goalInput, goalSchema, eventSchema, sessionSchema, repositorySchema, authStartSchema, installationStartSchema, authPollSchema, actionSchema, type GoalInput, type GoalAction } from './index.js';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
@@ -40,6 +40,8 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       return request('/api/goals', goalSchema, maxWip === 1 ? goal : {...goal,maxWip}, requestId);
     },
     rename: (id: string, name: string) => request(`${goalPath(id)}/name`, goalSchema, goalRename.parse({name})),
+    update: (id: string, input: GoalUpdate) => request(goalPath(id), goalSchema, goalUpdate.parse(input)),
+    editPrompt: (id: string, prompt: string) => request(`${goalPath(id)}/prompt`, goalSchema, goalPromptEdit.parse({prompt})),
     events: (id: string, after = 0) => request(`${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`, z.array(eventSchema)),
     action: (id: string, action: GoalAction) => request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
     retryPublication: (id:string) => request(`${goalPath(id)}/retry-publication`,goalSchema,{}),

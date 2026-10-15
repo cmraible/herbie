@@ -258,3 +258,22 @@ test('rename sends a validated name for the selected goal', async () => {
     assert.equal(JSON.parse(app.output.at(-1)??'').name,'Better coverage');
   } finally {await app.close();}
 });
+
+test('edit sends a validated prompt for the selected goal', async () => {
+  const prompts:unknown[]=[];
+  const app=await fixture((request,response)=>{
+    if(request.url==='/api/demo/login'){json(response,{token:'private-session',session});return;}
+    if(request.url===`/api/goals/${goalId}/prompt`&&request.method==='POST'){
+      let body='';request.setEncoding('utf8');request.on('data',(chunk:string)=>{body+=chunk;});
+      request.on('end',()=>{const input=JSON.parse(body);prompts.push(input);json(response,{...goal,...input});});return;
+    }
+    json(response,{error:'Not found'},404);
+  });
+  try {
+    await app.invoke(['login','--demo','--url',app.baseUrl]);
+    assert.equal(await app.invoke(['edit',goalId,'--prompt','   ']),1);
+    assert.equal(await app.invoke(['edit',goalId,'--prompt','  Better coverage  ']),0);
+    assert.deepEqual(prompts,[{prompt:'Better coverage'}]);
+    assert.equal(JSON.parse(app.output.at(-1)??'').prompt,'Better coverage');
+  } finally {await app.close();}
+});

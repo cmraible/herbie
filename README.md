@@ -36,6 +36,7 @@ pnpm cli start --repo demo/example --name "Fix addition" --prompt "Fix addition 
 pnpm cli status
 pnpm cli status GOAL_ID
 pnpm cli rename GOAL_ID --name "Improve arithmetic"
+pnpm cli edit GOAL_ID --prompt "Also cover subtraction with regression tests"
 pnpm cli logs GOAL_ID
 pnpm cli pause GOAL_ID
 pnpm cli resume GOAL_ID
@@ -47,7 +48,10 @@ any queued or running attempt. Attempts run sequentially, filling available
 capacity without waiting for merges. Each merge frees capacity for the next
 attempt. For example, `--max-wip 2` keeps up to two PRs outstanding until the
 goal is paused, cancelled, or stopped by a failure or an unmerged close.
-The goal view lists every published PR.
+The goal view lists every published PR. Use **Edit goal** to update its name,
+prompt, and maximum work in progress together. Prompt changes apply to future
+attempts; lowering the limit keeps existing work and delays new attempts until
+capacity is available. The repository stays fixed for the life of the goal.
 
 CLI responses are JSON. Login stores only a Herbie bearer session in a private
 0600 file (`HERBIE_CONFIG` or `~/.config/herbie/session.json`). For an interrupted

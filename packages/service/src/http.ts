@@ -5,7 +5,7 @@ import {randomBytes} from 'node:crypto';
 import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
-import {actionSchema,goalInput,goalRename,type Goal} from '@herbie/contracts';
+import {actionSchema,goalUpdate,goalInput,goalPromptEdit,goalRename,type Goal} from '@herbie/contracts';
 import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {Store,StoreError} from './store.js';
 import {AuthError,type createAuth} from './auth.js';
@@ -145,13 +145,18 @@ export function createApiServer(options:ApiOptions){
         await adapters.authorize(userId,input.repository);
         const result=await store.createGoal(userId,input,adapters.mode,key);goalJson(result.created?201:200,result.goal);return;
       }
-      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|name))?$/);
+      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|name|prompt))?$/);
       if(goalPath){
         const id=z.string().uuid().parse(goalPath[1]);const goal=await store.getGoal(id,userId);
         if(!goal)throw new HttpError(404,'Goal not found');
+        if(method==='POST'&&!goalPath[2]){goalJson(200,await store.updateGoal(id,userId,goalUpdate.parse(await readJson(request))));return;}
         if(method==='GET'&&!goalPath[2]){goalJson(200,goal);return;}
         if(method==='GET'&&goalPath[2]==='events'){const after=z.coerce.number().int().min(0).safe().parse(url.searchParams.get('after')??0);json(response,200,await store.events(id,after));return;}
         if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){
+          if(goalPath[2]==='prompt'){
+            const {prompt}=goalPromptEdit.parse(await readJson(request));
+            goalJson(200,await store.editGoalPrompt(id,userId,prompt));return;
+          }
           if(goalPath[2]==='name'){
             const {name}=goalRename.parse(await readJson(request));
             goalJson(200,await store.renameGoal(id,userId,name));return;
