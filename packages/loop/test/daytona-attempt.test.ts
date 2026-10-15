@@ -823,3 +823,21 @@ for (const title of [undefined, "", "   ", 123, "x".repeat(257), "First\nSecond"
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
+
+for (const verification of ["pass", "fail", "missing"] as const) {
+  test(`CI repair requires local verification: ${verification}`, async (t) => {
+    const script = verification === "pass" ? "node --test" : "exit 1";
+    const edits =
+      `const fs = await import('node:fs'); fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }\\n');` +
+      (verification === "missing"
+        ? ""
+        : `fs.writeFileSync('../verify.sh', ${JSON.stringify(script)});`);
+    const { run, sandbox } = await localFixture(t, edits);
+    if (verification === "pass") {
+      const result = await run({ verifyLocally: true });
+      assert.equal(result.verification?.localChecksPassed, true);
+      assert.ok(result.patch.length);
+    } else await assert.rejects(run({ verifyLocally: true }));
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}

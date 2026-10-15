@@ -75,10 +75,38 @@ it cannot undo an external call already in flight.
   invalid saved evidence blocks automatic writes with an explicit reason. The
   branch is never overwritten. Transient network/authentication failures keep
   backing off so fixing credentials can recover the saved work automatically.
-- Signed GitHub webhooks trigger read-only reconciliation; a 30-second worker poll
-  handles missing, duplicate or out-of-order deliveries. Trusted GitHub API reads
-  determine merge/close state. Read-only reconciliation uses the App installation
+- Signed GitHub webhooks request reconciliation and CI review for Herbie's tracked
+  open PRs. A 30-second worker poll covers missed deliveries. Trusted GitHub API reads
+  determine merge/close state and current CI failures; webhook bodies never supply
+  agent instructions. Read-only merge/close reconciliation uses the App installation
   even after the initiating user's login expires.
+- CI repairs run in a new Daytona agent session at the PR head. Context includes the
+  original goal, PR URL, failed checks/statuses, check output, annotations, and failed
+  GitHub Actions steps, including checks on GitHub's current test merge commit.
+  Repairs wait while checks are pending. The agent reproduces the failure and writes
+  verification commands; the sandbox runner executes them after the agent exits and
+  rejects missing commands or any nonzero result. Verification has a ten-minute
+  deadline; repair execution allows 32 minutes and uses a 45-minute sandbox TTL.
+- After verification and confirmed sandbox deletion, the host saves the patch and
+  pushes a child commit to the same PR branch, with an exact-head Git lease. A changed
+  head, closed PR, stopped goal, lost worker lease, or unavailable owner authorization
+  prevents publication. The agent never receives GitHub write credentials.
+- Once current CI passes, the worker marks the tracked draft PR ready for review,
+  including PRs that never needed a repair. It rechecks CI, the PR head, owner access,
+  and the active goal before the GitHub write. Pending, cancelled, unknown, or absent
+  checks leave the PR as draft; at least one check/status must succeed, with other
+  checks successful, neutral, or skipped. Already-ready PRs are left alone. This
+  transition uses the existing Pull requests write permission and launches no model
+  session. GitHub's [ready-for-review mutation](https://docs.github.com/en/graphql/reference/pulls#markpullrequestreadyforreview)
+  has no atomic expected-head condition; a concurrent external push after the final
+  read remains a race. The event feed records confirmed transitions.
+- PostgreSQL deduplicates repairs by PR job and head SHA and allows at most three
+  sessions per PR. A failed/expired repair stops further automatic repairs for that
+  PR; ambiguous pushes are not replayed. The goal event feed records repair outcomes,
+  and `ci_repairs.artifact` retains captured work. Repairs do not consume another WIP
+  slot or create a PR. Pause/cancel stops repair work through its heartbeat. Demo and
+  execution-disabled mode do not run repairs. No live model/sandbox validation is
+  included in the routine local tests.
 
 For `needs_attention`, inspect the recorded attempt events and GitHub branch,
 then verify Daytona cleanup by its recorded sandbox name/ID. There is deliberately
@@ -126,9 +154,14 @@ an integrated paid attempt. Before using live mode:
    Do not log authorization headers, cookies, callback codes, poll-token queries,
    encrypted credentials, or Git child environments.
 2. Register/configure a GitHub App with **Contents: read/write**, **Pull requests:
-   read/write**, and **Metadata: read**. Use callback
+   read/write**, **Checks: read**, **Commit statuses: read**, **Actions: read**,
+   and **Metadata: read**. Use callback
    `https://YOUR-HOST/api/auth/callback`, webhook
-   `https://YOUR-HOST/api/webhooks/github`, and subscribe to Pull request events.
+   `https://YOUR-HOST/api/webhooks/github`, and subscribe to **Pull request**,
+   **Check run**, **Check suite**, and **Status** events. Existing installations must
+   accept the added read permissions. These are App-wide subscriptions; Herbie
+   filters deliveries to its own saved PRs. See the [GitHub webhook reference](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
+   and [Checks API](https://docs.github.com/en/rest/checks/runs).
    Set the App's **Setup URL** to
    `https://YOUR-HOST/api/auth/installation/callback`. The authenticated web UI
    derives the App slug from GitHub's `/app` metadata and starts installation

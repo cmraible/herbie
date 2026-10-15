@@ -2,7 +2,7 @@ import { registerDiagnosticSecret, logFailure } from "./diagnostic-log.js";
 import { createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { Repository } from "@herbie/contracts";
-import type { PullRequest, RepositoryAccess } from "./adapters.js";
+import type { PullRequest, RepositoryAccess, CiStatus } from "./adapters.js";
 
 export interface GithubConfig {
   appId: string;
@@ -225,6 +225,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     installationId: number,
     repository: string,
     permission: "read" | "write" = "write",
+    ci = false,
   ) {
     if (
       !Number.isSafeInteger(installationId) ||
@@ -239,20 +240,217 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       .parse(
         await request(`/app/installations/${installationId}/access_tokens`, jwt(), {
           repositories: [repository.split("/")[1]],
-          permissions: { contents: permission, pull_requests: permission },
+          permissions: {
+            contents: permission,
+            pull_requests: permission,
+            ...(ci ? { checks: "read", statuses: "read", actions: "read" } : {}),
+          },
         }),
       );
     if (!(Date.parse(value.expires_at) > Date.now() + 30_000))
       throw new Error("GitHub installation token expired");
     return value.token;
   }
+  async function ciStatus(
+    token: string,
+    repository: string,
+    number: number,
+    branch: string,
+  ): Promise<CiStatus | null> {
+    const pr = z
+      .object({
+        state: z.string(),
+        html_url: z.string(),
+        merge_commit_sha: z.string().nullable(),
+        mergeable: z.boolean().nullable(),
+        head: z.object({
+          sha: z.string().regex(/^[a-f0-9]{40}$/),
+          ref: z.string(),
+          repo: z.object({ full_name: z.string() }).nullable(),
+        }),
+      })
+      .parse(await request(`/repos/${repository}/pulls/${number}`, token));
+    if (
+      pr.state !== "open" ||
+      pr.head.ref !== branch ||
+      pr.head.repo?.full_name.toLowerCase() !== repository.toLowerCase()
+    )
+      return null;
+    const details: unknown[] = [];
+    let pending = false;
+    let passing = true;
+    let succeeded = false;
+    const refs = [
+      ...new Set([
+        pr.head.sha,
+        ...(pr.mergeable && pr.merge_commit_sha ? [pr.merge_commit_sha] : []),
+      ]),
+    ];
+    for (const sha of refs) {
+      for (let page = 1; ; page++) {
+        if (page > 10) throw new Error("CI check listing exceeds supported limit");
+        const checks = z
+          .object({
+            check_runs: z.array(
+              z.object({
+                id: z.number().int(),
+                name: z.string(),
+                status: z.string(),
+                conclusion: z.string().nullable(),
+                details_url: z.string().nullable(),
+                output: z.object({
+                  title: z.string().nullable(),
+                  summary: z.string().nullable(),
+                  text: z.string().nullable(),
+                }),
+              }),
+            ),
+          })
+          .parse(
+            await request(
+              `/repos/${repository}/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
+              token,
+            ),
+          ).check_runs;
+        for (const check of checks) {
+          if (check.status !== "completed") pending = true;
+          if (check.conclusion === "success") succeeded = true;
+          if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) passing = false;
+          if (
+            check.status !== "completed" ||
+            !["failure", "timed_out", "action_required", "startup_failure"].includes(
+              check.conclusion ?? "",
+            )
+          )
+            continue;
+          const annotations = z
+            .array(z.object({ path: z.string(), start_line: z.number(), message: z.string() }))
+            .parse(
+              await request(
+                `/repos/${repository}/check-runs/${check.id}/annotations?per_page=100`,
+                token,
+              ),
+            );
+          details.push({
+            sha,
+            name: check.name,
+            conclusion: check.conclusion,
+            url: check.details_url,
+            output: JSON.stringify(check.output).slice(0, 12000),
+            annotations: JSON.stringify(annotations).slice(0, 16000),
+          });
+          // Actions checks frequently have no output; include the failed workflow steps.
+          const job = check.details_url?.startsWith(
+            `https://github.com/${repository}/actions/runs/`,
+          )
+            ? check.details_url.match(/\/job\/([0-9]+)$/)
+            : null;
+          if (job) {
+            const steps = z
+              .object({
+                name: z.string(),
+                steps: z.array(z.object({ name: z.string(), conclusion: z.string().nullable() })),
+              })
+              .parse(await request(`/repos/${repository}/actions/jobs/${job[1]}`, token));
+            details.push(steps);
+          }
+        }
+        if (checks.length < 100) break;
+      }
+      const statuses = z
+        .object({
+          state: z.string(),
+          total_count: z.number(),
+          statuses: z.array(
+            z.object({
+              context: z.string(),
+              state: z.string(),
+              description: z.string().nullable(),
+              target_url: z.string().nullable(),
+            }),
+          ),
+        })
+        .parse(await request(`/repos/${repository}/commits/${sha}/status?per_page=100`, token));
+      if (statuses.total_count > 100) throw new Error("CI status listing exceeds supported limit");
+      if (statuses.statuses.some((status) => status.state === "pending")) pending = true;
+      if (statuses.statuses.some((status) => status.state === "success")) succeeded = true;
+      if (statuses.statuses.some((status) => status.state !== "success")) passing = false;
+      details.push(
+        ...statuses.statuses.filter((status) => ["error", "failure"].includes(status.state)),
+      );
+    }
+    if (pending) return null;
+    if (!details.length)
+      return passing && succeeded
+        ? {
+            state: "passed",
+            head: pr.head.sha,
+            pullRequest: { number, url: pr.html_url },
+          }
+        : null;
+    return {
+      head: pr.head.sha,
+      pullRequest: { number, url: pr.html_url },
+      state: "failed",
+      details: JSON.stringify(details).slice(0, 60000),
+    };
+  }
   return {
+    ciStatus,
     repositories,
     authorize,
     findPullRequest,
     branchCommit,
     isAncestor,
     installationToken,
+    async markReady(
+      token: string,
+      repository: string,
+      number: number,
+      branch: string,
+      head: string,
+      beforeWrite: () => Promise<void>,
+    ): Promise<boolean> {
+      const status = await ciStatus(token, repository, number, branch);
+      if (status?.state !== "passed" || status.head !== head) return false;
+      const pr = z
+        .object({
+          node_id: z.string(),
+          draft: z.boolean(),
+          state: z.string(),
+          head: z.object({ sha: z.string(), ref: z.string() }),
+        })
+        .parse(await request(`/repos/${repository}/pulls/${number}`, token));
+      if (!pr.draft || pr.state !== "open" || pr.head.sha !== head || pr.head.ref !== branch)
+        return false;
+      await beforeWrite();
+      // GitHub has no expected-head argument for this mutation; recheck immediately above.
+      const result = z
+        .object({
+          data: z
+            .object({
+              markPullRequestReadyForReview: z.object({
+                pullRequest: z.object({ id: z.string(), isDraft: z.literal(false) }),
+              }),
+            })
+            .nullable()
+            .optional(),
+          errors: z.array(z.unknown()).optional(),
+        })
+        .parse(
+          await request("/graphql", token, {
+            query:
+              "mutation($id:ID!) { markPullRequestReadyForReview(input:{pullRequestId:$id}) { pullRequest { id isDraft } } }",
+            variables: { id: pr.node_id },
+          }),
+        );
+      if (
+        result.errors?.length ||
+        result.data?.markPullRequestReadyForReview.pullRequest.id !== pr.node_id
+      )
+        throw new Error("GitHub did not confirm that the PR is ready for review");
+      return true;
+    },
     async installationUrl(state: string) {
       if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error("Invalid installation state");
       const app = appSchema.parse(await request("/app", jwt()));

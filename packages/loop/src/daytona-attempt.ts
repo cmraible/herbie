@@ -43,6 +43,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   repoUrl: string;
   commit?: string;
   goal: string;
+  verifyLocally?: boolean;
 };
 
 export interface DaytonaAttemptChanges {
@@ -62,6 +63,7 @@ export interface DaytonaAttemptChanges {
     patchSha256: string;
     goalCompleted: true;
     sandboxDeleted: true;
+    localChecksPassed?: true;
   };
 }
 
@@ -170,7 +172,7 @@ export async function runDaytonaAttempt(
         ...(request.domainAllowList ? { domainAllowList: request.domainAllowList } : {}),
         secrets: request.secrets,
         outboundProxyUrl: request.outboundProxyUrl,
-        ttlMinutes: 35,
+        ttlMinutes: request.verifyLocally ? 45 : 35,
       },
       { timeout: 120 },
     );
@@ -220,7 +222,9 @@ export async function runDaytonaAttempt(
     }
     await sandbox.fs.uploadFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`, 30);
     await sandbox.fs.uploadFile(
-      Buffer.from(JSON.stringify({ cwd, goal: request.goal })),
+      Buffer.from(
+        JSON.stringify({ cwd, goal: request.goal, verifyLocally: request.verifyLocally }),
+      ),
       `${directory}/attempt.json`,
       30,
     );
@@ -234,7 +238,7 @@ export async function runDaytonaAttempt(
       `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`,
       directory,
       undefined,
-      22 * 60,
+      (request.verifyLocally ? 32 : 22) * 60,
     );
     if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
     if (result.result !== "herbie-attempt-completed\n")
@@ -277,6 +281,11 @@ export async function runDaytonaAttempt(
       /[\r\n]/.test(artifact.pullRequestTitle)
     )
       throw new Error("Invalid pull request title");
+    if (
+      request.verifyLocally &&
+      (!("localChecksPassed" in artifact) || artifact.localChecksPassed !== true)
+    )
+      throw new Error("Local verification did not pass");
     changes = {
       pullRequestTitle: artifact.pullRequestTitle.trim(),
       baseCommit: artifact.baseCommit,
@@ -313,6 +322,7 @@ export async function runDaytonaAttempt(
   request.signal?.removeEventListener("abort", abort);
   if (!failures.length && changes) {
     changes.verification = {
+      ...(request.verifyLocally ? { localChecksPassed: true as const } : {}),
       version: 3,
       repoUrl: repo.href,
       baseCommit: changes.baseCommit,

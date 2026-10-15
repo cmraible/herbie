@@ -404,3 +404,48 @@ test("a lease lost after push preserves the branch but prevents PR creation", as
   assert.equal(createPullRequest.mock.callCount(), 0);
   assert.deepEqual(await readdir(scratch), []);
 });
+
+test("CI repair updates an existing branch with a child commit and no new PR", async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, "push", f.remote, `HEAD:refs/heads/${f.request.branch}`);
+  f.changes.verification!.localChecksPassed = true;
+  const result = await publishPatch(f.createPullRequest, {
+    ...f.request,
+    updatePullRequest: {
+      url: "https://github.com/example/repo/pull/1",
+      head: f.changes.baseCommit,
+    },
+  });
+  assert.equal(f.createPullRequest.mock.callCount(), 0);
+  assert.equal(await git(f.remote, "rev-parse", f.request.branch), result.commit);
+  assert.equal(await git(f.remote, "rev-parse", `${result.commit}^`), f.changes.baseCommit);
+});
+
+test("CI repair refuses a concurrently advanced head and unverified changes", async (t) => {
+  const f = await fixture(t);
+  await git(f.repo, "push", f.remote, `HEAD:refs/heads/${f.request.branch}`);
+  const request = {
+    ...f.request,
+    updatePullRequest: {
+      url: "https://github.com/example/repo/pull/1",
+      head: f.changes.baseCommit,
+    },
+  };
+  await assert.rejects(publishPatch(f.createPullRequest, request), /successful local checks/);
+  f.changes.verification!.localChecksPassed = true;
+  await assert.rejects(
+    publishPatch(f.createPullRequest, {
+      ...request,
+      beforeWrite: async () => {
+        await git(f.repo, "commit", "-m", "Concurrent human fix");
+        await git(f.repo, "push", f.remote, `HEAD:refs/heads/${f.request.branch}`);
+      },
+    }),
+    PatchPublicationError,
+  );
+  assert.equal(
+    await git(f.remote, "rev-parse", f.request.branch),
+    await git(f.repo, "rev-parse", "HEAD"),
+  );
+  assert.equal(f.createPullRequest.mock.callCount(), 0);
+});

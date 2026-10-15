@@ -1,3 +1,4 @@
+import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure } from "./diagnostic-log.js";
 import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
@@ -272,8 +273,10 @@ export async function runWorker(
     try {
       if (Date.now() >= nextReconciliation) {
         await reconcileReviews(store, adapters);
+        if (adapters.ciStatus) await store.requestCiReview();
         nextReconciliation = Date.now() + 30_000;
       }
+      if (!signal.aborted) await runCiRepairOnce(store, adapters, workerId);
       if (!signal.aborted) await runWorkerOnce(store, adapters, workerId);
     } catch (error) {
       logFailure(error, { component: "worker-tick" });

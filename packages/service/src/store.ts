@@ -923,6 +923,139 @@ export class Store {
     });
   }
 
+  async requestCiReview(repository?: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE jobs j SET ci_review_requested=true FROM goals g
+      WHERE j.goal_id=g.id AND g.mode='live' AND j.stage='awaiting_review'
+      AND j.pull_request->>'state'='open' AND ($1::text IS NULL OR lower(g.repository)=lower($1))`,
+      [repository ?? null],
+    );
+  }
+
+  async takeCiReview(): Promise<Job | null> {
+    return this.transaction(async (client) => {
+      const selected = await client.query<{
+        id: string;
+      }>(`SELECT j.id FROM jobs j JOIN goals g ON j.goal_id=g.id
+        WHERE j.ci_review_requested AND j.stage='awaiting_review' AND g.mode='live'
+        AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL
+        ORDER BY j.created_at LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`);
+      const id = selected.rows[0]?.id;
+      if (!id) return null;
+      const { row, goal } = await lockJob(client, id);
+      await client.query("UPDATE jobs SET ci_review_requested=false WHERE id=$1", [id]);
+      return decodeJob(row, goal);
+    });
+  }
+
+  async ciReviewActive(jobId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM jobs j JOIN goals g ON j.goal_id=g.id
+      WHERE j.id=$1 AND j.stage='awaiting_review' AND j.pull_request->>'state'='open'
+      AND g.mode='live' AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL`,
+      [jobId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async startCiRepair(jobId: string, head: string, workerId: string): Promise<string | null> {
+    return this.transaction(async (client) => {
+      const { row, goal } = await lockJob(client, jobId);
+      if (
+        row.stage !== "awaiting_review" ||
+        goal.stopRequested ||
+        !["queued", "running", "awaiting_review"].includes(goal.state)
+      )
+        return null;
+      const previous = await client.query<{ head: string; state: string }>(
+        "SELECT head,state FROM ci_repairs WHERE job_id=$1",
+        [jobId],
+      );
+      if (
+        previous.rows.length >= 3 ||
+        previous.rows.some((r) => r.head === head || r.state !== "completed")
+      )
+        return null;
+      const id = randomUUID();
+      await client.query(
+        `INSERT INTO ci_repairs(id,job_id,head,state,lease_owner,lease_expires_at)
+        VALUES($1,$2,$3,'running',$4,clock_timestamp()+interval '30 seconds')`,
+        [id, jobId, head, workerId],
+      );
+      await addEvent(
+        client,
+        goal.id,
+        "ci_repair_started",
+        `Repairing failing CI on ${row.branch} at ${head}`,
+      );
+      return id;
+    });
+  }
+
+  async heartbeatCiRepair(id: string, workerId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ci_repairs r SET lease_expires_at=clock_timestamp()+interval '30 seconds'
+      FROM jobs j JOIN goals g ON j.goal_id=g.id WHERE r.id=$1 AND r.lease_owner=$2
+      AND r.job_id=j.id AND r.state='running' AND r.lease_expires_at>clock_timestamp()
+      AND j.stage='awaiting_review' AND j.pull_request->>'state'='open'
+      AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL`,
+      [id, workerId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async saveCiArtifact(
+    id: string,
+    workerId: string,
+    changes: DaytonaAttemptChanges,
+  ): Promise<void> {
+    const { patch, ...metadata } = changes;
+    const result = await this.pool.query(
+      `UPDATE ci_repairs SET artifact=$3 WHERE id=$1 AND lease_owner=$2
+      AND state='running' AND lease_expires_at>clock_timestamp()`,
+      [id, workerId, JSON.stringify({ ...metadata, patchBase64: patch.toString("base64") })],
+    );
+    if (result.rowCount !== 1) throw conflict("CI repair lease lost");
+  }
+
+  async finishCiRepair(
+    id: string,
+    workerId: string,
+    succeeded: boolean,
+    message: string,
+  ): Promise<void> {
+    await this.transaction(async (client) => {
+      const result = await client.query<{ goal_id: string }>(
+        `UPDATE ci_repairs r SET state=$3 FROM jobs j
+        WHERE r.id=$1 AND r.lease_owner=$2 AND r.state='running' AND r.job_id=j.id RETURNING j.goal_id`,
+        [id, workerId, succeeded ? "completed" : "failed"],
+      );
+      if (result.rows[0])
+        await addEvent(
+          client,
+          result.rows[0].goal_id,
+          succeeded ? "ci_repair_completed" : "ci_repair_failed",
+          message,
+        );
+    });
+  }
+
+  async recoverCiRepairs(): Promise<void> {
+    await this.transaction(async (client) => {
+      const expired = await client.query<{
+        goal_id: string;
+      }>(`UPDATE ci_repairs r SET state='failed' FROM jobs j
+        WHERE r.job_id=j.id AND r.state='running' AND r.lease_expires_at<=clock_timestamp() RETURNING j.goal_id`);
+      for (const row of expired.rows)
+        await addEvent(
+          client,
+          row.goal_id,
+          "ci_repair_failed",
+          "CI repair lease expired. Inspect sandbox cleanup and the PR head before manual recovery; the repair will not be replayed.",
+        );
+    });
+  }
+
   async reviewJobs(mode?: "demo" | "live"): Promise<Job[]> {
     const result = await this.pool.query<Record<string, unknown>>(
       `SELECT j.*, (j.lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs j JOIN goals g ON g.id=j.goal_id

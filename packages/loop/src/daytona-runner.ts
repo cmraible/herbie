@@ -26,7 +26,15 @@ try {
   const baseCommit = (await git("rev-parse", "HEAD")).trim();
   const titleFile = new URL("./pr-title.txt", import.meta.url);
   const descriptionFile = new URL("./pr-description.md", import.meta.url);
+  const verifyLocally = "verifyLocally" in input && input.verifyLocally === true;
+  const verificationFile = new URL("./verify.sh", import.meta.url);
+  const verificationInstructions = verifyLocally
+    ? `
+This is a CI repair. Reproduce the failing checks, make the smallest fix, and run the relevant verification locally. Do not disable checks, weaken tests, or claim success when verification is unavailable.
+Write the exact verification commands to ${fileURLToPath(verificationFile)} outside the repository. Use a bash script that exits nonzero on any failure; the runner will execute it after you exit, from the repository root, with a ten-minute deadline. Include the failing checks and relevant regression coverage. Do not push or open another PR. Then exit.`
+    : "";
   const goal = `${input.goal}
+${verificationInstructions}
 
 After implementing and verifying your change, write the pull request description as Markdown to ${fileURLToPath(descriptionFile)} (outside the repository).
 Write a concise, single-line pull request title (at most 256 characters) to ${fileURLToPath(titleFile)}. Name the specific change made in this attempt, rather than repeating the overall goal.
@@ -37,6 +45,16 @@ Explain the specific change you actually made, why you chose it, and how it help
     turnTimeoutMs: 20 * 60_000,
     disposableDaytona: true,
   });
+  if (verifyLocally) {
+    if (!(await readFile(verificationFile, "utf8")).trim())
+      throw new Error("Missing local verification commands");
+    await promisify(execFile)("bash", ["-euo", "pipefail", fileURLToPath(verificationFile)], {
+      cwd,
+      timeout: 10 * 60_000,
+      killSignal: "SIGKILL",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  }
   const pullRequestTitle = (await readFile(titleFile, "utf8")).trim();
   if (!pullRequestTitle || pullRequestTitle.length > 256 || /[\r\n]/.test(pullRequestTitle))
     throw new Error("Invalid pull request title");
@@ -62,6 +80,7 @@ Explain the specific change you actually made, why you chose it, and how it help
     new URL("./changes.json", import.meta.url),
     JSON.stringify({
       baseCommit,
+      ...(verifyLocally ? { localChecksPassed: true } : {}),
       pullRequestBody,
       pullRequestTitle,
       patchBase64: (await readFile(patchFile)).toString("base64"),

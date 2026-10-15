@@ -1,0 +1,158 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import test from "node:test";
+import pg from "pg";
+import { Store } from "../src/store.js";
+import { runWorkerOnce } from "../src/worker.js";
+import { runCiRepairOnce } from "../src/ci-repair.js";
+import { createDemoAdapters } from "../src/demo.js";
+import type { Adapters } from "../src/adapters.js";
+
+for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"] as const) {
+  test(`durable CI repair: ${outcome}`, async (t) => {
+    const database = process.env.HERBIE_TEST_DATABASE_URL;
+    if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL");
+    const schema = `ci_${randomUUID().replaceAll("-", "")}`;
+    const admin = new pg.Pool({ connectionString: database });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const store = new Store(
+      new pg.Pool({ connectionString: database, options: `-c search_path=${schema}` }),
+    );
+    t.after(async () => {
+      await store.close();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    });
+    await store.migrate();
+    const { goal } = await store.createGoal(
+      "demo-user",
+      { repository: "demo/example", prompt: "Fix arithmetic" },
+      "demo",
+      randomUUID(),
+    );
+    const demo = createDemoAdapters();
+    await runWorkerOnce(store, demo, "original");
+    await store.pool.query("UPDATE goals SET mode='live' WHERE id=$1", [goal.id]);
+    const [job] = await store.reviewJobs("live");
+    assert.ok(job);
+    const pr = job.goal.pullRequests[0]!;
+    if (outcome === "crash") {
+      const claims = await Promise.all([
+        store.startCiRepair(job.id, "a".repeat(40), "one"),
+        store.startCiRepair(job.id, "a".repeat(40), "two"),
+      ]);
+      assert.equal(claims.filter(Boolean).length, 1);
+      await store.pool.query(
+        "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
+      );
+      await store.recoverCiRepairs();
+      assert.equal(await store.startCiRepair(job.id, "b".repeat(40), "replacement"), null);
+      await store.finishCiRepair(claims.find(Boolean)!, "one", true, "stale completion");
+      assert.equal(
+        (await store.pool.query("SELECT state FROM ci_repairs")).rows[0].state,
+        "failed",
+      );
+      return;
+    }
+
+    let attempts = 0,
+      pushes = 0,
+      reads = 0;
+    let head = "a".repeat(40);
+    const adapters: Adapters = {
+      ...demo,
+      mode: "live",
+      ciStatus: async () => ({
+        state: "failed",
+        head: outcome === "stale" && ++reads > 1 ? "b".repeat(40) : head,
+        pullRequest: pr,
+        details: "test addition failed",
+      }),
+      attempt: async (execution) => {
+        attempts++;
+        assert.equal(execution.ciRepair?.head, head);
+        assert.equal(execution.branch, job.branch);
+        if (outcome === "failure") throw new Error("Verification failed");
+        if (outcome === "cancel") await store.control(goal.id, "demo-user", "cancel");
+        if (outcome === "lease")
+          await store.pool.query(
+            "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
+          );
+        const changes = await demo.attempt(execution, async () => {});
+        return {
+          ...changes,
+          baseCommit: head,
+          verification: { ...changes.verification!, localChecksPassed: true },
+        };
+      },
+      publish: async (_execution, _changes, requireLease) => {
+        await requireLease();
+        pushes++;
+        return pr;
+      },
+    };
+    await store.requestCiReview("unrelated/repo");
+    assert.equal(await runCiRepairOnce(store, adapters, "repair"), false);
+    await store.requestCiReview("demo/example");
+    await runCiRepairOnce(store, adapters, "repair");
+    assert.equal(attempts, 1);
+    assert.equal(pushes, outcome === "success" ? 1 : 0);
+    if (outcome !== "stale") {
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "duplicate");
+      assert.equal(attempts, 1);
+    }
+    assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
+    if (outcome === "success") {
+      for (const char of ["b", "c", "d"]) {
+        head = char.repeat(40);
+        await store.requestCiReview();
+        await runCiRepairOnce(store, adapters, "next");
+      }
+      assert.equal(attempts, 3, "repair budget is per PR");
+      assert.equal(pushes, 3);
+      let ready = false;
+      adapters.ciStatus = async () => ({ state: "passed", head, pullRequest: pr });
+      adapters.markReady = async (_execution, expectedHead, beforeWrite) => {
+        assert.equal(expectedHead, head);
+        await beforeWrite();
+        if (ready) return false;
+        ready = true;
+        return true;
+      };
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "ready");
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "ready-again");
+      assert.equal(ready, true);
+      assert.equal(attempts, 3, "marking ready does not launch another session");
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='pull_request_ready'",
+            [goal.id],
+          )
+        ).rowCount,
+        1,
+      );
+      assert.equal(await store.ciReviewActive(job.id), true);
+      await store.control(goal.id, "demo-user", "pause");
+      assert.equal(await store.ciReviewActive(job.id), false);
+    }
+    const events = await store.pool.query<{ type: string }>(
+      "SELECT type FROM goal_events WHERE goal_id=$1",
+      [goal.id],
+    );
+    assert.ok(
+      events.rows.some(
+        (row) =>
+          row.type ===
+          (["success", "stale"].includes(outcome) ? "ci_repair_completed" : "ci_repair_failed"),
+      ),
+    );
+  });
+}
+
+test("CI repairs are unavailable when execution adapters are disabled", async () => {
+  assert.equal(await runCiRepairOnce({} as Store, createDemoAdapters(), "worker"), false);
+});
