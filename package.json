@@ -5,6 +5,7 @@
   "description": "Herbie workspace: an AI loop controller and ChatGPT demo.",
   "type": "module",
   "scripts": {
+    "verify": "bash scripts/verify.sh",
     "start": "pnpm --filter @herbie/loop start",
     "demo": "pnpm --filter @herbie/demo start",
     "build": "pnpm -r build",
