@@ -67,6 +67,7 @@ async function fixture(t: TestContext, extraFiles = false) {
           Readable.from([
             Buffer.from(
               JSON.stringify({
+                pullRequestTitle: "Fix addition totals",
                 pullRequestBody: "Tested arithmetic fix",
                 baseCommit,
                 patchBase64: patch.toString("base64"),
