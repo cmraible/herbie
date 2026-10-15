@@ -42,6 +42,10 @@ docker exec -e EXPECTED_REVISION="$revision" "$prefix-app" node --input-type=mod
   assert.equal(health.imageRevision,process.env.EXPECTED_REVISION);
   assert.equal(health.deploymentId,process.env.EXPECTED_REVISION);
   assert.equal((await fetch("http://127.0.0.1:8787/")).status,200);
+  const favicon=await fetch("http://127.0.0.1:8787/favicon.svg");
+  assert.equal(favicon.status,200);
+  assert.match(favicon.headers.get("content-type"),/^image\/svg\+xml\b/);
+  assert.match(await favicon.text(),/<svg\b/);
   assert.notEqual(process.getuid(),0);
 '
 docker exec "$prefix-app" sh -c 'git --version >/dev/null && mkdir /tmp/publisher-smoke && git init --quiet /tmp/publisher-smoke'
@@ -54,4 +58,4 @@ docker exec "$prefix-app" node --input-type=module -e '
 '
 docker stop --time 15 "$prefix-app" >/dev/null
 test "$(docker inspect --format '{{.State.ExitCode}}' "$prefix-app")" = 0
-printf 'Portable image smoke passed: revision, UI, non-root read-only runtime, Git scratch, DB outage, SIGTERM.\n'
+printf 'Portable image smoke passed: revision, UI, favicon, non-root read-only runtime, Git scratch, DB outage, SIGTERM.\n'
