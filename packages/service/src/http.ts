@@ -277,6 +277,18 @@ export function createApiServer(options: ApiOptions) {
       // Only trusted API reads drive transitions. Duplicate/out-of-order webhook bodies are harmless.
       if (request.headers["x-github-event"] === "pull_request")
         await reconcileReviews(store, adapters);
+      if (
+        executionEnabled &&
+        adapters.mode === "live" &&
+        ["check_run", "check_suite", "status", "pull_request"].includes(
+          String(request.headers["x-github-event"]),
+        )
+      ) {
+        const event = z
+          .object({ repository: z.object({ full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }) })
+          .safeParse(JSON.parse(payload.toString("utf8")));
+        if (event.success) await store.requestCiReview(event.data.repository.full_name);
+      }
       json(response, 200, { ok: true });
       return;
     }

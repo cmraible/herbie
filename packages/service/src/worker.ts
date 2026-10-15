@@ -1,3 +1,4 @@
+import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure } from "./diagnostic-log.js";
 import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
@@ -250,6 +251,28 @@ export async function runWorkerOnce(
 }
 
 export async function reconcileReviews(store: Store, adapters: Adapters): Promise<void> {
+  // Recovery of a past write must not depend on current CI, goal state, or PR state.
+  if (adapters.readinessState)
+    for (const job of await store.reviewJobs(adapters.mode, true)) {
+      try {
+        const state = await adapters.readinessState(await executionFor(adapters, job, true));
+        if (
+          state === "closed" ||
+          (state === "draft" && ["cancelled", "completed", "failed"].includes(job.goal.state))
+        )
+          await store.cancelReadiness(job.id);
+        if (state === "ready") {
+          const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
+          if (pr) await store.confirmReadiness(job.id, pr.url);
+        }
+      } catch (error) {
+        logFailure(error, {
+          component: "readiness-reconciliation",
+          goalId: job.goal.id,
+          jobId: job.id,
+        });
+      }
+    }
   for (const job of await store.reviewJobs(adapters.mode)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
@@ -268,12 +291,18 @@ export async function runWorker(
   signal: AbortSignal,
 ): Promise<void> {
   let nextReconciliation = 0;
+  let nextCiPoll = 0;
   while (!signal.aborted) {
     try {
       if (Date.now() >= nextReconciliation) {
         await reconcileReviews(store, adapters);
         nextReconciliation = Date.now() + 30_000;
       }
+      if (adapters.ciStatus && Date.now() >= nextCiPoll) {
+        await store.requestCiReview();
+        nextCiPoll = Date.now() + 10 * 60_000;
+      }
+      if (!signal.aborted) await runCiRepairOnce(store, adapters, workerId);
       if (!signal.aborted) await runWorkerOnce(store, adapters, workerId);
     } catch (error) {
       logFailure(error, { component: "worker-tick" });

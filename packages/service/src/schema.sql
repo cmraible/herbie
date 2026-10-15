@@ -77,3 +77,25 @@ CREATE TRIGGER sync_goal_pull_request AFTER INSERT OR UPDATE OF pull_request ON 
   FOR EACH ROW EXECUTE FUNCTION sync_goal_pull_request();
 UPDATE jobs j SET pull_request=g.pull_request FROM goals g
   WHERE j.goal_id=g.id AND j.branch=g.pull_request->>'branch' AND j.pull_request IS NULL;
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ci_review_requested boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS ci_repairs (
+  id uuid PRIMARY KEY,
+  job_id uuid NOT NULL REFERENCES jobs(id),
+  head text NOT NULL,
+  state text NOT NULL CHECK (state IN ('running','completed','failed')),
+  lease_owner text NOT NULL,
+  lease_expires_at timestamptz NOT NULL,
+  artifact jsonb,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE(job_id, head)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ci_repairs_one_running ON ci_repairs(job_id) WHERE state='running';
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ci_reviewed_at timestamptz;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS readiness_pending boolean NOT NULL DEFAULT false;
+
+ALTER TABLE ci_repairs DROP CONSTRAINT IF EXISTS ci_repairs_state_check;
+ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('running','waiting','completed','failed'));
+
+ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;

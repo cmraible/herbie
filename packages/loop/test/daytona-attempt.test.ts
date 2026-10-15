@@ -823,3 +823,48 @@ for (const title of [undefined, "", "   ", 123, "x".repeat(257), "First\nSecond"
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
+
+for (const verification of ["pass", "fail", "missing", "mutates"] as const) {
+  test(`CI repair requires local verification: ${verification}`, async (t) => {
+    const script =
+      verification === "pass"
+        ? "node --test"
+        : verification === "mutates"
+          ? "node --test\nprintf modified > add.mjs"
+          : "exit 1";
+    const edits =
+      `const fs = await import('node:fs'); fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }\\n');` +
+      (verification === "missing"
+        ? ""
+        : `fs.writeFileSync('../verify.sh', ${JSON.stringify(script)});`);
+    const { run, sandbox } = await localFixture(t, edits);
+    if (verification === "pass") {
+      const result = await run({ verifyLocally: true });
+      assert.equal(result.verification?.localChecksPassed, true);
+      assert.ok(result.patch.length);
+    } else await assert.rejects(run({ verifyLocally: true }));
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}
+
+test("CI repair publishes the immutable verified tree despite later index changes", async (t) => {
+  const { directory, run } = await localFixture(
+    t,
+    `const fs = await import('node:fs'); fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }\\n'); fs.writeFileSync('../verify.sh', 'node --test');`,
+  );
+  await writeFile(
+    join(directory, "bin", "git"),
+    `#!/bin/sh
+if [ "$1" = diff ]; then
+  printf modified > add.mjs
+  /usr/bin/git add --all
+fi
+exec /usr/bin/git "$@"
+`,
+    { mode: 0o700 },
+  );
+  const result = await run({ verifyLocally: true });
+  assert.equal(result.verification?.localChecksPassed, true);
+  assert.match(result.patch.toString(), /return a\+b/);
+  assert.doesNotMatch(result.patch.toString(), /modified/);
+});

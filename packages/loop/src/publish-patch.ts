@@ -22,6 +22,8 @@ type Request = {
   title: string;
   body: string;
   changes: DaytonaAttemptChanges;
+  // Update an existing PR only while its head still matches the captured base.
+  updatePullRequest?: { url: string; head: string };
   // Durable callers must confirm current lease ownership immediately before remote writes.
   beforeWrite?: () => Promise<void>;
   // Trusted caller-owned, per-process auth/identity. Never persist credentials in Git config.
@@ -36,6 +38,8 @@ export interface PublicationState {
   commit?: string;
   url?: string;
 }
+
+export class PatchHeadChangedError extends Error {}
 
 export class PatchPublicationError extends AggregateError {
   constructor(
@@ -93,6 +97,11 @@ export async function publishPatch(
   if (!hasValidPublicationEvidence(repository, changes)) {
     throw new Error("Matching successful goal and cleanup evidence is required for this patch");
   }
+  if (
+    request.updatePullRequest &&
+    (request.updatePullRequest.head !== baseCommit || !changes.verification?.localChecksPassed)
+  )
+    throw new Error("PR updates require matching head and successful local checks");
   if (!patch.length) throw new Error("Cannot publish an empty patch");
 
   const directory = await mkdtemp(join(tmpdir(), "herbie-publish-"));
@@ -121,9 +130,11 @@ export async function publishPatch(
     await git("check-ref-format", `refs/heads/${baseBranch}`);
     await request.onPhase?.("preparing");
     await git("remote", "add", "origin", remoteUrl);
-    if (await git("ls-remote", "--heads", "origin", headRef))
-      throw new Error("Publication branch already exists");
-    await git("fetch", "--no-tags", "origin", `refs/heads/${baseBranch}`);
+    const update = request.updatePullRequest;
+    const remoteHead = (await git("ls-remote", "--heads", "origin", headRef)).split("\t")[0];
+    if (update && remoteHead !== update.head) throw new PatchHeadChangedError("PR head changed");
+    if (!update && remoteHead) throw new Error("Publication branch already exists");
+    await git("fetch", "--no-tags", "origin", update ? headRef : `refs/heads/${baseBranch}`);
     // Keep the exact captured tree and parent even when other work advances main.
     await git("merge-base", "--is-ancestor", baseCommit, "FETCH_HEAD");
     await git("read-tree", baseCommit);
@@ -142,28 +153,40 @@ export async function publishPatch(
     const pushed = await git(
       "push",
       "--porcelain",
-      `--force-with-lease=${headRef}:`,
+      `--force-with-lease=${headRef}:${update?.head ?? ""}`,
       "origin",
       `${commit}:${headRef}`,
     );
-    if (!pushed.split("\n").some((line) => line.startsWith("*\t")))
+    if (!pushed.split("\n").some((line) => line.startsWith(update ? " \t" : "*\t")))
       throw new Error("Push did not create a new branch");
     await request.beforeWrite?.();
     state.stage = "opening-pr";
     await request.onPhase?.("opening-pr");
-    const { url } = await createPullRequest({
-      repository,
-      base: baseBranch,
-      head: branch,
-      title,
-      body,
-      draft: true,
-    });
+    const { url } =
+      update ??
+      (await createPullRequest({
+        repository,
+        base: baseBranch,
+        head: branch,
+        title,
+        body,
+        draft: true,
+      }));
     state.url = url;
     state.stage = "published";
     result = { url, branch, commit };
   } catch (error) {
-    failures.push(error);
+    // Only a definitive Git lease rejection is a discard; transport failures remain uncertain.
+    const rejected =
+      request.updatePullRequest &&
+      state.stage === "pushing" &&
+      error instanceof Error &&
+      "stdout" in error &&
+      typeof error.stdout === "string" &&
+      error.stdout
+        .split("\n")
+        .some((line) => line.startsWith("!\t") && line.endsWith("[rejected] (stale info)"));
+    failures.push(rejected ? new PatchHeadChangedError("PR head changed during push") : error);
   } finally {
     try {
       await rm(directory, { recursive: true, force: true });

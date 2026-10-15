@@ -12,7 +12,21 @@ export interface Execution {
   attemptId: string;
   branch: string;
   signal?: AbortSignal;
+  ciRepair?: CiFailure;
 }
+export interface CiFailure {
+  head: string;
+  pullRequest: { number: number; url: string };
+  details: string;
+}
+export type CiStatus =
+  | (CiFailure & { state: "failed" })
+  | {
+      state: "passed";
+      draft: boolean;
+      head: string;
+      pullRequest: { number: number; url: string };
+    };
 export interface PullRequest {
   url: string;
   number: number;
@@ -36,8 +50,16 @@ export type PublicationRetryCheck =
   | "base_changed";
 export class KnownAttemptFailure extends Error {}
 export class PublicationBlockedError extends Error {}
+export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
+  readinessState?(execution: Execution): Promise<"ready" | "draft" | "closed">;
+  ciStatus?(execution: Execution): Promise<CiStatus | null>;
+  markReady?(
+    execution: Execution,
+    head: string,
+    beforeWrite: () => Promise<void>,
+  ): Promise<boolean>;
   authorize(userId: string, repository: string): Promise<RepositoryAccess>;
   reconciliationRepository(repository: string): Promise<RepositoryAccess>;
   repositories(userId: string): Promise<Repository[]>;

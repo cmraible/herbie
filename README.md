@@ -328,9 +328,15 @@ fails, the adapter still rejects and exposes the retrieved artifact on
 artifacts. Goal, extraction, change-artifact download, or malformed-artifact failures
 reject and still attempt deletion; they do not provide a partial patch.
 
-Herbie does not run a separate validation command after the agent finishes.
-The agent can install dependencies and run tests in its own checkout. Repository
-CI validates the draft PR; reviewers should check its results before merging.
+For initial goal attempts, the agent installs dependencies and runs tests in its
+own checkout; there is no separate validation command. For CI repairs, the runner
+requires and executes the agent's verification script after the session exits.
+Only successful local verification and confirmed sandbox deletion allow a repair
+patch to be pushed to the existing PR. Signed CI webhooks and polling trigger
+repairs for tracked PRs, once per head and up to three times per PR; failures stop
+further automatic repair. See [setup and recovery](docs/service.md) for the required
+GitHub App subscriptions and permissions. Repository CI still validates each push. Once checks pass, Herbie automatically
+marks the draft PR ready for review without starting another agent session.
 After goal completion and confirmed sandbox deletion, the host attaches
 `verification` evidence binding the repository URL, base commit and SHA-256 of
 the patch bytes to that attempt. Version 3 records completion and cleanup, not a

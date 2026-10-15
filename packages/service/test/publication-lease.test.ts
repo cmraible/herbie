@@ -29,7 +29,18 @@ async function githubFixture(t: TestContext) {
     else if (path.startsWith("/user/installations"))
       response.end(
         JSON.stringify({
-          installations: [{ id: 11, permissions: { contents: "write", pull_requests: "write" } }],
+          installations: [
+            {
+              id: 11,
+              permissions: {
+                contents: "write",
+                pull_requests: "write",
+                checks: "read",
+                statuses: "read",
+                actions: "read",
+              },
+            },
+          ],
         }),
       );
     else if (path === "/app/installations/11/access_tokens")
