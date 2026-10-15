@@ -37,6 +37,9 @@ packages/web/*
 !packages/web/tsconfig.json
 !packages/web/vite.config.ts
 !packages/web/index.html
+!packages/web/public/
+packages/web/public/*
+!packages/web/public/favicon.svg
 !packages/web/src/
 packages/web/src/*
 !packages/web/src/*.ts
