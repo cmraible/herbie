@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 
 const demoSession={mode:'demo',user:{id:'fixture-user',login:'sample-user'}};
 const goalId=randomUUID();
-const fixtureGoal={id:goalId,ownerId:'fixture-owner',repository:'demo/sample',name:'Keep loaded work visible',prompt:'Keep loaded work visible',maxAttempts:1,attemptCount:1,state:'running',createdAt:'2026-10-13T00:00:00.000Z',updatedAt:'2026-10-13T00:00:00.000Z',mode:'demo',stopRequested:null,pullRequest:null,error:null};
+const fixtureGoal={id:goalId,ownerId:'fixture-owner',repository:'demo/sample',name:'Keep loaded work visible',prompt:'Keep loaded work visible',attemptCount:1,state:'running',createdAt:'2026-10-13T00:00:00.000Z',updatedAt:'2026-10-13T00:00:00.000Z',mode:'demo',stopRequested:null,pullRequest:null,error:null};
 const health={mode:'demo'};
 const json=(route:Parameters<Parameters<Page['route']>[1]>[0],body:unknown,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
 async function routeSignedIn(page:Page,goals:unknown[]=[fixtureGoal]){
@@ -52,7 +52,7 @@ test('goals and repository actions stay pending until their responses arrive',as
   await expect(page.getByRole('status').filter({hasText:'Checking repository access'})).toBeVisible();
   await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
   releaseRepos();
-  await expect(page.getByRole('dialog').getByText('No repositories available.')).toBeVisible();
+  await expect(page.getByRole('region',{name:'New goal',exact:true}).getByText('No repositories available.')).toBeVisible();
   await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
 });
 
@@ -99,10 +99,10 @@ test('repository discovery errors do not suggest connecting repositories',async(
   await page.route('**/api/repositories',route=>json(route,{error:'Repository discovery is unavailable'},503));
   await page.goto('/');
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  const dialog=page.getByRole('dialog');
-  await expect(dialog.getByRole('alert')).toContainText('Repository discovery is unavailable');
-  await expect(dialog.getByText('No repositories available.')).toHaveCount(0);
-  await expect(dialog.getByRole('button',{name:'Connect'})).toHaveCount(0);
+  const screen=page.getByRole('region',{name:'New goal',exact:true});
+  await expect(screen.getByRole('alert')).toContainText('Repository discovery is unavailable');
+  await expect(screen.getByText('No repositories available.')).toHaveCount(0);
+  await expect(screen.getByRole('button',{name:'Connect'})).toHaveCount(0);
 });
 
 test('signed-out, sign-in, and sign-out states only appear after their responses',async({page})=>{
@@ -164,6 +164,25 @@ test('the goal list hides finished work until requested and opens details separa
   await page.goBack();
   await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:/Stopped work/})).toBeVisible();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await expect(page).toHaveURL(/#new$/);
+  await expect(page.getByRole('heading',{name:'New goal',exact:true})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Goals',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByLabel('What should Herbie work on?').fill('Keep my draft');
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.goForward();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'New goal',exact:true})).toBeVisible();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
+  await page.getByRole('button',{name:'Back to goals'}).click();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
 });
 
 test('mobile loading and repeated refresh clicks remain within the viewport',async({page})=>{
@@ -179,7 +198,8 @@ test('mobile loading and repeated refresh clicks remain within the viewport',asy
   await refresh.click();
   await expect(refresh).toBeEnabled();
   await refresh.click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('region',{name:'New goal',exact:true})).toBeVisible();
+  await page.screenshot({path:'test-results/new-goal-mobile.png',fullPage:true});
   expect(requests).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
 });
@@ -204,4 +224,72 @@ test('repository refresh keeps alphabetical order and the current selection',asy
   await expect(select).toBeEnabled();
   await expect(select.locator('option')).toHaveText(expected);
   await expect(select).toHaveValue('Beta/repo');
+});
+
+test('a pending creation respects browser Back navigation',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let created=false;
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',async route=>{
+    if(route.request().method()==='POST'){
+      await gate;
+      created=true;
+      await json(route,fixtureGoal);
+    }else await json(route,created?[fixtureGoal]:[]);
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('What should Herbie work on?').fill(fixtureGoal.prompt);
+  const request=page.waitForRequest(request=>request.method()==='POST'&&new URL(request.url()).pathname==='/api/goals');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await request;
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  release();
+  await expect(page.getByRole('button',{name:'Sign out'})).toBeEnabled();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible({timeout:1000});
+  await expect(page.getByRole('button',{name:/Keep loaded work visible/})).toBeVisible();
+});
+
+test('direct creation waits for the initial goals request to succeed',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  let fail=true;
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',async route=>{
+    await gate;
+    await (fail?json(route,{error:'goals unavailable'},503):json(route,[]));
+  });
+  await page.goto('/#new');
+  await expect(page.getByLabel('Repository')).toBeEnabled();
+  const start=page.getByRole('button',{name:'Start goal',exact:true});
+  await expect(start).toBeDisabled({timeout:1000});
+  release();
+  await expect(page.getByRole('alert')).toContainText('goals unavailable');
+  await expect(start).toBeDisabled();
+  fail=false;
+  await page.getByRole('button',{name:'Retry'}).click();
+  await expect(start).toBeEnabled();
+});
+
+test('successful creation replaces the draft screen in browser history',async({page})=>{
+  await routeSignedIn(page,[]);
+  await page.unroute('**/api/repositories');
+  await page.route('**/api/repositories',route=>json(route,[{fullName:'demo/sample',defaultBranch:'main',installationId:1}]));
+  await page.unroute('**/api/goals');
+  await page.route('**/api/goals',route=>json(route,route.request().method()==='POST'?fixtureGoal:[]));
+  await page.goto('/');
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('What should Herbie work on?').fill(fixtureGoal.prompt);
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(page.getByRole('heading',{name:fixtureGoal.name,exact:true})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible({timeout:1000});
 });

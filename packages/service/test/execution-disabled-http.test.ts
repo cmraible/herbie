@@ -33,7 +33,7 @@ test('execution-disabled HTTP blocks creation and resume before authorization wh
   assert.equal(login.status,200);const session=sessionSchema.parse(await login.json());
   const cookie=login.headers.get('set-cookie')?.split(';')[0];assert.ok(cookie);
   const headers={cookie,origin,'content-type':'application/json','idempotency-key':randomUUID()};
-  const input={repository:'demo/example',prompt:'Do not execute this goal',maxAttempts:1};
+  const input={repository:'demo/example',prompt:'Do not execute this goal'};
   for(let request=0;request<2;request++){
     const response=await fetch(`${base}/api/goals`,{method:'POST',headers,body:JSON.stringify(input)});
     assert.equal(response.status,503);

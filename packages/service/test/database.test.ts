@@ -85,7 +85,7 @@ test('private schema denies Data API roles, repairs old grants, and remains usab
   await pool.query("CREATE FUNCTION herbie.legacy_secret() RETURNS text LANGUAGE sql AS 'SELECT ''legacy secret''' ");
   await prepareDatabase(pool, 'live');
   await prepareDatabase(pool, 'live');
-  const { goal } = await store.createGoal('owner', { repository: 'example/private', prompt: 'Sensitive goal', maxAttempts: 1 }, 'live', randomUUID());
+  const { goal } = await store.createGoal('owner', { repository: 'example/private', prompt: 'Sensitive goal' }, 'live', randomUUID());
   assert.equal((await store.getGoal(goal.id, 'owner'))?.prompt, 'Sensitive goal');
   const auth = new PgAuthStore(pool);
   await auth.putCredential({ id: 'owner', login: 'owner' }, 'encrypted-fixture-token', new Date(Date.now() + 60_000));
@@ -152,7 +152,7 @@ test('live preparation refuses a public search path while demo keeps its selecte
   database.additionalPools.push(demoPool);
   await prepareDatabase(demoPool, 'demo');
   const store = new Store(demoPool);
-  const { goal } = await store.createGoal('demo-user', { repository: 'demo/example', prompt: 'Local demo', maxAttempts: 1 }, 'demo', randomUUID());
+  const { goal } = await store.createGoal('demo-user', { repository: 'demo/example', prompt: 'Local demo' }, 'demo', randomUUID());
   assert.equal((await store.getGoal(goal.id))?.prompt, 'Local demo');
   assert.equal((await demoPool.query<Record<string, unknown>>('SELECT current_schema() AS name')).rows[0]?.name, selected);
 });

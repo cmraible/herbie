@@ -44,7 +44,7 @@ test('explicit demo login persists a private bearer session and authenticates su
 
 const goalId = '271de1c7-b32c-43b7-a61f-f0a2a1d53c0d';
 const requestId = '8e5e189f-b9cf-4f65-9c94-5d8d25b43b70';
-const goal = {id:goalId, ownerId:'user-1', repository:'octocat/demo', name:'Regression coverage',prompt:'Add a regression test', maxAttempts:2, attemptCount:0, state:'queued', createdAt:'2026-10-08T00:00:00Z', updatedAt:'2026-10-08T00:00:00Z', mode:'demo', stopRequested:null, pullRequest:null, error:null};
+const goal = {id:goalId, ownerId:'user-1', repository:'octocat/demo', name:'Regression coverage',prompt:'Add a regression test', attemptCount:0, state:'queued', createdAt:'2026-10-08T00:00:00Z', updatedAt:'2026-10-08T00:00:00Z', mode:'demo', stopRequested:null, pullRequest:null, error:null};
 
 test('start sends a custom name and preserves the request ID on retry', async () => {
   const requests: {key: string | string[] | undefined; body: unknown}[] = [];
@@ -59,10 +59,10 @@ test('start sends a custom name and preserves the request ID on retry', async ()
   });
   try {
     await app.invoke(['login','--demo','--url',app.baseUrl]);
-    const args = ['start','--name','Regression coverage','--repo','octocat/demo','--prompt','Add a regression test','--max-attempts','2','--request-id',requestId];
+    const args = ['start','--name','Regression coverage','--repo','octocat/demo','--prompt','Add a regression test','--request-id',requestId];
     assert.equal(await app.invoke(args), 0);
     assert.equal(await app.invoke(args), 0);
-    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',name:'Regression coverage',prompt:'Add a regression test',maxAttempts:2}})));
+    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',name:'Regression coverage',prompt:'Add a regression test'}})));
     assert.equal(JSON.parse(app.output.at(-1) ?? '').id, goalId);
   } finally { await app.close(); }
 });

@@ -9,7 +9,7 @@ import { goalInput, actionSchema } from '@herbie/contracts';
 import { createClient, ApiError } from '@herbie/contracts/client';
 
 const savedSession = z.object({baseUrl: z.string().url(), token: z.string().min(1)}).strict();
-const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--max-attempts 1] [--request-id UUID]\n  rename GOAL_ID --name TEXT\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n  retry-publication GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
+const help = `Herbie — durable coding goals\n\nCommands:\n  login --url URL [--demo]\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--request-id UUID]\n  rename GOAL_ID --name TEXT\n  status [GOAL_ID]\n  logs GOAL_ID [--after EVENT_ID]\n  pause|resume|cancel GOAL_ID\n  retry-publication GOAL_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\n--demo explicitly uses a loopback-only deterministic service.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nGoals continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
 
 export type CliIO = {configPath?: string; stdout: (value: string) => void; stderr: (value: string) => void};
 
@@ -35,7 +35,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
   try {
     const { values, positionals } = parseArgs({args, allowPositionals: true, strict: true, options: {
       url: {type: 'string'}, demo: {type: 'boolean'}, repo: {type: 'string'}, prompt: {type: 'string'}, name: {type: 'string'},
-      'max-attempts': {type: 'string'}, 'request-id': {type: 'string'}, after: {type: 'string'}, help: {type:'boolean',short:'h'},
+      'request-id': {type: 'string'}, after: {type: 'string'}, help: {type:'boolean',short:'h'},
     }});
     const [command, id, extra] = positionals;
     if (values.help || !command) { io.stdout(help); return 0; }
@@ -92,7 +92,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
     if (command === 'status') { print(id ? await client.goal(id) : await client.goals()); return 0; }
     if (command === 'start') {
       if (id) throw new Error('start accepts options, not a goal ID');
-      const input = goalInput.parse({repository:values.repo, name:values.name, prompt:values.prompt, maxAttempts:Number(values['max-attempts'] ?? 1)});
+      const input = goalInput.parse({repository:values.repo, name:values.name, prompt:values.prompt});
       const requestId = z.uuid().parse(values['request-id'] ?? randomUUID());
       io.stderr(`Request ID: ${requestId}\nIf the response is interrupted, retry with --request-id ${requestId}\n`);
       print(await client.start(input, requestId)); return 0;

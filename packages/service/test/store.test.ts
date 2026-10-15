@@ -23,17 +23,19 @@ afterEach(async () => {
 });
 after(async () => { await admin.end(); });
 const integration = (name: string, fn: () => Promise<void>) => test(name, { skip: !databaseUrl }, fn);
-const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: 'Fix arithmetic', maxAttempts: 2 });
+const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: 'Fix arithmetic' });
 
-integration('migration preserves old goals and artifacts while new goals need no test command', async () => {
+integration('migration removes old limits and preserves goals, artifacts, and request replays', async () => {
   await store.pool.query('ALTER TABLE goals DROP COLUMN name');
+  await store.pool.query('ALTER TABLE goals ADD COLUMN max_attempts integer NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 5)');
+  await store.pool.query('ALTER TABLE jobs DROP CONSTRAINT jobs_cycle_check, ADD CONSTRAINT jobs_cycle_check CHECK (cycle BETWEEN 1 AND 5)');
   await store.pool.query('ALTER TABLE goals ALTER COLUMN test_command SET NOT NULL');
   const id = randomUUID();
   await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
     VALUES($1,'owner','example/repo','Legacy goal','["npm","test"]',1,'live','queued')`, [id]);
   const unicodeId = randomUUID();
   await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
-    VALUES($1,'owner','example/repo',$2,'["npm","test"]',1,'live','queued')`, [unicodeId,'[demo:fail] \n'+ '🥁'.repeat(130)]);
+    VALUES($1,'owner','example/repo',$2,'["npm","test"]',1,'live','completed')`, [unicodeId,'[demo:fail] \n'+ '🥁'.repeat(130)]);
   const key = randomUUID();
   const legacyRequest = {repository:'example/repo',prompt:'Legacy goal',testCommand:['npm','test'],maxAttempts:1};
   const fingerprint = createHash('sha256').update(JSON.stringify({...legacyRequest,mode:'live'})).digest('hex');
@@ -41,16 +43,19 @@ integration('migration preserves old goals and artifacts while new goals need no
   await store.migrate();
   await store.migrate();
   assert.equal((await store.getGoal(unicodeId))?.name,'🥁'.repeat(120));
+  assert.equal((await store.getGoal(unicodeId))?.state,'completed');
   const oldGoal = await store.getGoal(id);
   assert.equal(oldGoal?.prompt, 'Legacy goal');
   assert.equal(oldGoal?.name, 'Legacy goal');
   await store.renameGoal(id,'owner','Renamed legacy goal');
   assert.ok(!('testCommand' in oldGoal!));
-  const request = {repository:'EXAMPLE/REPO',prompt:'Legacy goal',maxAttempts:1};
+  assert.ok(!('maxAttempts' in oldGoal!));
+  assert.equal((await store.pool.query("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='goals' AND column_name='max_attempts'")).rowCount,0);
+  const request = {repository:'EXAMPLE/REPO',prompt:'Legacy goal'};
   const replay = await store.createGoal('owner',request,'live',key);
   assert.equal(replay.created,false);
   assert.equal(replay.goal.id,id);
-  for (const change of [{prompt:'Different goal'},{repository:'example/other'},{maxAttempts:2}]) {
+  for (const change of [{prompt:'Different goal'},{repository:'example/other'}]) {
     await assert.rejects(store.createGoal('owner',{...request,...change},'live',key), /different request/);
   }
   await assert.rejects(store.createGoal('owner',request,'demo',key), /different request/);
@@ -61,7 +66,7 @@ integration('migration preserves old goals and artifacts while new goals need no
   const evidence = {version:2,repoUrl:'https://github.com/example/repo.git',baseCommit,
     patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true,sandboxDeleted:true};
   await store.pool.query("UPDATE goals SET state='needs_attention' WHERE id=$1",[id]);
-  await store.pool.query(`INSERT INTO jobs(id,goal_id,cycle,branch,stage,artifact) VALUES($1,$2,1,$3,'publishing',$4)`,
+  await store.pool.query(`INSERT INTO jobs(id,goal_id,cycle,branch,stage,artifact) VALUES($1,$2,6,$3,'publishing',$4)`,
     [randomUUID(),id,`herbie/${id}`,JSON.stringify({baseCommit,patchBase64:patch.toString('base64'),
       testResult:{exitCode:0,stdout:'passed',stderr:''},verification:{...evidence,testCommand:['npm','test']}})]);
   const candidate = await store.publicationRetryCandidate(id,'owner');
@@ -156,7 +161,7 @@ integration('expired attempts require attention and expired publications only re
   assert.equal(await store.claim('restarted-worker'), null);
 });
 
-integration('merge advances once within the attempt budget and close unmerged stops a paused goal', async () => {
+integration('merge advances once beyond five iterations and close unmerged stops a paused goal', async () => {
   const owner = randomUUID();
   const { goal } = await store.createGoal(owner, input(), 'demo', randomUUID());
   async function publish() {
@@ -178,12 +183,14 @@ integration('merge advances once within the attempt budget and close unmerged st
   await store.reconcile(first.id, 'merged');
   assert.equal(await store.claim('worker'), null);
   await store.control(goal.id, owner, 'resume');
-  const second = await publish();
-  const completed = await store.reconcile(second.id, 'merged');
-  assert.equal(completed.state, 'completed');
-  assert.equal(completed.attemptCount, 2);
-  assert.equal(await store.claim('worker'), null);
-  await store.createGoal(owner, input(), 'demo', randomUUID());
+  for (let count=2;count<=7;count++) {
+    const job = await publish();
+    const next = await store.reconcile(job.id, 'merged');
+    assert.equal(next.state, 'queued');
+    assert.equal(next.attemptCount, count);
+    await store.reconcile(job.id, 'merged');
+    assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM jobs WHERE goal_id=$1 AND stage='queued'",[goal.id])).rows[0].count,1);
+  }
   const unmerged = await publish();
   await store.control(unmerged.goal.id, owner, 'pause');
   assert.equal((await store.reconcile(unmerged.id, 'closed')).state, 'cancelled');
@@ -211,7 +218,7 @@ integration('concurrent replay creates one goal and distinct requests share a re
 
 integration('same-repository goals execute independently and keep multiple pull requests open', async () => {
   const owner = randomUUID();
-  const request = { ...input(), maxAttempts: 1 };
+  const request = input();
   const { goal: first } = await store.createGoal(owner, request, 'demo', randomUUID());
   const { goal: second } = await store.createGoal(owner, { ...request, repository: request.repository.toUpperCase() }, 'demo', randomUUID());
   const workers = ['worker-a', 'worker-b'];
@@ -381,5 +388,22 @@ integration('post-commit naming failures return the saved goal without duplicati
       assert.equal((await store.listGoals(owner)).length,1);
       assert.equal((await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[result.goal.id])).rowCount,1);
     }finally{if(failure==='model')await pool.end();}
+  }
+});
+
+for (const named of [false,true]) integration(`pre-removal create requests still replay after renaming (named: ${named})`, async () => {
+  for (const maxAttempts of [1,2,3,4,5]) {
+    const request={...input(),...(named?{name:'Original name'}:{})};
+    const key=randomUUID();
+    const {goal}=await store.createGoal('owner',request,'demo',key);
+    const fingerprint=createHash('sha256').update(JSON.stringify({repository:request.repository,prompt:request.prompt,maxAttempts,mode:'demo',...(named?{name:'Original name'}:{})})).digest('hex');
+    await store.pool.query('UPDATE goal_requests SET fingerprint=$1 WHERE goal_id=$2',[fingerprint,goal.id]);
+    await store.renameGoal(goal.id,'owner','Renamed goal');
+    await store.migrate();
+    const replay=await store.createGoal('owner',request,'demo',key);
+    assert.equal(replay.created,false);
+    assert.equal(replay.goal.id,goal.id);
+    await assert.rejects(store.createGoal('owner',{...request,prompt:'Different'},'demo',key),/different request/);
+    await assert.rejects(store.createGoal('owner',{...request,name:'Renamed goal'},'demo',key),/different request/);
   }
 });

@@ -27,7 +27,7 @@ test('HTTP sessions protect durable goals, preserve idempotency and enforce cook
   const login=await fetch(`${base}/api/demo/login`,{method:'POST',headers:{'content-type':'application/json',origin:'http://localhost:8787'},body:'{}'});
   assert.equal(login.status,200);sessionSchema.parse(await login.json());
   const cookie=login.headers.get('set-cookie')?.split(';')[0];assert.ok(cookie);
-  const input={repository:'demo/example',name:'Addition fix',prompt:'Make addition correct',maxAttempts:2};
+  const input={repository:'demo/example',name:'Addition fix',prompt:'Make addition correct'};
   const key=randomUUID();
   const headers={'content-type':'application/json',cookie,'idempotency-key':key};
   assert.equal((await fetch(`${base}/api/goals`,{method:'POST',headers,body:JSON.stringify(input)})).status,403);

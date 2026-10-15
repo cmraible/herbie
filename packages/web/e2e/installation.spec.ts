@@ -43,14 +43,16 @@ test('repository setup runs during onboarding, refreshes access, and survives Ba
   await page.getByRole('button',{name:'New goal',exact:true}).click();
   await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
   await expect(page.getByRole('button',{name:'Add repositories'})).toBeVisible();
-  await page.getByRole('button',{name:'Close new goal'}).click();
+  await page.getByRole('button',{name:'Back to goals'}).click();
 
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await expect.poll(()=>repositoryRequests).toBeGreaterThanOrEqual(3);
   await expect(page.getByRole('button',{name:'Connect repositories'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Sign out'}).first()).toBeEnabled();
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Close new goal'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Back to goals'})).toBeEnabled();
   await expect(page.getByLabel('Repository')).toContainText('public-sample/project');
 });

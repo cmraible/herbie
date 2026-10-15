@@ -11,7 +11,7 @@ import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
 const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
-  max_attempts AS "maxAttempts", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
+  attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest", cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
 const artifactSchema = z.object({
@@ -35,8 +35,8 @@ export class StoreError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'StoreError'; }
 }
 const conflict = (message: string) => new StoreError(409, message);
-function requestFingerprint({repository,prompt,maxAttempts,name}:GoalInput, mode:Goal['mode']):string {
-  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,maxAttempts,mode,...(name === undefined ? {} : {name})})).digest('hex');
+function requestFingerprint({repository,prompt,name}:GoalInput, mode:Goal['mode'], legacyLimit?:number):string {
+  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,...(legacyLimit === undefined ? {} : {maxAttempts:legacyLimit}),mode,...(name === undefined ? {} : {name})})).digest('hex');
 }
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
@@ -94,14 +94,15 @@ export class Store {
         const previous = z.object({ fingerprint: z.string(), goal_id: z.string().uuid(), legacy: z.boolean() }).parse(existing.rows[0]);
         const goal = await goalFrom(client, previous.goal_id);
         if (!goal) throw new Error('Missing idempotent goal');
-        // Pre-upgrade fingerprints included testCommand. Compare the immutable
-        // goal input without the mutable name so interrupted legacy requests still replay.
-        if (previous.fingerprint !== fingerprint && (!previous.legacy || request.name !== undefined || requestFingerprint({...goal,name:undefined},goal.mode) !== fingerprint)) throw conflict('Idempotency key was already used for a different request');
+        // Match old request hashes without retaining a limit on the goal.
+        const matchesFingerprint = [undefined,1,2,3,4,5].some(limit => requestFingerprint(request,mode,limit) === previous.fingerprint);
+        // Older testCommand requests replay against immutable input, excluding the mutable name.
+        if (!matchesFingerprint && (!previous.legacy || request.name !== undefined || requestFingerprint({...goal,name:undefined},goal.mode) !== fingerprint)) throw conflict('Idempotency key was already used for a different request');
         return { goal, created: false };
       }
       const id = randomUUID();
       const name=request.name??fallbackGoalName(request.prompt);
-      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode, name]);
+      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", [id, ownerId, request.repository, request.prompt, mode, name]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
       await addEvent(client, id, 'queued', 'Goal queued for a durable worker');
@@ -398,12 +399,11 @@ export class Store {
       if (row.stage === 'completed' || row.stage === 'cancelled') return goal;
       if (row.stage !== 'awaiting_review' || !goal.pullRequest || goal.pullRequest.branch !== row.branch) throw conflict('Only the current published pull request can be reconciled');
       const cancelled = outcome === 'closed';
-      const next = !cancelled && goal.attemptCount < goal.maxAttempts;
-      const state = cancelled ? 'cancelled' : next ? goal.state === 'paused' ? 'paused' : 'queued' : 'completed';
+      const state = cancelled ? 'cancelled' : goal.state === 'paused' ? 'paused' : 'queued';
       await client.query('UPDATE jobs SET stage=$2,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed']);
       await client.query('UPDATE goals SET state=$2,pull_request=$3,stop_requested=NULL,error=NULL,updated_at=clock_timestamp() WHERE id=$1', [goal.id, state, JSON.stringify({ ...goal.pullRequest, state: outcome })]);
-      await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : next ? 'Pull request merged; next bounded attempt queued' : 'Pull request merged; attempt budget complete');
-      if (next) await insertJob(client, goal.id, row.cycle + 1);
+      await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged; next attempt queued');
+      if (!cancelled) await insertJob(client, goal.id, row.cycle + 1);
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing reconciled goal');
       return updated;

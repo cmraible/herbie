@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS goals (
   prompt text NOT NULL,
   -- Retained for older deployments; new goals no longer supply a test command.
   test_command jsonb,
-  max_attempts integer NOT NULL CHECK (max_attempts BETWEEN 1 AND 5),
   attempt_count integer NOT NULL DEFAULT 0,
   mode text NOT NULL CHECK (mode IN ('demo', 'live')),
   state text NOT NULL CHECK (state IN ('queued','running','paused','awaiting_review','completed','cancelled','failed','needs_attention')),
@@ -26,7 +25,7 @@ CREATE TABLE IF NOT EXISTS goal_requests (
 CREATE TABLE IF NOT EXISTS jobs (
   id uuid PRIMARY KEY,
   goal_id uuid NOT NULL REFERENCES goals(id),
-  cycle integer NOT NULL CHECK (cycle BETWEEN 1 AND 5),
+  cycle integer NOT NULL CHECK (cycle >= 1),
   branch text NOT NULL UNIQUE,
   stage text NOT NULL CHECK (stage IN ('queued','running','ready','publishing','awaiting_review','completed','cancelled','failed','needs_attention')),
   artifact jsonb,
@@ -57,3 +56,7 @@ ALTER TABLE goals ALTER COLUMN test_command DROP NOT NULL;
 ALTER TABLE goals ADD COLUMN IF NOT EXISTS name text;
 UPDATE goals SET name=COALESCE(NULLIF(regexp_replace(left(regexp_replace(replace(prompt,'[demo:fail]',''),'^[[:space:]]+|[[:space:]]+$','','g'),120),'[[:space:]]+$',''),''),'Untitled goal') WHERE name IS NULL;
 ALTER TABLE goals ALTER COLUMN name SET NOT NULL;
+
+ALTER TABLE goals DROP COLUMN IF EXISTS max_attempts;
+ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_cycle_check;
+ALTER TABLE jobs ADD CONSTRAINT jobs_cycle_check CHECK (cycle >= 1);

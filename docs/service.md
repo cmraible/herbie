@@ -26,10 +26,11 @@ Goals execute independently and may have multiple PRs open at once. Publication
 preserves each artifact's captured tree and original base commit when the default
 branch advances. That base must remain in the default branch's history. Repository
 CI and PR review validate the changes and their integration with the current base.
-Each goal allows 1–5 attempts. An attempt that creates a PR waits for review;
-merging it queues the next attempt up to the limit. Closing it without merging
-stops the goal. The final merge completes the goal. The service does not infer
-that the entire open-ended prompt is solved: the limit is an explicit work budget.
+An attempt that creates a PR waits for review; merging it queues the next attempt.
+There is no total attempt limit. Pause or cancel a goal to stop continued work;
+closing a PR without merging also stops it. Failed attempts still stop for attention
+rather than retrying automatically. The service does not infer that the entire
+open-ended prompt is solved. Previously completed goals remain stopped after upgrade.
 
 The API and worker run independently. Start one or more worker processes against
 the same database. Transactional claims use row locks, ownership leases and fenced
@@ -94,8 +95,8 @@ This command does not retry sandbox execution or bypass publication checks.
 Demo rows and sessions are separate from live work by mode. Prefer a separate
 Postgres database for production; the sample password and fixed demo encryption
 key are only for local demo. Keep the database and encryption key together in
-backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters,
-attempts to five. Existing Daytona deadlines and
+backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters.
+Goals have no total attempt limit. Existing Daytona deadlines and
 cancellation protections remain in force. Herbie does not impose a dollar spending cap.
 
 The agent owns setup and testing in its coding checkout. Herbie captures the patch,

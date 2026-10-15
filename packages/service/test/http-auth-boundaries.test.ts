@@ -61,7 +61,7 @@ test('HTTP rejects expired and wrong-mode sessions and hides another owner’s g
   const setup = await fixture(t);
   if (!setup) return;
   const { store, session, base } = setup;
-  const { goal } = await store.createGoal('owner', { repository: 'demo/example', prompt: 'Private goal text', maxAttempts: 1 }, 'live', randomUUID());
+  const { goal } = await store.createGoal('owner', { repository: 'demo/example', prompt: 'Private goal text' }, 'live', randomUUID());
   const other = await session('7');
   for (const path of [`/api/goals/${goal.id}`, `/api/goals/${goal.id}/events`]) {
     const response = await fetch(`${base}${path}`, { headers: other });
@@ -89,7 +89,7 @@ test('HTTP reports expired GitHub login, denied repository permission, and inval
   assert.deepEqual(await repositories.json(), { error: 'GitHub login expired; log in again before continuing' });
   const denied = await fetch(`${base}/api/goals`, {
     method: 'POST', headers: { ...await session('7'), 'content-type': 'application/json', 'idempotency-key': randomUUID() },
-    body: JSON.stringify({ repository: 'demo/example', prompt: 'Fix bug', maxAttempts: 1 }),
+    body: JSON.stringify({ repository: 'demo/example', prompt: 'Fix bug' }),
   });
   assert.equal(denied.status, 403);
   assert.deepEqual(await denied.json(), { error: 'User write permission is required' });
@@ -112,6 +112,6 @@ test('existing nonowner bearer and cookie sessions cannot access authenticated A
     const response=await fetch(`${base}${path}`,{headers});assert.equal(response.status,401);
     assert.deepEqual(await response.json(),{error:'Login required'});
   }
-  const response=await fetch(`${base}/api/goals`,{method:'POST',headers:{...bearer,'content-type':'application/json','idempotency-key':randomUUID()},body:JSON.stringify({repository:'demo/example',prompt:'Denied',maxAttempts:1})});
+  const response=await fetch(`${base}/api/goals`,{method:'POST',headers:{...bearer,'content-type':'application/json','idempotency-key':randomUUID()},body:JSON.stringify({repository:'demo/example',prompt:'Denied'})});
   assert.equal(response.status,401);
 });
