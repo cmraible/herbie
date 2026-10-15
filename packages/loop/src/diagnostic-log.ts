@@ -78,7 +78,35 @@ export function diagnosticRecord(
   const seen = new Set<object>();
   let remaining = 10_000;
   let nodes = 0;
-  const clean = (value: unknown, depth = 0): unknown => {
+  let clean: (value: unknown, depth?: number) => unknown;
+  const cleanProperty = (
+    out: Record<string, unknown>,
+    key: string,
+    property: PropertyDescriptor,
+    depth: number,
+  ): void => {
+    const safeKey = redactDiagnostic(key).slice(0, 80);
+    if (sensitiveKey.test(key) || omitKey.test(key)) {
+      out[safeKey] = "[REDACTED]";
+      return;
+    }
+    out[safeKey] = "value" in property ? clean(property.value, depth + 1) : "[accessor omitted]";
+  };
+  const cleanObject = (value: object, depth: number): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    if (value instanceof Error) {
+      out.name = clean(value.name);
+      out.message = clean(value.message);
+      out.stack = clean(value.stack);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Object.keys(descriptors).slice(0, 30)) {
+      if (key in out) continue;
+      cleanProperty(out, key, descriptors[key], depth);
+    }
+    return out;
+  };
+  clean = (value: unknown, depth = 0): unknown => {
     if (++nodes > 200) return "[node limit]";
     if (Buffer.isBuffer(value)) return clean(value.toString("utf8"), depth);
     if (typeof value === "string") {
@@ -93,24 +121,7 @@ export function diagnosticRecord(
     if (seen.has(value)) return "[circular]";
     seen.add(value);
     if (Array.isArray(value)) return value.slice(0, 8).map((item) => clean(item, depth + 1));
-    const out: Record<string, unknown> = {};
-    if (value instanceof Error) {
-      out.name = clean(value.name);
-      out.message = clean(value.message);
-      out.stack = clean(value.stack);
-    }
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    for (const key of Object.keys(descriptors).slice(0, 30)) {
-      if (key in out) continue;
-      const safeKey = redactDiagnostic(key).slice(0, 80);
-      if (sensitiveKey.test(key) || omitKey.test(key)) {
-        out[safeKey] = "[REDACTED]";
-        continue;
-      }
-      const property = descriptors[key];
-      out[safeKey] = "value" in property ? clean(property.value, depth + 1) : "[accessor omitted]";
-    }
-    return out;
+    return cleanObject(value, depth);
   };
   const record = { event: "herbie_failure", errorId, context: clean(context), error: clean(error) };
   const encoded = JSON.stringify(record);
