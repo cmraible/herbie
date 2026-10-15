@@ -26,7 +26,7 @@ Verify each finding against the code, make the smallest correct fix, run relevan
 
 ## Open the PR and enable auto-merge
 
-Push the reviewed head and reuse the branch's open PR, or create one following repository title/body conventions. Mark it ready and attach its URL to the chat when the app supports it. Confirm the remote head matches the locally reviewed commit, then immediately enable auto-merge using the repository's preferred allowed method and a head-SHA guard when supported, so it merges as soon as required CI and branch protections permit. Respect merge queues and required approvals; never bypass protections with admin overrides. Local review replaces the skill's PR-review wait, but does not satisfy a repository-required approval. If auto-merge is unavailable, report the limitation rather than changing repository settings.
+Push the reviewed head and reuse the branch's open PR, or create one following repository title/body conventions. Mark it ready and attach its URL to the chat when the app supports it. Confirm repository protections gate merging on all relevant CI checks; wait for any uncovered checks to appear and pass before enabling auto-merge. Confirm the remote head matches the locally reviewed commit, then immediately enable auto-merge using the repository's preferred allowed method and a head-SHA guard when supported, so it merges as soon as required CI and branch protections permit. Respect merge queues and required approvals; never bypass protections with admin overrides. Local review replaces the skill's PR-review wait, but does not satisfy a repository-required approval. If auto-merge is unavailable, report the limitation rather than changing repository settings.
 
 ## Monitor CI and verify the merge
 
