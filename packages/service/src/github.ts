@@ -264,11 +264,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         ...batch.map(({ filename, status, patch }) => ({
           filename,
           status,
-          changes: patch!
-            .split("\n")
-            .filter(
-              (line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("\\"),
-            ),
+          changes: patch!.split("\n").filter((line) => !line.startsWith("@@")),
         })),
       );
       if (batch.length < 100)
