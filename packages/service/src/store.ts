@@ -11,8 +11,10 @@ import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
 const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
-  attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
-  pull_request AS "pullRequest", cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  max_wip AS "maxWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
+  pull_request AS "pullRequest",
+  COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
+  cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
 const artifactSchema = z.object({
   baseCommit: z.string(), patchBase64: z.string(),
@@ -35,8 +37,8 @@ export class StoreError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'StoreError'; }
 }
 const conflict = (message: string) => new StoreError(409, message);
-function requestFingerprint({repository,prompt,name}:GoalInput, mode:Goal['mode'], legacyLimit?:number):string {
-  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,...(legacyLimit === undefined ? {} : {maxAttempts:legacyLimit}),mode,...(name === undefined ? {} : {name})})).digest('hex');
+function requestFingerprint({repository,prompt,name,maxWip}:GoalInput, mode:Goal['mode'], legacyLimit?:number):string {
+  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,...(legacyLimit === undefined ? {} : {maxAttempts:legacyLimit}),mode,...(name === undefined ? {} : {name}),...(maxWip === undefined || maxWip === 1 ? {} : {maxWip})})).digest('hex');
 }
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
@@ -68,6 +70,37 @@ async function lockJob(client: PoolClient, id: string, workerId?: string): Promi
 async function insertJob(client: PoolClient, goalId: string, cycle: number): Promise<void> {
   const id = randomUUID();
   await client.query("INSERT INTO jobs(id,goal_id,cycle,branch,stage) VALUES ($1,$2,$3,$4,'queued')", [id, goalId, cycle, `herbie/${goalId}/${id}`]);
+}
+
+// Call with the goal locked. One attempt runs at a time, while published PRs
+// continue occupying capacity until merged. Queued work reserves a slot too.
+async function advanceGoal(client: PoolClient, goal: Goal): Promise<void> {
+  if (['cancelled','failed','needs_attention'].includes(goal.state)) return;
+  const {rows} = await client.query<{stage:string;cycle:number}>('SELECT stage,cycle FROM jobs WHERE goal_id=$1 ORDER BY cycle', [goal.id]);
+  let pending = rows.find(job => ['queued','running','ready','publishing'].includes(job.stage));
+  const reviewing = rows.filter(job => job.stage === 'awaiting_review').length;
+  const cycle = rows.at(-1)?.cycle ?? 0;
+  if (!pending && reviewing < goal.maxWip) {
+    await insertJob(client, goal.id, cycle + 1);
+    pending = {stage:'queued',cycle:cycle+1};
+  }
+  const state = goal.state === 'paused' || goal.stopRequested === 'pause' && pending?.stage !== 'running' ? 'paused'
+    : pending ? ['running','publishing'].includes(pending.stage) ? 'running' : 'queued' : 'awaiting_review';
+  await client.query("UPDATE goals SET state=$2,stop_requested=CASE WHEN $2='paused' THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1", [goal.id,state]);
+}
+
+async function cancelGoal(client: PoolClient, goal: Goal): Promise<void> {
+  const {rows} = await client.query<{stage:string;lease_valid:boolean}>(
+    'SELECT stage,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 FOR UPDATE',[goal.id]);
+  const uncertain = rows.some(j=>['publishing','awaiting_review','needs_attention'].includes(j.stage)||j.stage==='running'&&!j.lease_valid);
+  const active = rows.some(j=>j.stage==='running'&&j.lease_valid);
+  const cleanup = uncertain ? 'needs_attention' : active ? 'pending' : 'not_required';
+  await client.query("UPDATE jobs SET cancelled_worker=lease_owner,cancel_cleanup_deadline=clock_timestamp()+interval '5 minutes',stage='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE goal_id=$1 AND stage NOT IN ('completed','cancelled','failed')",[goal.id]);
+  await client.query("UPDATE goals SET state='cancelled',stop_requested=NULL,cleanup_status=$2,updated_at=clock_timestamp() WHERE id=$1",[goal.id,cleanup]);
+  await addEvent(client,goal.id,'cancel','Goal cancelled. No further attempts or publication retries will start. Saved work and audit history retained.');
+  if(cleanup!=='not_required')await addEvent(client,goal.id,'cleanup_required',cleanup==='pending'
+    ? 'Stopping the active sandbox. Cleanup confirmation is pending.'
+    : 'Remote work may remain. Cleanup requires attention; cancellation remains in effect.');
 }
 
 export class Store {
@@ -110,7 +143,7 @@ export class Store {
       }
       const id = randomUUID();
       if(name===undefined)throw new Error('Missing goal name');
-      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", [id, ownerId, request.repository, request.prompt, mode, name]);
+      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,mode,name,max_wip,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, mode, name, request.maxWip]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
       await addEvent(client, id, 'queued', 'Goal queued for a durable worker');
@@ -163,17 +196,7 @@ export class Store {
         // Cancellation is a local durable decision, never dependent on GitHub or
         // remote cleanup. Revoking every lease fences callbacks and future claims.
         if (['cancelled','completed','failed'].includes(goal.state)) return goal;
-        const jobs = await client.query<{stage:string;lease_valid:boolean}>(
-          'SELECT stage,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 FOR UPDATE',[id]);
-        const uncertain = jobs.rows.some(j=>['publishing','awaiting_review','needs_attention'].includes(j.stage)||j.stage==='running'&&!j.lease_valid);
-        const active = jobs.rows.some(j=>j.stage==='running'&&j.lease_valid);
-        const cleanup = uncertain ? 'needs_attention' : active ? 'pending' : 'not_required';
-        await client.query("UPDATE jobs SET cancelled_worker=lease_owner,cancel_cleanup_deadline=clock_timestamp()+interval '5 minutes',stage='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE goal_id=$1 AND stage NOT IN ('completed','cancelled','failed')",[id]);
-        await client.query("UPDATE goals SET state='cancelled',stop_requested=NULL,cleanup_status=$2,updated_at=clock_timestamp() WHERE id=$1",[id,cleanup]);
-        await addEvent(client,id,'cancel','Goal cancelled. No further attempts or publication retries will start. Saved work and audit history retained.');
-        if(cleanup!=='not_required')await addEvent(client,id,'cleanup_required',cleanup==='pending'
-          ? 'Stopping the active sandbox. Cleanup confirmation is pending.'
-          : 'Remote work may remain. Cleanup requires attention; cancellation remains in effect.');
+        await cancelGoal(client,goal);
         return (await goalFrom(client,id))!;
       }
       const result = await client.query<Record<string, unknown>>('SELECT *, (lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE goal_id=$1 ORDER BY cycle DESC LIMIT 1 FOR UPDATE', [id]);
@@ -183,8 +206,8 @@ export class Store {
       if (['completed','cancelled','failed','needs_attention'].includes(goal.state)) throw conflict(`Cannot ${action} a ${goal.state} goal`);
       if (action === 'resume') {
         if (goal.state !== 'paused' && goal.stopRequested !== 'pause') throw conflict('Goal is not paused');
-        const state = job.stage === 'awaiting_review' ? 'awaiting_review' : job.stage === 'running' ? 'running' : 'queued';
-        await client.query('UPDATE goals SET state=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1', [id, state]);
+        await client.query("UPDATE goals SET state='queued',stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1", [id]);
+        await advanceGoal(client,{...goal,state:'queued',stopRequested:null});
       } else if (job.stage === 'running') {
         await client.query('UPDATE goals SET stop_requested=$2,updated_at=clock_timestamp() WHERE id=$1', [id, action]);
       } else {
@@ -208,6 +231,7 @@ export class Store {
       }
       if(pullRequest&&pullRequest.branch===row.branch){
         const pr=goalSchema.shape.pullRequest.unwrap().parse({...pullRequest,state:'open'});
+        await client.query('UPDATE jobs SET pull_request=$2 WHERE id=$1',[jobId,JSON.stringify(pr)]);
         await client.query('UPDATE goals SET pull_request=$2 WHERE id=$1',[goal.id,JSON.stringify(pr)]);
       }
       // An uncertain publication cannot become clean merely because its caller returned.
@@ -287,8 +311,9 @@ export class Store {
     return this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId, workerId);
       if (row.stage !== 'publishing' || pr.branch !== row.branch || pr.state !== 'open') throw conflict('Publication does not match the expected attempt branch');
-      await client.query("UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=0,publication_blocked=false WHERE id=$1", [jobId]);
+      await client.query("UPDATE jobs SET stage='awaiting_review',pull_request=$2,lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=0,publication_blocked=false WHERE id=$1", [jobId,JSON.stringify(pr)]);
       await client.query("UPDATE goals SET state='awaiting_review',pull_request=$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, JSON.stringify(pr)]);
+      await advanceGoal(client,{...goal,state:'awaiting_review',error:null});
       await addEvent(client, goal.id, 'pull_request_opened', `Pull request #${pr.number} awaits review: ${pr.url}`);
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing published goal');
@@ -377,7 +402,7 @@ export class Store {
 
   async reviewJobs(mode?: 'demo' | 'live'): Promise<Job[]> {
     const result = await this.pool.query<Record<string, unknown>>(`SELECT j.*, (j.lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs j JOIN goals g ON g.id=j.goal_id
-      WHERE j.stage='awaiting_review' AND g.state IN ('awaiting_review','paused') AND ($1::text IS NULL OR g.mode=$1) ORDER BY j.created_at`, [mode ?? null]);
+      WHERE j.stage='awaiting_review' AND g.state!='cancelled' AND ($1::text IS NULL OR g.mode=$1) ORDER BY j.created_at`, [mode ?? null]);
     const jobs: Job[] = [];
     for (const selected of result.rows) {
       const row = jobRow.parse(selected);
@@ -390,15 +415,17 @@ export class Store {
     return this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId);
       if (row.stage === 'completed' || row.stage === 'cancelled') return goal;
-      if (row.stage !== 'awaiting_review' || !goal.pullRequest || goal.pullRequest.branch !== row.branch) throw conflict('Only the current published pull request can be reconciled');
+      const pr = goal.pullRequests.find(pr => pr.branch === row.branch);
+      if (row.stage !== 'awaiting_review' || !pr) throw conflict('Only a published pull request can be reconciled');
       const cancelled = outcome === 'closed';
-      const state = cancelled ? 'cancelled' : goal.state === 'paused' ? 'paused' : 'queued';
-      await client.query('UPDATE jobs SET stage=$2,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed']);
-      await client.query('UPDATE goals SET state=$2,pull_request=$3,stop_requested=NULL,error=NULL,updated_at=clock_timestamp() WHERE id=$1', [goal.id, state, JSON.stringify({ ...goal.pullRequest, state: outcome })]);
-      await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged; next attempt queued');
-      if (!cancelled) await insertJob(client, goal.id, row.cycle + 1);
+      const updatedPr = JSON.stringify({...pr,state:outcome});
+      await client.query('UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed',updatedPr]);
+      await client.query("UPDATE goals SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1", [goal.id,row.branch,updatedPr]);
+      if (cancelled) await cancelGoal(client,goal);
+      else await advanceGoal(client,goal);
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error('Missing reconciled goal');
+      await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged; work continues within the WIP limit');
       return updated;
     });
   }

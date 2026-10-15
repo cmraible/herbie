@@ -15,10 +15,11 @@ async function login(page:Page){
     }
   }
 }
-async function start(page:Page,prompt:string){
+async function start(page:Page,prompt:string,maxWip='1'){
   await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill(prompt);
   await expect(page.getByLabel('Maximum attempts')).toHaveCount(0);
+  await page.getByLabel('Maximum work in progress').fill(maxWip);
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('region',{name:'New goal',exact:true})).not.toBeVisible();
   await expect(page.getByRole('region',{name:'Selected goal'}).getByRole('heading',{name:prompt})).toBeVisible();
@@ -37,7 +38,7 @@ test('a goal survives reload, pauses and resumes, then continues until cancelled
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   for(let attempt=2;attempt<=7;attempt++){
     await detail(page).getByRole('button',{name:'Simulate merge'}).click();
-    await expect(detail(page).getByText(`Attempt ${attempt} · Created`,{exact:false})).toBeVisible();
+    await expect(detail(page).getByText(`Attempt ${attempt} · Max WIP 1`,{exact:false})).toBeVisible();
     await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   }
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
@@ -135,7 +136,7 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
   const id=z.uuid().parse(new URL(page.url()).hash.slice(1));
   const merged=await page.request.post(`/api/demo/goals/${id}/merge`,{headers:{origin:url},data:{}});
   expect(merged.ok()).toBeTruthy();
-  await expect(detail(page).getByText('Attempt 2 · Created')).toBeVisible();
+  await expect(detail(page).getByText('Attempt 2 · Max WIP 1')).toBeVisible();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   expect(repositoryRequests).toBe(2);
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
@@ -217,4 +218,28 @@ test('editing a legacy draft discards its hidden name',async({page})=>{
   await page.getByRole('button',{name:'Start goal',exact:true}).click();
   await expect(detail(page).getByRole('heading',{name:'Name this updated brief automatically',exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+});
+
+test('a goal fills maxWip and merging a selected PR starts one replacement',async({page})=>{
+  await login(page);
+  await start(page,'Keep two pull requests ready for review','2');
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(2);
+  await expect(detail(page).getByText('Attempt 2 · Max WIP 2')).toBeVisible();
+  await page.reload();
+  const cards = detail(page).locator('.pr-card');
+  await expect(cards).toHaveCount(2);
+  // Merge the newer PR; the older one must stay open.
+  await cards.nth(1).getByRole('button',{name:'Simulate merge'}).click();
+  await expect(detail(page).getByText('Attempt 3 · Max WIP 2')).toBeVisible();
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toContainText('Ready for your review.');
+  await expect(cards.nth(1)).toContainText('Pull request merged.');
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(2);
+  await cards.nth(2).getByRole('button',{name:'Simulate merge'}).click();
+  await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
+  await cards.nth(0).getByRole('button',{name:'Simulate merge'}).click();
+  await expect(detail(page).getByText('Attempt 5 · Max WIP 2')).toBeVisible();
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(2);
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+  await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
 });

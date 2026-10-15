@@ -28,7 +28,7 @@ export function createDemoAdapters(): Adapters {
       return {url:`https://demo.invalid/herbie/pull/${number}`,number,branch:execution.branch};
     },
     async reconcile(execution) {
-      return execution.goal.pullRequest?.branch===execution.branch ? execution.goal.pullRequest : null;
+      return execution.goal.pullRequests.find(pr => pr.branch === execution.branch) ?? null;
     },
   };
 }

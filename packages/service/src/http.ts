@@ -172,7 +172,8 @@ export function createApiServer(options:ApiOptions){
       if(method==='POST'&&adapters.mode==='demo'&&demoPath){
         const id=z.string().uuid().parse(demoPath[1]);const goal=await store.getGoal(id,userId);if(!goal)throw new HttpError(404,'Goal not found');
         if(goal.mode!=='demo')throw new HttpError(409,'Only demo goals support simulated reviews');
-        const job=(await store.reviewJobs()).find(job=>job.goal.id===id);
+        const {branch}=z.object({branch:z.string().optional()}).parse(await readJson(request));
+        const job=(await store.reviewJobs()).find(job=>job.goal.id===id&&(!branch||job.branch===branch));
         if(!job){json(response,200,goal);return;}
         json(response,200,await store.reconcile(job.id,demoPath[2]==='merge'?'merged':'closed'));return;
       }

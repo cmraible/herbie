@@ -394,3 +394,140 @@ for (const named of [false,true]) integration(`pre-removal create requests still
     await assert.rejects(store.createGoal('owner',{...request,name:'Renamed goal'},'demo',key),/different request/);
   }
 });
+
+async function publishNext(number: number) {
+  const job = await store.claim('worker');
+  assert.ok(job);
+  await store.saveArtifact(job.id,'worker',{baseCommit:'abc',patch:Buffer.from('captured')});
+  assert.equal(await store.beginPublication(job.id,'worker'),true);
+  await store.completePublication(job.id,'worker',{url:`https://github.com/example/repo/pull/${number}`,number,branch:job.branch});
+  return job;
+}
+
+integration('maxWip fills capacity, survives restart, and replenishes each merge exactly once', async () => {
+  const request = {...input(),maxWip:2};
+  const key = randomUUID();
+  const {goal} = await store.createGoal('owner',request,'demo',key);
+  await assert.rejects(store.createGoal('owner',{...request,maxWip:3},'demo',key), /different request/);
+  const first = await publishNext(1);
+  const second = await publishNext(2);
+  store = new Store(store.pool);
+  const full = await store.getGoal(goal.id);
+  assert.equal(full?.maxWip,2);
+  assert.equal(full?.state,'awaiting_review');
+  assert.equal(full?.pullRequests.length,2);
+  assert.equal((await store.listGoals('owner'))[0]?.pullRequests.length,2);
+  assert.equal(await store.claim('overflow'),null);
+  // Older and newer PRs can merge together, with repeated delivery.
+  await Promise.all([store.reconcile(second.id,'merged'),store.reconcile(first.id,'merged'),store.reconcile(first.id,'merged')]);
+  const claimed = await Promise.all([store.claim('a'),store.claim('b')]);
+  assert.equal(claimed.filter(Boolean).length,1);
+  const third = claimed.find(job => job !== null)!;
+  const worker = claimed[0] ? 'a' : 'b';
+  assert.equal(third.goal.attemptCount,3);
+  assert.equal(third.goal.pullRequests.filter(pr => pr.state === 'merged').length,2);
+  await store.saveArtifact(third.id,worker,{baseCommit:'abc',patch:Buffer.from('captured')});
+  await store.beginPublication(third.id,worker);
+  await store.completePublication(third.id,worker,{url:'https://github.com/example/repo/pull/3',number:3,branch:third.branch});
+  const fourth = await publishNext(4);
+  assert.equal(await store.claim('overflow'),null);
+  await store.reconcile(third.id,'merged');
+  const fifth = await publishNext(5);
+  assert.equal(await store.claim('full'),null);
+  await store.reconcile(fifth.id,'merged');
+  const sixth = await publishNext(6);
+  assert.equal(sixth.goal.attemptCount,6);
+  assert.equal((await store.getGoal(goal.id))?.state,'awaiting_review');
+  await store.control(goal.id,'owner','pause');
+  await store.reconcile(fourth.id,'merged');
+  await store.reconcile(sixth.id,'merged');
+  const paused = await store.getGoal(goal.id);
+  assert.equal(paused?.state,'paused');
+  assert.ok(paused?.pullRequests.every(pr => pr.state === 'merged'));
+  assert.equal(await store.claim('paused'),null);
+  await store.control(goal.id,'owner','resume');
+  const seventh = await publishNext(7);
+  assert.equal(seventh.goal.attemptCount,7);
+  await store.control(goal.id,'owner','cancel');
+  assert.equal(await store.claim('cancelled'),null);
+});
+
+integration('a merge during an attempt preserves its reservation and a requested pause', async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
+  const first = await publishNext(1);
+  const second = await store.claim('worker');
+  assert.ok(second);
+  await store.control(goal.id,'owner','pause');
+  const merged = await store.reconcile(first.id,'merged');
+  assert.equal(merged.state,'running');
+  assert.equal(merged.stopRequested,'pause');
+  assert.equal(await store.claim('extra'),null);
+  await store.saveArtifact(second.id,'worker',{baseCommit:'abc',patch:Buffer.from('held')});
+  assert.equal((await store.getGoal(goal.id))?.state,'paused');
+  assert.equal(await store.beginPublication(second.id,'worker'),false);
+  await store.control(goal.id,'owner','resume');
+  const resumed = await store.claim('worker');
+  assert.equal(resumed?.id,second.id);
+  assert.equal(resumed?.goal.attemptCount,2);
+  await store.beginPublication(second.id,'worker');
+  await store.completePublication(second.id,'worker',{url:'https://github.com/example/repo/pull/2',number:2,branch:second.branch});
+  await publishNext(3);
+  assert.equal(await store.claim('overflow'),null);
+});
+
+integration('closing an older PR cancels the goal and fences its active attempt', async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:3},'demo',randomUUID());
+  const first = await publishNext(1);
+  await publishNext(2);
+  const third = await store.claim('worker');
+  assert.ok(third);
+  const cancelled = await store.reconcile(first.id,'closed');
+  assert.equal(cancelled.state,'cancelled');
+  assert.equal(cancelled.cleanupStatus,'needs_attention');
+  assert.deepEqual(cancelled.pullRequests.map(pr => pr.state),['closed','open']);
+  assert.equal(await store.heartbeat(third.id,'worker'),false);
+  await assert.rejects(store.saveArtifact(third.id,'worker',{baseCommit:'abc',patch:Buffer.from('late')}), /lease/);
+  assert.equal(await store.claim('extra'),null);
+});
+
+integration('merges still reconcile during failure or publication recovery without clearing the stop', async () => {
+  for (const stage of ['failure','publication'] as const) {
+    const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
+    const first = await publishNext(1);
+    const second = await store.claim('worker');
+    assert.ok(second);
+    if (stage === 'failure') await store.fail(second.id,'worker','fixture failure');
+    else {
+      await store.saveArtifact(second.id,'worker',{baseCommit:'abc',patch:Buffer.from('captured')});
+      await store.beginPublication(second.id,'worker');
+      await store.publicationUncertain(second.id,'worker','fixture uncertain');
+    }
+    const before = await store.getGoal(goal.id);
+    assert.ok((await store.reviewJobs()).some(job => job.id === first.id));
+    const after = await store.reconcile(first.id,'merged');
+    assert.equal(after.state,before?.state);
+    assert.equal(after.error,before?.error);
+    assert.equal(after.pullRequests[0]?.state,'merged');
+    assert.equal(await store.claim('extra'),null);
+  }
+});
+
+integration('migration backfills existing PRs and defaults WIP to one without losing history', async () => {
+  const {goal} = await store.createGoal('owner',input(),'demo',randomUUID());
+  const first = await publishNext(1);
+  await store.pool.query('ALTER TABLE jobs DROP COLUMN pull_request');
+  await store.pool.query('ALTER TABLE goals DROP COLUMN max_wip');
+  await store.migrate();
+  await store.migrate();
+  const migrated = await store.getGoal(goal.id);
+  assert.equal(migrated?.maxWip,1);
+  assert.deepEqual(migrated?.pullRequests,[migrated?.pullRequest]);
+  assert.equal(await store.claim('full'),null);
+  await store.reconcile(first.id,'merged');
+  const second = await publishNext(2);
+  await store.migrate();
+  const history = await store.getGoal(goal.id);
+  assert.deepEqual(history?.pullRequests.map(pr => pr.state),['merged','open']);
+  await store.reconcile(second.id,'merged');
+  assert.equal((await store.getGoal(goal.id))?.state,'queued');
+});

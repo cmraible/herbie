@@ -32,7 +32,7 @@ Use another terminal for the same service:
 ```sh
 pnpm cli login --url http://127.0.0.1:8787 --demo
 pnpm cli repositories
-pnpm cli start --repo demo/example --name "Fix addition" --prompt "Fix addition and test the change"
+pnpm cli start --repo demo/example --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
 pnpm cli status
 pnpm cli status GOAL_ID
 pnpm cli rename GOAL_ID --name "Improve arithmetic"
@@ -41,6 +41,13 @@ pnpm cli pause GOAL_ID
 pnpm cli resume GOAL_ID
 pnpm cli cancel GOAL_ID
 ```
+
+`maxWip` defaults to 1 and limits each goal's outstanding work: open PRs plus
+any queued or running attempt. Attempts run sequentially, filling available
+capacity without waiting for merges. Each merge frees capacity for the next
+attempt. For example, `--max-wip 2` keeps up to two PRs outstanding until the
+goal is paused, cancelled, or stopped by a failure or an unmerged close.
+The goal view lists every published PR.
 
 CLI responses are JSON. Login stores only a Herbie bearer session in a private
 0600 file (`HERBIE_CONFIG` or `~/.config/herbie/session.json`). For an interrupted

@@ -45,6 +45,6 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     demoLogin: () => request('/api/demo/login', sessionSchema, {client: 'web'}),
     demoCliLogin: () => request('/api/demo/login', z.object({token: z.string().min(1), session: sessionSchema}), {client: 'cli'}),
     logout: () => request('/api/auth/logout', z.object({ok: z.literal(true)}), {}),
-    demoAction: (id: string, action: 'merge'|'close') => request(`/api/demo/goals/${z.uuid().parse(id)}/${action}`, goalSchema, {}),
+    demoAction: (id: string, action: 'merge'|'close', branch?: string) => request(`/api/demo/goals/${z.uuid().parse(id)}/${action}`, goalSchema, {branch}),
   };
 }

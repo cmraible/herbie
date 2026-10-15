@@ -59,10 +59,10 @@ test('start sends a custom name and preserves the request ID on retry', async ()
   });
   try {
     await app.invoke(['login','--demo','--url',app.baseUrl]);
-    const args = ['start','--name','Regression coverage','--repo','octocat/demo','--prompt','Add a regression test','--request-id',requestId];
+    const args = ['start','--name','Regression coverage','--repo','octocat/demo','--prompt','Add a regression test','--max-wip','2','--request-id',requestId];
     assert.equal(await app.invoke(args), 0);
     assert.equal(await app.invoke(args), 0);
-    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',name:'Regression coverage',prompt:'Add a regression test'}})));
+    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',name:'Regression coverage',prompt:'Add a regression test',maxWip:2}})));
     assert.equal(JSON.parse(app.output.at(-1) ?? '').id, goalId);
   } finally { await app.close(); }
 });
