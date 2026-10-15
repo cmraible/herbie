@@ -32,12 +32,8 @@ jobs:
           cache: true
           cache_dependency_path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Build and typecheck every package
+      - name: Check lint, formatting, build, and types
         run: bash scripts/ci-verify.sh build
-      - name: Check lint
-        run: pnpm lint
-      - name: Check formatting
-        run: pnpm format:check
       - name: Save failure evidence
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

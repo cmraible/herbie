@@ -14,6 +14,5 @@ COPY packages/service/package.json packages/service/
 COPY packages/web/package.json packages/web/
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @herbie/web exec playwright install --with-deps chromium --only-shell
-COPY packages/ packages/
-COPY scripts/ scripts/
+COPY . .
 CMD ["bash", "scripts/ci-verify.sh", "all"]

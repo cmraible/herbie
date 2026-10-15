@@ -140,6 +140,8 @@ if (!response.ok || health.mode !== 'demo' || health.executionEnabled !== true) 
 JS
 }
 run_build() {
+  run_step lint pnpm lint
+  run_step format pnpm format:check
   run_step build pnpm build
   run_step typecheck pnpm typecheck
 }
