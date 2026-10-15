@@ -12,9 +12,9 @@ test('saved drafts from before test-command and attempt-limit removal still rest
   assert.deepEqual(draftSchema.parse({...draft,test:'["npm","test"]',maxAttempts:'2'}),draft);
 });
 
-test('saved draft names are discarded so the backend names new goals', () => {
+test('legacy named drafts preserve the original request for idempotent retries', () => {
   const draft = {...newDraft('demo/example'),prompt:'Fix arithmetic'};
   const restored = draftSchema.parse({...draft,name:'Old custom name'});
-  assert.deepEqual(restored,draft);
-  assert.deepEqual(parseDraft(restored),{repository:'demo/example',prompt:'Fix arithmetic'});
+  assert.equal(restored.requestId,draft.requestId);
+  assert.deepEqual(parseDraft(restored),{repository:'demo/example',name:'Old custom name',prompt:'Fix arithmetic'});
 });

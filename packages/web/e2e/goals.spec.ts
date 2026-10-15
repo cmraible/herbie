@@ -186,3 +186,22 @@ test('web names support the same Unicode length limit as the API',async({page})=
   await dialog.getByRole('button',{name:'Save name'}).click();
   await expect(detail(page).getByRole('heading',{name:renamed,exact:true})).toBeVisible();
 });
+
+test('a legacy named draft can replay a create request after reload',async({page})=>{
+  await login(page);
+  const draft={repository:'demo/example',name:'Legacy custom name',prompt:'Recover a legacy named request',requestId:crypto.randomUUID()};
+  const response=await page.request.post('/api/goals',{
+    headers:{origin:url,'idempotency-key':draft.requestId},
+    data:{repository:draft.repository,name:draft.name,prompt:draft.prompt},
+  });
+  expect(response.ok()).toBeTruthy();
+  const created=goalSchema.parse(await response.json());
+  await page.evaluate(draft=>sessionStorage.setItem('herbie-draft',JSON.stringify(draft)),draft);
+  await page.goto('/#new');
+  await page.reload();
+  await expect(page.getByLabel('Goal name',{exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(page).toHaveURL(new RegExp(`#${created.id}$`));
+  await expect(detail(page).getByRole('heading',{name:draft.name,exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+});
