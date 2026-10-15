@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
-import {actionSchema,goalInput} from '@herbie/contracts';
+import {actionSchema,goalInput,goalRename} from '@herbie/contracts';
 import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {Store,StoreError} from './store.js';
 import {AuthError,type createAuth} from './auth.js';
@@ -135,13 +135,17 @@ export function createApiServer(options:ApiOptions){
         await adapters.authorize(userId,input.repository);
         const result=await store.createGoal(userId,input,adapters.mode,key);json(response,result.created?201:200,result.goal);return;
       }
-      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry-publication))?$/);
+      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry-publication|name))?$/);
       if(goalPath){
         const id=z.string().uuid().parse(goalPath[1]);const goal=await store.getGoal(id,userId);
         if(!goal)throw new HttpError(404,'Goal not found');
         if(method==='GET'&&!goalPath[2]){json(response,200,goal);return;}
         if(method==='GET'&&goalPath[2]==='events'){const after=z.coerce.number().int().min(0).safe().parse(url.searchParams.get('after')??0);json(response,200,await store.events(id,after));return;}
         if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){
+          if(goalPath[2]==='name'){
+            const {name}=goalRename.parse(await readJson(request));
+            json(response,200,await store.renameGoal(id,userId,name));return;
+          }
           if(goalPath[2]==='retry-publication'){
             requireExecution();
             if(adapters.mode!=='live'||!adapters.checkPublicationRetry)throw new HttpError(404,'Not found');

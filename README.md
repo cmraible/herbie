@@ -27,9 +27,10 @@ Use another terminal for the same service:
 ```sh
 pnpm cli login --url http://127.0.0.1:8787 --demo
 pnpm cli repositories
-pnpm cli start --repo demo/example --prompt "Fix addition and test the change" --max-attempts 2
+pnpm cli start --repo demo/example --name "Fix addition" --prompt "Fix addition and test the change" --max-attempts 2
 pnpm cli status
 pnpm cli status GOAL_ID
+pnpm cli rename GOAL_ID --name "Improve arithmetic"
 pnpm cli logs GOAL_ID
 pnpm cli pause GOAL_ID
 pnpm cli resume GOAL_ID

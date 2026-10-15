@@ -26,18 +26,25 @@ const integration = (name: string, fn: () => Promise<void>) => test(name, { skip
 const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: 'Fix arithmetic', maxAttempts: 2 });
 
 integration('migration preserves old goals and artifacts while new goals need no test command', async () => {
+  await store.pool.query('ALTER TABLE goals DROP COLUMN name');
   await store.pool.query('ALTER TABLE goals ALTER COLUMN test_command SET NOT NULL');
   const id = randomUUID();
   await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
     VALUES($1,'owner','example/repo','Legacy goal','["npm","test"]',1,'live','queued')`, [id]);
+  const unicodeId = randomUUID();
+  await store.pool.query(`INSERT INTO goals(id,owner_id,repository,prompt,test_command,max_attempts,mode,state)
+    VALUES($1,'owner','example/repo',$2,'["npm","test"]',1,'live','queued')`, [unicodeId,'[demo:fail] \n'+ '🥁'.repeat(130)]);
   const key = randomUUID();
   const legacyRequest = {repository:'example/repo',prompt:'Legacy goal',testCommand:['npm','test'],maxAttempts:1};
   const fingerprint = createHash('sha256').update(JSON.stringify({...legacyRequest,mode:'live'})).digest('hex');
   await store.pool.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', ['owner',key,fingerprint,id]);
   await store.migrate();
   await store.migrate();
+  assert.equal((await store.getGoal(unicodeId))?.name,'🥁'.repeat(120));
   const oldGoal = await store.getGoal(id);
   assert.equal(oldGoal?.prompt, 'Legacy goal');
+  assert.equal(oldGoal?.name, 'Legacy goal');
+  await store.renameGoal(id,'owner','Renamed legacy goal');
   assert.ok(!('testCommand' in oldGoal!));
   const request = {repository:'EXAMPLE/REPO',prompt:'Legacy goal',maxAttempts:1};
   const replay = await store.createGoal('owner',request,'live',key);
@@ -273,4 +280,39 @@ integration('event logs remain numerically ordered past ten events and cursor pa
   for (const message of ['a','b','c','d','e','f','g','h','i','j','k']) await store.appendEvent(goal.id, 'attempt', message);
   assert.deepEqual((await store.events(goal.id)).map(event => event.id), [1,2,3,4,5,6,7,8,9,10,11,12]);
   assert.deepEqual((await store.events(goal.id, 8)).map(event => event.id), [9,10,11,12]);
+});
+
+integration('names persist independently of prompts and original create requests survive renames', async () => {
+  const owner = randomUUID(), key = randomUUID();
+  const request = {...input(),name:'  Arithmetic cleanup  '};
+  const {goal} = await store.createGoal(owner,request,'demo',key);
+  assert.equal(goal.name,'Arithmetic cleanup');
+  await assert.rejects(store.renameGoal(goal.id,'another-owner','Private rename'), /Goal not found/);
+  for (const name of ['', '   ', 'x'.repeat(121)]) {
+    await assert.rejects(store.renameGoal(goal.id,owner,name));
+    await assert.rejects(store.createGoal(owner,{...request,name},'demo',randomUUID()));
+  }
+  const renamed = await store.renameGoal(goal.id,owner,'  Better arithmetic  ');
+  assert.equal(renamed.name,'Better arithmetic');
+  assert.equal(renamed.prompt,goal.prompt);
+  assert.equal(renamed.state,goal.state);
+  assert.equal(renamed.attemptCount,0);
+  assert.equal((await new Store(store.pool).listGoals(owner))[0]?.name,'Better arithmetic');
+  const replay = await store.createGoal(owner,request,'demo',key);
+  assert.equal(replay.created,false);
+  assert.equal(replay.goal.name,'Better arithmetic');
+  for (const name of ['Different name','Better arithmetic',undefined]) {
+    await assert.rejects(store.createGoal(owner,{...request,name},'demo',key), /different request/);
+  }
+  await store.control(goal.id,owner,'cancel');
+  assert.equal((await store.renameGoal(goal.id,owner,'Finished work')).state,'cancelled');
+});
+
+integration('omitted names use the brief and replay after renaming', async () => {
+  const owner = randomUUID(), key = randomUUID();
+  const request = {...input(),prompt:'[demo:fail] '+ 'a'.repeat(150)};
+  const {goal} = await store.createGoal(owner,request,'demo',key);
+  assert.equal(goal.name,'a'.repeat(120));
+  await store.renameGoal(goal.id,owner,'Short name');
+  assert.equal((await store.createGoal(owner,request,'demo',key)).goal.name,'Short name');
 });

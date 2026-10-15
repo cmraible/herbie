@@ -53,3 +53,7 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancel_cleanup_deadline timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_retry_count integer NOT NULL DEFAULT 0 CHECK (publication_retry_count >= 0);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS publication_blocked boolean NOT NULL DEFAULT false;
 ALTER TABLE goals ALTER COLUMN test_command DROP NOT NULL;
+
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS name text;
+UPDATE goals SET name=COALESCE(NULLIF(regexp_replace(left(regexp_replace(replace(prompt,'[demo:fail]',''),'^[[:space:]]+|[[:space:]]+$','','g'),120),'[[:space:]]+$',''),''),'Untitled goal') WHERE name IS NULL;
+ALTER TABLE goals ALTER COLUMN name SET NOT NULL;
