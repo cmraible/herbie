@@ -19,8 +19,6 @@
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @herbie/loop test:e2e",
     "test:daytona": "pnpm --filter @herbie/loop test:daytona",
-    "service": "node --env-file-if-exists=.env --import tsx packages/service/src/index.ts",
-    "worker": "node --env-file-if-exists=.env --import tsx packages/service/src/worker-main.ts",
     "cli": "pnpm --filter @herbie/cli start",
     "test:web": "pnpm --filter @herbie/web test:e2e"
   },

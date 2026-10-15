@@ -125,7 +125,7 @@ wait_browser_install() {
 }
 start_hosted_service() {
   # Serve the compiled app and use the deterministic local demo adapter.
-  # Deliberately do not use the root "service" script, which loads a local .env.
+  # Run the test service directly without loading the local Compose .env.
   export HERBIE_E2E_URL="http://127.0.0.1:$HERBIE_CI_PORT"
   export HERBIE_CLI_E2E_ENTRY="$repo_dir/packages/cli/dist/index.js"
   start_server hosted env DATABASE_URL="$HERBIE_CI_DATABASE_URL" \

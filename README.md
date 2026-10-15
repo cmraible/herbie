@@ -6,6 +6,9 @@ exits. Postgres owns goals, attempts, jobs, captured artifacts, PRs and events.
 
 ## Service, web UI and CLI
 
+Follow the [setup guide](docs/setup.md) to configure credentials and run Herbie
+locally with Docker Compose.
+
 Run **`pnpm verify`** for all CI validation locally, including PostgreSQL,
 browser, CLI and production container checks. Docker provisions the test tools
 and disposable databases. After the initial tool/image downloads, runs target
@@ -18,28 +21,27 @@ edits last until the dev server restarts. PR links are illustrative fixture URLs
 they do not refer to PRs created by Herbie. Fixture middleware runs only in Vite's
 `fixtures` development mode and is not included in production builds.
 
-Requires Node.js 24+, pnpm 10, and Postgres 17 (Docker is convenient locally).
+Run Herbie locally with Docker Compose. Docker builds the current checkout and
+runs the web UI, API, worker, and Postgres together. Configure your test GitHub
+App, Daytona, OpenAI, and HTTPS hostname using the [setup guide](docs/setup.md).
+
+```sh
+cp .env.example .env
+# Fill the credentials in .env.
+docker compose up --build -d --wait
+```
+
+Open the configured HTTPS hostname and sign in with GitHub. Execution defaults to
+disabled; set `HERBIE_EXECUTION_ENABLED=true` and rerun Compose when ready to run
+a real goal.
+
+The optional CLI client requires Node.js 24+ and pnpm 10:
 
 ```sh
 pnpm install
-cp .env.example .env
-docker compose up -d postgres
-pnpm build
-pnpm service   # terminal 1: API + built React UI at http://127.0.0.1:8787
-pnpm worker    # terminal 2: separate durable worker
-```
-
-Open http://127.0.0.1:8787 and choose **Enter local demo**. Demo mode is explicit,
-loopback-only, and deterministic: it calls no model, Daytona, GitHub, or host Git.
-Its simulated PRs use `demo.invalid`, and its artifacts cannot pass the live
-publisher. The UI can simulate a failure, merge, or unmerged close.
-
-Use another terminal for the same service:
-
-```sh
-pnpm cli login --url http://127.0.0.1:8787 --demo
+pnpm cli login --url https://herbie-dev.example.com
 pnpm cli repositories
-pnpm cli start --repo demo/example --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
+pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
 pnpm cli status
 pnpm cli status GOAL_ID
 pnpm cli rename GOAL_ID --name "Improve arithmetic"
@@ -68,7 +70,7 @@ its request ID for retries too. `pnpm cli logout` revokes the session.
 
 See [service operations and live setup](docs/service.md) for recovery behavior,
 testing, security boundaries, and the precise one-time GitHub App/Daytona setup.
-No live execution or public deployment is enabled by the demo configuration.
+Local Compose uses real integrations; execution stays disabled until you enable it.
 
 Environment configuration is validated together by the Zod schema in
 `packages/service/src/config.ts` before connecting to PostgreSQL. Errors name the
@@ -79,13 +81,8 @@ without saving a goal or job. Demo naming is deterministic and makes no model ca
 Live execution also
 requires `DAYTONA_API_KEY` and `HERBIE_DAYTONA_OPENAI_SECRET` at this stage.
 
-With `pnpm service`, `NODE_ENV` defaults to `development`. Invalid configuration
-serves a detailed error page on the service's loopback address (normally
-http://127.0.0.1:8787), returning HTTP 503 even for health checks. An invalid port
-falls back to 8787 for this diagnostic page. Correct `.env` or the shell environment,
-then restart the service and reload. `NODE_ENV=production` exits with status 1
-instead of starting a diagnostic server. The hosted entrypoint and standalone
-worker always exit on invalid configuration.
+The Compose container exits on invalid configuration. Check `docker compose logs
+herbie`, correct `.env`, and rerun `docker compose up -d --wait`.
 
 The [portable deployment runbook](docs/portable-deployment.md) describes the
 Node container, private Supabase database, and automatic GHCR → Flux OCI → k3s delivery.
