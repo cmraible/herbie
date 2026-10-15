@@ -304,6 +304,11 @@ test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t
   const after = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
   assert.ok(before?.patchSha);
   assert.equal(after?.patchSha, before.patchSha);
+  fixture.patch = "@@ -101 +101 @@\n---before\n+++after";
+  const edge = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  fixture.patch = "@@ -101 +101 @@\n---before\n+++changed";
+  const changed = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.notEqual(changed?.patchSha, edge?.patchSha);
 });
 
 test("review reconciliation uses only repository-scoped read permission after user login expires", async (t) => {
