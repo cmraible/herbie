@@ -1299,46 +1299,40 @@ export class Store {
   }
   async reconcilePullRequestHead(
     jobId: string,
-    headSha: string,
-    baseSha?: string,
+    current: Pick<PullRequest, "headSha" | "baseSha" | "patchSha">,
   ): Promise<boolean> {
     return this.transaction(async (client) => {
       const { row, goal } = await lockJob(client, jobId);
       const pr = goal.pullRequests.find((item) => item.branch === row.branch);
       if (row.stage !== "awaiting_review" || pr?.state !== "open") return false;
+      const tracked = {
+        ...(current.headSha ? { headSha: current.headSha } : {}),
+        ...(current.baseSha ? { baseSha: current.baseSha } : {}),
+        ...(current.patchSha ? { patchSha: current.patchSha } : {}),
+      };
+      const updateTrackedPullRequest = async () => {
+        const value = JSON.stringify(tracked);
+        await client.query("UPDATE jobs SET pull_request=pull_request || $2::jsonb WHERE id=$1", [
+          jobId,
+          value,
+        ]);
+        await client.query(
+          "UPDATE goals SET pull_request=pull_request || $3::jsonb WHERE id=$1 AND pull_request->>'branch'=$2",
+          [goal.id, row.branch, value],
+        );
+      };
       if (!pr.headSha) {
-        await client.query(
-          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
-          [jobId, headSha],
-        );
-        await client.query(
-          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
-          [goal.id, row.branch, headSha],
-        );
+        await updateTrackedPullRequest();
         return false;
       }
-      if (pr.headSha === headSha || !["queued", "running", "awaiting_review"].includes(goal.state))
-        return false;
-      if (pr.baseSha && baseSha && pr.baseSha === baseSha) {
-        await client.query(
-          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
-          [jobId, headSha],
-        );
-        await client.query(
-          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
-          [goal.id, row.branch, headSha],
-        );
+      if (pr.headSha === current.headSha) {
+        if (!pr.patchSha && current.patchSha) await updateTrackedPullRequest();
         return false;
       }
-      if (pr.baseSha && baseSha && pr.baseSha !== baseSha) {
-        await client.query(
-          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{baseSha}',to_jsonb($2::text),true) WHERE id=$1",
-          [jobId, baseSha],
-        );
-        await client.query(
-          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{baseSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
-          [goal.id, row.branch, baseSha],
-        );
+      if (!["queued", "running", "awaiting_review"].includes(goal.state)) return false;
+      if (pr.patchSha && current.patchSha && pr.patchSha === current.patchSha) {
+        await updateTrackedPullRequest();
+        return false;
       }
       const active = await client.query(
         "SELECT 1 FROM jobs WHERE goal_id=$1 AND stage IN ('running','publishing') LIMIT 1",

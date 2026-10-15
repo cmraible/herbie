@@ -81,13 +81,14 @@ for (const outcome of [
     if (outcome === "external-change") {
       const originalHead = "a".repeat(40);
       const originalBase = "c".repeat(40);
+      const originalPatch = "e".repeat(64);
       await store.pool.query(
-        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true) WHERE id=$1",
-        [goal.id, originalHead, originalBase],
+        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true),'{0,patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
-        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true) WHERE id=$1",
-        [job.id, originalHead, originalBase],
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase, originalPatch],
       );
       const adapters: Adapters = {
         ...demo,
@@ -96,7 +97,8 @@ for (const outcome of [
           ...pr,
           state: "open",
           headSha: "b".repeat(40),
-          baseSha: "d".repeat(40),
+          baseSha: originalBase,
+          patchSha: "f".repeat(64),
         }),
       };
       await reconcileReviews(store, adapters);
@@ -116,16 +118,23 @@ for (const outcome of [
     if (outcome === "simple-rebase") {
       const originalHead = "a".repeat(40);
       const originalBase = "c".repeat(40);
+      const originalPatch = "e".repeat(64);
       await store.pool.query(
-        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true) WHERE id=$1",
-        [goal.id, originalHead, originalBase],
+        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true),'{0,patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
-        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true) WHERE id=$1",
-        [job.id, originalHead, originalBase],
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase, originalPatch],
       );
       assert.equal(
-        await store.reconcilePullRequestHead(job.id, "b".repeat(40), originalBase),
+        await store.reconcilePullRequestHead(job.id, {
+          ...pr,
+          state: "open",
+          headSha: "b".repeat(40),
+          baseSha: "d".repeat(40),
+          patchSha: originalPatch,
+        }),
         false,
       );
       assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");

@@ -1,5 +1,5 @@
 import { registerDiagnosticSecret, logFailure } from "./diagnostic-log.js";
-import { createHmac, createSign, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { Repository } from "@herbie/contracts";
 import type { PullRequest, RepositoryAccess, CiStatus } from "./adapters.js";
@@ -227,6 +227,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     if (!pr) return null;
     if (!pr.html_url.startsWith(`https://github.com/${repository}/pull/`))
       throw new Error("Unexpected GitHub pull request URL");
+    const patchSha = await pullRequestPatchSha(token, repository, pr.number);
     return {
       url: pr.html_url,
       number: pr.number,
@@ -234,7 +235,38 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       state: pr.merged_at ? "merged" : pr.state,
       headSha: pr.head.sha,
       baseSha: pr.base.sha,
+      ...(patchSha ? { patchSha } : {}),
     };
+  }
+  async function pullRequestPatchSha(
+    token: string,
+    repository: string,
+    number: number,
+  ): Promise<string | undefined> {
+    const files: { filename: string; status: string; patch: string }[] = [];
+    for (let page = 1; page <= 30; page++) {
+      const batch = z
+        .array(
+          z.object({
+            filename: z.string(),
+            status: z.string(),
+            patch: z.string().optional(),
+          }),
+        )
+        .parse(
+          await request(
+            `/repos/${repository}/pulls/${number}/files?per_page=100&page=${page}`,
+            token,
+          ),
+        );
+      if (batch.some((file) => file.patch === undefined)) return undefined;
+      files.push(
+        ...batch.map(({ filename, status, patch }) => ({ filename, status, patch: patch! })),
+      );
+      if (batch.length < 100)
+        return createHash("sha256").update(JSON.stringify(files)).digest("hex");
+    }
+    return undefined;
   }
   async function branchCommit(
     token: string,
@@ -753,6 +785,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
             draft: true,
           }),
         );
+        const patchSha = await pullRequestPatchSha(token, input.repository, pr.number);
         return {
           url: pr.html_url,
           number: pr.number,
@@ -760,6 +793,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           state: pr.merged_at ? "merged" : pr.state,
           headSha: pr.head.sha,
           baseSha: pr.base.sha,
+          ...(patchSha ? { patchSha } : {}),
         };
       } catch (error) {
         logFailure(error, { component: "github-publication-response" });

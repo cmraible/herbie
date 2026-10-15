@@ -270,7 +270,7 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
       if (current?.state === "open" && current.headSha)
-        await store.reconcilePullRequestHead(job.id, current.headSha, current.baseSha);
+        await store.reconcilePullRequestHead(job.id, current);
       else if (current && current.state !== "open") await store.reconcile(job.id, current.state);
     } catch (error) {
       logFailure(error, { component: "review-reconciliation", goalId: job.goal.id, jobId: job.id });
