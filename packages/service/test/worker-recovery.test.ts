@@ -191,3 +191,48 @@ for (const heartbeatMs of [5000, 400]) {
     assert.equal(interrupted.pullRequest, null);
   });
 }
+
+for (const recovering of [false,true]) for (const outcome of ['closed','merged'] as const) {
+  test(`known ${outcome} PR is persisted before another worker can claim (recovery: ${recovering})`, async t => {
+    const store = await database(t);
+    if (!store) return;
+    const {goal} = await store.createGoal('demo-user',{...request,maxWip:2},'demo',randomUUID());
+    if (recovering) {
+      const job = await store.claim('lost-publisher');
+      assert.ok(job);
+      await store.saveArtifact(job.id,'lost-publisher',artifact);
+      await store.beginPublication(job.id,'lost-publisher');
+      await store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[job.id]);
+    }
+    // Observe the commit before the worker can perform a subsequent transaction.
+    const complete = store.completePublication.bind(store);
+    let observedState: string | undefined;
+    let competing: Awaited<ReturnType<Store['claim']>> | undefined;
+    store.completePublication = async (...args) => {
+      const result = await complete(...args);
+      observedState = result.pullRequests[0]?.state;
+      competing = await store.claim('competing-worker');
+      return result;
+    };
+    const adapters: Adapters = {
+      ...createDemoAdapters(),
+      async attempt() { assert.equal(recovering,false); return artifact; },
+      async publish() { throw new Error('An existing PR must not be published again'); },
+      async reconcile(execution) {
+        return {url:'https://demo.invalid/herbie/pull/42',number:42,branch:execution.branch,state:outcome};
+      },
+    };
+    await runWorkerOnce(store,adapters,'worker');
+    assert.equal(observedState,outcome);
+    if (outcome === 'closed') {
+      assert.equal(competing,null);
+      assert.equal((await store.getGoal(goal.id))?.state,'cancelled');
+      assert.equal((await store.getGoal(goal.id))?.attemptCount,1);
+      assert.equal((await store.pool.query('SELECT count(*)::int n FROM jobs WHERE goal_id=$1',[goal.id])).rows[0].n,1);
+    } else {
+      assert.ok(competing);
+      assert.equal(competing.goal.attemptCount,2);
+      assert.equal(competing.goal.pullRequests[0]?.state,'merged');
+    }
+  });
+}

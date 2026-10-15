@@ -60,3 +60,20 @@ ALTER TABLE goals ALTER COLUMN name SET NOT NULL;
 ALTER TABLE goals DROP COLUMN IF EXISTS max_attempts;
 ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_cycle_check;
 ALTER TABLE jobs ADD CONSTRAINT jobs_cycle_check CHECK (cycle >= 1);
+
+ALTER TABLE goals ADD COLUMN IF NOT EXISTS max_wip integer NOT NULL DEFAULT 1 CHECK (max_wip > 0);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pull_request jsonb;
+-- Older coordinators can still publish or reconcile while draining after this migration.
+CREATE OR REPLACE FUNCTION sync_goal_pull_request() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE jobs SET pull_request=NEW.pull_request
+    WHERE goal_id=NEW.id AND branch=NEW.pull_request->>'branch'
+      AND pull_request IS DISTINCT FROM NEW.pull_request;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS sync_goal_pull_request ON goals;
+CREATE TRIGGER sync_goal_pull_request AFTER INSERT OR UPDATE OF pull_request ON goals
+  FOR EACH ROW EXECUTE FUNCTION sync_goal_pull_request();
+UPDATE jobs j SET pull_request=g.pull_request FROM goals g
+  WHERE j.goal_id=g.id AND j.branch=g.pull_request->>'branch' AND j.pull_request IS NULL;

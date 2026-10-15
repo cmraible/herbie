@@ -6,13 +6,16 @@ export const goalInput = z.object({
   name: z.string().trim().transform(name=>name || undefined).pipe(goalName.optional()).optional(),
   repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   prompt: z.string().trim().min(1).max(8000),
+  maxWip: z.number().int().min(1).max(2147483647).default(1),
 }).strict();
+export const pullRequestSchema = z.object({url:z.string().url(), number:z.number().int(), state:z.enum(['open','merged','closed']), branch:z.string()});
 export const goalSchema = goalInput.extend({
   name: goalName,
   id: z.string().uuid(), ownerId: z.string(), state: goalState,
   attemptCount: z.number().int(), createdAt: z.string(), updatedAt: z.string(),
   mode: z.enum(['demo', 'live']), stopRequested: z.enum(['pause', 'cancel']).nullable(),
-  pullRequest: z.object({url:z.string().url(), number:z.number().int(), state:z.enum(['open','merged','closed']), branch:z.string()}).nullable(),
+  pullRequest: pullRequestSchema.nullable(),
+  pullRequests: z.array(pullRequestSchema).default([]),
   cleanupStatus: z.enum(['not_required','pending','complete','needs_attention']).default('not_required'),
   error: z.string().nullable(),
 });
@@ -24,7 +27,7 @@ export const installationStartSchema = z.object({url:z.string().url()});
 export const authPollSchema = z.object({status:z.enum(['pending','complete','expired','rejected']),token:z.string().optional()});
 export const actionSchema = z.enum(['pause','resume','cancel']);
 export type Goal = z.infer<typeof goalSchema>;
-export type GoalInput = z.infer<typeof goalInput>;
+export type GoalInput = z.input<typeof goalInput>;
 export type GoalEvent = z.infer<typeof eventSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type Repository = z.infer<typeof repositorySchema>;

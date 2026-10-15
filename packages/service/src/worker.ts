@@ -86,8 +86,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
       } else {
         published = existing;
         await reportPublicationPhase('state_persistence');
-        await store.completePublication(job.id,workerId,{url:existing.url,number:existing.number,branch:existing.branch});
-        if (existing.state !== 'open') await store.reconcile(job.id,existing.state);
+        await store.completePublication(job.id,workerId,existing);
       }
       return true;
     }
@@ -116,7 +115,6 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     published = result;
     if(!existing)await reportPublicationPhase('state_persistence');
     await store.completePublication(job.id,workerId,result);
-    if (existing && existing.state !== 'open') await store.reconcile(job.id,existing.state);
   } catch (error) {
     const cancelled = await store.getGoal(job.goal.id);
     if (cancelled?.state === 'cancelled') {

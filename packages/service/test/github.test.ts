@@ -12,7 +12,7 @@ import { goalSchema } from '@herbie/contracts';
 
 export async function githubFixture(t: TestContext) {
   const requests: {path: string; authorization: string; body: unknown}[] = [];
-  const fixture = { private: false, archived:false, disabled:false, push: true, contents: 'write', pullRequests: 'write', installationId:11, installationToken:'ghs_fixture', pr: false, losePrResponse:false, prBranch:'herbie/attempt-1', comparisonBase:'0'.repeat(40), branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
+  const fixture = { private: false, archived:false, disabled:false, push: true, contents: 'write', pullRequests: 'write', installationId:11, installationToken:'ghs_fixture', pr: false, prState:'open' as 'open'|'closed', mergedAt:null as string|null, losePrResponse:false, prBranch:'herbie/attempt-1', comparisonBase:'0'.repeat(40), branchHeads:new Map<string,string>([['main','0'.repeat(40)]]) };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -37,7 +37,7 @@ export async function githubFixture(t: TestContext) {
     else if (path.startsWith('/repos/alice/project/compare/')) res.end(JSON.stringify({merge_base_commit:{sha:fixture.comparisonBase}}));
     else if (path === '/app/installations/11/access_tokens') res.end(JSON.stringify({token:fixture.installationToken,expires_at:new Date(Date.now()+3600000).toISOString()}));
     else if (path.startsWith('/repos/alice/project/pulls')) {
-      const pr = {number:8,html_url:'https://github.com/alice/project/pull/8',state:'open',merged_at:null,head:{ref:fixture.prBranch},base:{ref:'main'}};
+      const pr = {number:8,html_url:'https://github.com/alice/project/pull/8',state:fixture.prState,merged_at:fixture.mergedAt,head:{ref:fixture.prBranch},base:{ref:'main'}};
       if(req.method==='POST') {
         fixture.pr=true;
         if(fixture.losePrResponse) {res.statusCode=500;res.end('{}');}
@@ -195,16 +195,18 @@ test('checks webhook raw bytes and rejects malformed signatures', async t => {
   assert.equal(github.verifyWebhook(body,undefined),false);
 });
 
-test('live publication recovers an existing attempt PR without running Git or creating another PR', async t => {
+for (const state of ['open','closed','merged'] as const) test(`live publication preserves an existing ${state} PR without running Git or creating another PR`, async t => {
   const {github,fixture,requests} = await githubFixture(t);
   fixture.pr=true;
+  fixture.prState=state === 'open' ? 'open' : 'closed';
+  fixture.mergedAt=state === 'merged' ? new Date().toISOString() : null;
   const live = createLiveAdapters({apiKey:'daytona-fixture-never-used',openaiSecretName:'existing-secret-name'},github,{userToken:async()=> 'ghu_fixture'});
   const goal = goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
   const execution = {goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/attempt-1'};
   const pr = await live.publish(execution,{baseCommit:'0'.repeat(40),patch:Buffer.alloc(0)},async()=>{});
-  assert.deepEqual(pr,{url:'https://github.com/alice/project/pull/8',number:8,branch:'herbie/attempt-1'});
+  assert.deepEqual(pr,{url:'https://github.com/alice/project/pull/8',number:8,branch:'herbie/attempt-1',state});
   assert.equal(requests.filter(request=>request.path==='/repos/alice/project/pulls').length,0);
-  assert.equal((await live.reconcile(execution))?.state,'open');
+  assert.equal((await live.reconcile(execution))?.state,state);
 });
 
 test('durable OAuth binds web callbacks to the browser and CLI tokens are delivered once across restarts', {skip:!process.env.HERBIE_TEST_DATABASE_URL}, async t => {

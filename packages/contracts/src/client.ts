@@ -9,7 +9,7 @@ export class ApiError extends Error {
 export function createClient(options: { baseUrl?: string; token?: string; origin?: string } = {}) {
   const baseUrl = options.baseUrl?.replace(/\/$/, '') ?? '';
   async function request<T>(path: string, schema: z.ZodType<T>, body?: unknown, requestId?: string): Promise<T> {
-    const headers = new Headers({accept: 'application/json'});
+    const headers = new Headers({accept: 'application/json', 'x-herbie-goal-version': '2'});
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (body !== undefined && options.origin) headers.set('origin', options.origin);
     if (options.token) headers.set('authorization', `Bearer ${options.token}`);
@@ -34,7 +34,11 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     repositories: () => request('/api/repositories', z.array(repositorySchema)),
     goals: () => request('/api/goals', z.array(goalSchema)),
     goal: (id: string) => request(goalPath(id), goalSchema),
-    start: (input: GoalInput, requestId: string) => request('/api/goals', goalSchema, goalInput.parse(input), requestId),
+    start: (input: GoalInput, requestId: string) => {
+      const {maxWip,...goal} = goalInput.parse(input);
+      // The default must remain acceptable to older strict APIs during rolling upgrades.
+      return request('/api/goals', goalSchema, maxWip === 1 ? goal : {...goal,maxWip}, requestId);
+    },
     rename: (id: string, name: string) => request(`${goalPath(id)}/name`, goalSchema, goalRename.parse({name})),
     events: (id: string, after = 0) => request(`${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`, z.array(eventSchema)),
     action: (id: string, action: GoalAction) => request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
@@ -45,6 +49,6 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     demoLogin: () => request('/api/demo/login', sessionSchema, {client: 'web'}),
     demoCliLogin: () => request('/api/demo/login', z.object({token: z.string().min(1), session: sessionSchema}), {client: 'cli'}),
     logout: () => request('/api/auth/logout', z.object({ok: z.literal(true)}), {}),
-    demoAction: (id: string, action: 'merge'|'close') => request(`/api/demo/goals/${z.uuid().parse(id)}/${action}`, goalSchema, {}),
+    demoAction: (id: string, action: 'merge'|'close', branch?: string) => request(`/api/demo/goals/${z.uuid().parse(id)}/${action}`, goalSchema, {branch}),
   };
 }

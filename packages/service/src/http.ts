@@ -5,7 +5,7 @@ import {randomBytes} from 'node:crypto';
 import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
-import {actionSchema,goalInput,goalRename} from '@herbie/contracts';
+import {actionSchema,goalInput,goalRename,type Goal} from '@herbie/contracts';
 import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {Store,StoreError} from './store.js';
 import {AuthError,type createAuth} from './auth.js';
@@ -54,6 +54,14 @@ export function createApiServer(options:ApiOptions){
     response.setHeader('content-security-policy',`default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     const url=new URL(request.url??'/',origin);
     const method=request.method??'GET';
+    function goalJson(status:number,value:Goal|Goal[]):void {
+      const compatible=(goal:Goal)=>{
+        if(request.headers['x-herbie-goal-version']==='2')return goal;
+        const {maxWip,pullRequests,...legacy}=goal;
+        return legacy;
+      };
+      json(response,status,Array.isArray(value)?value.map(compatible):compatible(value));
+    }
     const bearer=request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
     if(method!=='GET'&&method!=='HEAD'&&url.pathname!=='/api/webhooks/github'&&(!bearer||url.pathname==='/api/auth/cli')){
       // SameSite does not protect against another port on localhost or compromised sibling origins.
@@ -129,31 +137,31 @@ export function createApiServer(options:ApiOptions){
       if(method==='GET'&&url.pathname==='/api/session'){json(response,200,session);return;}
       if(method==='POST'&&url.pathname==='/api/auth/logout'){if(token)await auth.logout(token);response.setHeader('set-cookie',`herbie_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);json(response,200,{ok:true});return;}
       if(method==='GET'&&url.pathname==='/api/repositories'){json(response,200,await adapters.repositories(userId));return;}
-      if(method==='GET'&&url.pathname==='/api/goals'){json(response,200,await store.listGoals(userId));return;}
+      if(method==='GET'&&url.pathname==='/api/goals'){goalJson(200,await store.listGoals(userId));return;}
       if(method==='POST'&&url.pathname==='/api/goals'){
         requireExecution();
         const input=goalInput.parse(await readJson(request));
         const key=z.string().uuid().parse(request.headers['idempotency-key']);
         await adapters.authorize(userId,input.repository);
-        const result=await store.createGoal(userId,input,adapters.mode,key);json(response,result.created?201:200,result.goal);return;
+        const result=await store.createGoal(userId,input,adapters.mode,key);goalJson(result.created?201:200,result.goal);return;
       }
       const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry-publication|name))?$/);
       if(goalPath){
         const id=z.string().uuid().parse(goalPath[1]);const goal=await store.getGoal(id,userId);
         if(!goal)throw new HttpError(404,'Goal not found');
-        if(method==='GET'&&!goalPath[2]){json(response,200,goal);return;}
+        if(method==='GET'&&!goalPath[2]){goalJson(200,goal);return;}
         if(method==='GET'&&goalPath[2]==='events'){const after=z.coerce.number().int().min(0).safe().parse(url.searchParams.get('after')??0);json(response,200,await store.events(id,after));return;}
         if(method==='POST'&&goalPath[2]&&goalPath[2]!=='events'){
           if(goalPath[2]==='name'){
             const {name}=goalRename.parse(await readJson(request));
-            json(response,200,await store.renameGoal(id,userId,name));return;
+            goalJson(200,await store.renameGoal(id,userId,name));return;
           }
           if(goalPath[2]==='retry-publication'){
             requireExecution();
             if(adapters.mode!=='live'||!adapters.checkPublicationRetry)throw new HttpError(404,'Not found');
             const candidate=await store.publicationRetryCandidate(id,userId);
             if(!candidate)throw new HttpError(404,'Goal not found');
-            if(candidate.kind==='already_queued'||candidate.kind==='in_progress'){json(response,200,candidate.goal);return;}
+            if(candidate.kind==='already_queued'||candidate.kind==='in_progress'){goalJson(200,candidate.goal);return;}
             if(candidate.kind!=='retryable')throw new HttpError(409,'No saved publication is eligible for a safe retry.');
             const job=candidate.job;
             if(!job.artifact||!hasValidPublicationEvidence(job.goal.repository,job.artifact))throw new HttpError(409,'The saved artifact does not meet publication verification requirements.');
@@ -162,19 +170,20 @@ export function createApiServer(options:ApiOptions){
             if(check==='pull_request_exists')throw new HttpError(409,'A pull request already exists; reconciliation will check GitHub.');
             if(check==='branch_exists')throw new HttpError(409,'The exact attempt branch already exists; automatic retry was refused.');
             if(check==='base_changed')throw new HttpError(409,'The repository history no longer contains the original base; the saved artifact cannot be published without a new attempt.');
-            json(response,200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
+            goalJson(200,await store.queueSavedPublication(job.id,userId,job.branch,job.artifact.baseCommit));return;
           }
           const action=actionSchema.parse(goalPath[2]);if(action==='resume')requireExecution();
-          json(response,200,await store.control(id,userId,action));return;
+          goalJson(200,await store.control(id,userId,action));return;
         }
       }
       const demoPath=url.pathname.match(/^\/api\/demo\/goals\/([^/]+)\/(merge|close)$/);
       if(method==='POST'&&adapters.mode==='demo'&&demoPath){
         const id=z.string().uuid().parse(demoPath[1]);const goal=await store.getGoal(id,userId);if(!goal)throw new HttpError(404,'Goal not found');
         if(goal.mode!=='demo')throw new HttpError(409,'Only demo goals support simulated reviews');
-        const job=(await store.reviewJobs()).find(job=>job.goal.id===id);
-        if(!job){json(response,200,goal);return;}
-        json(response,200,await store.reconcile(job.id,demoPath[2]==='merge'?'merged':'closed'));return;
+        const {branch}=z.object({branch:z.string().optional()}).parse(await readJson(request));
+        const job=(await store.reviewJobs()).find(job=>job.goal.id===id&&(!branch||job.branch===branch));
+        if(!job){goalJson(200,goal);return;}
+        goalJson(200,await store.reconcile(job.id,demoPath[2]==='merge'?'merged':'closed'));return;
       }
       throw new HttpError(404,'Not found');
     }

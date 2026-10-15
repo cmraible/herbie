@@ -28,3 +28,21 @@ test('a non-JSON service failure retains HTTP status without exposing its body',
     await assert.rejects(client.goals(),error=>error instanceof ApiError&&error.status===502&&!error.message.includes('private diagnostics'));
   });
 });
+
+for (const maxWip of [undefined,1,2]) test(`goal creation preserves rollout compatibility (maxWip: ${maxWip})`, async () => {
+  const bodies: unknown[] = [];
+  const id = '271de1c7-b32c-43b7-a61f-f0a2a1d53c0d';
+  await withServer((request,response) => {
+    assert.equal(request.headers['x-herbie-goal-version'],'2');
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data',chunk => { body += chunk; });
+    request.on('end',() => {
+      bodies.push(JSON.parse(body));
+      response.end(JSON.stringify({id,ownerId:'owner',repository:'demo/example',name:'Work',prompt:'Work',state:'queued',attemptCount:0,createdAt:'2026-10-15T00:00:00Z',updatedAt:'2026-10-15T00:00:00Z',mode:'demo',stopRequested:null,pullRequest:null,error:null}));
+    });
+  }, async client => {
+    await client.start({repository:'demo/example',prompt:'Work',maxWip},id);
+    assert.deepEqual(bodies,[{repository:'demo/example',prompt:'Work',...(maxWip === 2 ? {maxWip:2} : {})}]);
+  });
+});

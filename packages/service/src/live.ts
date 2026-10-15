@@ -25,10 +25,16 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
     async attempt(execution,report) {
       registerDiagnosticSecret(execution.goal.prompt);
       if(!config)throw new KnownAttemptFailure('Live execution is disabled by the operator');
+      const openPullRequests = execution.goal.pullRequests.filter(pr => pr.state === 'open');
+      const goal = openPullRequests.length === 0 ? execution.goal.prompt : `${execution.goal.prompt}
+
+Other pull requests for this goal are still open:
+${openPullRequests.map(pr => `- ${pr.url} (branch: ${pr.branch})`).join('\n')}
+Inspect these branches before choosing your change. Make one small, independently mergeable contribution on the current default branch. Do not duplicate or depend on their unmerged changes.`;
       const daytona = new Daytona({apiKey:config.apiKey,apiUrl:config.apiUrl,target:config.target,requestTimeoutMs:30_000});
       const changes = await runDaytonaAttempt((params,options)=>daytona.create(params,options), {
         signal:execution.signal,
-        repoUrl:`https://github.com/${execution.repository.repository}.git`,goal:execution.goal.prompt,
+        repoUrl:`https://github.com/${execution.repository.repository}.git`,goal,
         secrets:{OPENAI_API_KEY:config.openaiSecretName},
         snapshot:config.snapshot,domainAllowList:config.domainAllowList,outboundProxyUrl:config.outboundProxyUrl,
       },report);
@@ -43,7 +49,7 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       const token = await github.installationToken(access.installationId,access.repository);
       await reportPhase?.('existing_pr_check');
       const existing = await github.findPullRequest(token,access.repository,execution.branch);
-      if (existing) return {url:existing.url,number:existing.number,branch:existing.branch};
+      if (existing) return existing;
       await requireLease();
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
       const published = await publishPatch(request=>github.openPullRequest(token,request,requireLease), {
@@ -66,7 +72,7 @@ export function createLiveAdapters(config:LiveConfig|undefined,github:Github,aut
       await reportPhase?.('publication_confirmation');
       const confirmed = await github.findPullRequest(token,access.repository,execution.branch);
       if (!confirmed || confirmed.url!==published.url) throw new Error('Published PR could not be reconciled');
-      return {url:confirmed.url,number:confirmed.number,branch:confirmed.branch};
+      return confirmed;
     },
     async reconcile(execution) {
       const token = await github.installationToken(execution.repository.installationId,execution.repository.repository,'read');
