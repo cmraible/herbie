@@ -19,7 +19,7 @@ async function fixture(t:TestContext){
   t.mock.method(console,'error',()=>{});
   const {goal}=await store.createGoal('owner',{repository:'alice/project',name:'Fixture only',prompt:'Fixture only'},'live',randomUUID());
   const baseCommit='a'.repeat(40),patch=Buffer.from('verified fixture patch');
-  const artifact={baseCommit,patch,verification:{version:3 as const,repoUrl:'https://github.com/alice/project.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true as const,sandboxDeleted:true as const}};
+  const artifact={pullRequestBody:'Fixed arithmetic so totals are correct.',baseCommit,patch,verification:{version:3 as const,repoUrl:'https://github.com/alice/project.git',baseCommit,patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true as const,sandboxDeleted:true as const}};
   let attempts=0,publishes=0;let remote:PullRequest|null=null;let check:PublicationRetryCheck='ready';
   const access={repository:goal.repository,defaultBranch:'main',installationId:1};
   const adapters:Adapters={...createDemoAdapters(),mode:'live',
@@ -157,6 +157,27 @@ for (const recovering of [false, true]) test(`permanent publication failures sto
   assert.equal(row.publication_blocked, true);
   assert.ok(row.artifact);
   assert.match((await f.store.getGoal(f.goal.id))?.error ?? '', /no agent-authored pull request description/);
+  await f.due();
+  assert.equal(await runWorkerOnce(f.store, f.adapters, 'later'), false);
+});
+
+for (const recovering of [false, true]) test(`missing descriptions block before credential-dependent publication checks (recovering: ${recovering})`, async t => {
+  const f = await fixture(t); if (!f) return;
+  // Simulate a pre-upgrade artifact by removing the optional field from storage.
+  const {pullRequestBody: _body, ...legacy} = f.artifact;
+  const job = await f.store.claim('old', 30_000, 'live'); assert.ok(job);
+  await f.store.saveArtifact(job.id, 'old', legacy);
+  if (recovering) {
+    await f.store.beginPublication(job.id, 'old');
+    await f.store.publicationUncertain(job.id, 'old', 'unknown result');
+    await f.due();
+  } else await f.pool.query('UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [job.id]);
+  let credentialChecks = 0;
+  f.adapters.checkPublicationRetry = async () => { credentialChecks++; throw new Error('Expired GitHub credential'); };
+  f.adapters.publish = async () => { credentialChecks++; throw new Error('Expired GitHub credential'); };
+  await runWorkerOnce(f.store, f.adapters, 'recovery');
+  assert.equal(credentialChecks, 0);
+  assert.equal((await f.row()).publication_blocked, true);
   await f.due();
   assert.equal(await runWorkerOnce(f.store, f.adapters, 'later'), false);
 });

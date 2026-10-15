@@ -65,6 +65,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
           await store.blockPublication(job.id,workerId,'saved artifact lacks matching test and cleanup evidence');
           return true;
         }
+        if(adapters.mode==='live' && !changes.pullRequestBody?.trim()) throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description');
         if(!adapters.checkPublicationRetry){
           await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
           return true;
@@ -110,6 +111,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
     if (!existing) await requireLease();
+    if(!existing && adapters.mode==='live' && !changes.pullRequestBody?.trim()) throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description');
     if(existing)await reportPublicationPhase('state_persistence');
     const result = existing ?? await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
     published = result;
