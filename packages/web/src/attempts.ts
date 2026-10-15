@@ -27,8 +27,9 @@ export function groupAttempts(goal: Goal, events: GoalEvent[]) {
       continue;
     }
     if (!event.attemptId) {
-      if (event.type === "attempt_started") {
-        const number = /^Attempt (\d+) started$/.exec(event.message)?.[1];
+      if (["attempt_started", "queued", "retry"].includes(event.type)) {
+        const number =
+          /Run #(\d+)/.exec(event.message)?.[1] ?? (event.type === "queued" ? "1" : undefined);
         legacyAttempt = attempts.find((item) => item.number === Number(number));
         attempt = legacyAttempt;
       } else if (

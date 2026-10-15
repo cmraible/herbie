@@ -172,10 +172,6 @@ Inspect these branches before choosing your change. Make one small, independentl
           throw new StaleRepairError("PR head changed during CI repair");
       } else if (existing) return existing;
       await requireLease();
-      if (!changes.pullRequestBody?.trim())
-        throw new PublicationBlockedError(
-          "Saved artifact has no agent-authored pull request description",
-        );
       const title =
         changes.pullRequestTitle ?? `Herbie: ${execution.goal.prompt.split("\n")[0].slice(0, 180)}`;
       const published = await publishPatch(
@@ -214,7 +210,9 @@ Inspect these branches before choosing your change. Make one small, independentl
           baseBranch: access.defaultBranch,
           branch: execution.branch,
           title,
-          body: changes.pullRequestBody,
+          body:
+            changes.pullRequestBody?.trim() ||
+            `Implements the requested changes:\n\n${execution.goal.prompt}`,
           changes,
           gitEnvironment: {
             GIT_CONFIG_GLOBAL: "/dev/null",

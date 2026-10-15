@@ -60,7 +60,7 @@ export interface AuthStore {
   takeInstallationFlow(stateHash: string): Promise<{ sessionHash: string; expiresAt: Date } | null>;
 }
 export interface AuthConfig {
-  mode: "demo" | "live";
+  mode: "live";
   publicUrl: string;
   credentialKey: string;
   allowedGithubUserId?: string;
@@ -83,14 +83,12 @@ function userCode() {
 }
 export function createAuth(config: AuthConfig, store: AuthStore, github?: Github) {
   if (
-    config.mode === "live" &&
-    (!config.allowedGithubUserId ||
-      config.allowedGithubUserId.trim() !== config.allowedGithubUserId ||
-      !/^[1-9][0-9]*$/.test(config.allowedGithubUserId))
+    !config.allowedGithubUserId ||
+    config.allowedGithubUserId.trim() !== config.allowedGithubUserId ||
+    !/^[1-9][0-9]*$/.test(config.allowedGithubUserId)
   )
     throw new Error("HERBIE_ALLOWED_GITHUB_USER_ID must be a positive numeric GitHub account ID");
-  const allowed = (userId: string) =>
-    config.mode !== "live" || userId === config.allowedGithubUserId;
+  const allowed = (userId: string) => userId === config.allowedGithubUserId;
   function requireOwner(userId: string) {
     if (!allowed(userId)) throw new AuthError(403, "Access is restricted to the configured owner");
   }
@@ -106,14 +104,8 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
     publicUrl.pathname !== "/"
   )
     throw new Error("Public URL must be an origin without credentials");
-  if (config.mode === "live" && (publicUrl.protocol !== "https:" || !github))
+  if (publicUrl.protocol !== "https:" || !github)
     throw new Error("Live auth requires GitHub App configuration and HTTPS");
-  if (
-    config.mode === "demo" &&
-    (!["127.0.0.1", "localhost", "[::1]"].includes(publicUrl.hostname) ||
-      !["http:", "https:"].includes(publicUrl.protocol))
-  )
-    throw new Error("Demo authentication is restricted to loopback");
   function encrypt(value: string) {
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -144,8 +136,7 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
   const auth = {
     ...createInstallationAuth(config, store, github, (): InstallationIdentity => auth),
     async start(client: "web" | "cli") {
-      if (!github || config.mode !== "live")
-        throw new AuthError(400, "GitHub login is available only in live mode");
+      if (!github) throw new AuthError(400, "GitHub login is available only in live mode");
       const state = secret();
       const verifier = secret();
       const pollToken = client === "cli" ? secret() : undefined;
@@ -177,8 +168,7 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
     ): Promise<
       { client: "web"; token: string; session: Session } | { client: "cli"; approvalToken: string }
     > {
-      if (!github || config.mode !== "live" || !code || !state)
-        throw new AuthError(400, "Invalid authorization callback");
+      if (!github || !code || !state) throw new AuthError(400, "Invalid authorization callback");
       const flow = await store.takeFlow(hash(state));
       if (!flow || flow.expiresAt.getTime() <= Date.now())
         throw new AuthError(400, "Authorization is expired or invalid; start login again");
@@ -212,7 +202,6 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
       return { client: "web", ...result };
     },
     async pendingCli(approvalToken: string) {
-      if (config.mode !== "live") throw new AuthError(400, "CLI authorization is unavailable");
       const pending = await store.pendingCli(hash(approvalToken));
       if (!pending || pending.expiresAt.getTime() <= Date.now())
         throw new AuthError(400, "CLI authorization is expired or invalid; start login again");
@@ -229,7 +218,6 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
       decision: "approve" | "reject",
       code?: string,
     ): Promise<{ status: "approved" | "rejected" }> {
-      if (config.mode !== "live") throw new AuthError(400, "CLI authorization is unavailable");
       const pending = await store.pendingCli(hash(approvalToken));
       if (!pending)
         throw new AuthError(400, "CLI authorization is expired or invalid; start login again");
@@ -276,15 +264,7 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
     async logout(token: string) {
       await store.deleteSession(hash(token));
     },
-    async demoLogin() {
-      if (config.mode !== "demo") throw new AuthError(400, "Demo authentication is disabled");
-      const user = { id: "demo-user", login: "demo" };
-      const expiresAt = new Date(Date.now() + 28_800_000);
-      await store.putCredential(user, encrypt("DEMO: no GitHub credential"), expiresAt);
-      return issue(user, expiresAt);
-    },
     async userToken(userId: string) {
-      if (config.mode !== "live") throw new AuthError(400, "Demo has no GitHub credentials");
       requireOwner(userId);
       const credential = await store.credential(userId);
       if (!credential || credential.expiresAt.getTime() <= Date.now())

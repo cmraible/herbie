@@ -72,7 +72,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       request(
         "/api/health",
         z.object({
-          mode: z.enum(["demo", "live"]),
+          mode: z.literal("live"),
           deploymentId: z.string().optional(),
           imageRevision: z.string().optional(),
         }),
@@ -110,13 +110,6 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     installationStart: () => request("/api/auth/install/start", installationStartSchema, {}),
     authPoll: (token: string) =>
       request(`/api/auth/poll?token=${encodeURIComponent(token)}`, authPollSchema),
-    demoLogin: () => request("/api/demo/login", sessionSchema, { client: "web" }),
-    demoCliLogin: () =>
-      request("/api/demo/login", z.object({ token: z.string().min(1), session: sessionSchema }), {
-        client: "cli",
-      }),
     logout: () => request("/api/auth/logout", z.object({ ok: z.literal(true) }), {}),
-    demoAction: (id: string, action: "merge" | "close", branch?: string) =>
-      request(`/api/demo/goals/${z.uuid().parse(id)}/${action}`, goalSchema, { branch }),
   };
 }

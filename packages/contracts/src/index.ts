@@ -47,6 +47,10 @@ export const pullRequestSchema = z.object({
   number: z.number().int(),
   state: z.enum(["open", "merged", "closed"]),
   branch: z.string(),
+  headSha: z
+    .string()
+    .regex(/^[a-f0-9]{40}$/)
+    .optional(),
 });
 export const attemptSchema = z.object({
   id: z.string().uuid(),
@@ -94,7 +98,7 @@ export const eventSchema = z.object({
 });
 export const sessionSchema = z.object({
   user: z.object({ id: z.string(), login: z.string() }),
-  mode: z.enum(["demo", "live"]),
+  mode: z.literal("live"),
 });
 export const repositorySchema = z.object({
   fullName: z.string(),
