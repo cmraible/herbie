@@ -174,3 +174,35 @@ export async function runWorker(store: Store, adapters: Adapters, workerId: stri
     await delay(1000,undefined,{signal}).catch(() => undefined);
   }
 }
+
+/**
+ * Run one coordinator per database while allowing multiple HTTP processes to
+ * overlap during a zero-downtime rollout. PostgreSQL releases the session lock
+ * if the owning process or connection disappears.
+ */
+export async function runExclusiveWorker(store:Store,adapters:Adapters,workerId:string,signal:AbortSignal):Promise<void>{
+  const client=await store.pool.connect();
+  let locked=false;
+  const connectionLost=new AbortController();
+  const onError=(error:Error)=>{logFailure(error,{component:'coordinator-lock'});connectionLost.abort(error);};
+  client.on('error',onError);
+  try{
+    while(!signal.aborted){
+      const result=await client.query<{locked:boolean}>("SELECT pg_try_advisory_lock(hashtext(current_database()),hashtext(current_schema())) AS locked");
+      locked=result.rows[0]?.locked===true;
+      if(locked)break;
+      try{await delay(1000,undefined,{signal});}catch(error){if(!signal.aborted)throw error;}
+    }
+    if(!locked)return;
+    console.log(`Herbie coordinator ${workerId} acquired exclusive database ownership.`);
+    await runWorker(store,adapters,workerId,AbortSignal.any([signal,connectionLost.signal]));
+    if(connectionLost.signal.aborted&&!signal.aborted)throw connectionLost.signal.reason;
+  }finally{
+    client.off('error',onError);
+    if(locked&&!connectionLost.signal.aborted){
+      try{await client.query("SELECT pg_advisory_unlock(hashtext(current_database()),hashtext(current_schema()))");}
+      catch(error){logFailure(error,{component:'coordinator-unlock'});}
+    }
+    client.release(connectionLost.signal.aborted);
+  }
+}
