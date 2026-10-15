@@ -22,9 +22,10 @@ const request = {
   goal: 'Fix addition; $(do-not-execute) `nor-this` \'quoted\'\nsecond line',
 };
 const runtimeNames = ['codex-initialize', 'codex-thread', 'codex-turn', 'codex-process', 'daytona-runner', 'diagnostic-log'];
-const changes = { baseCommit: 'a'.repeat(40), patch: Buffer.from('diff --git a/file.txt b/file.txt\n') };
+const pullRequestBody = 'Fixed addition to sum both operands so totals are correct. Verified with arithmetic tests.';
+const changes = { pullRequestBody, baseCommit: 'a'.repeat(40), patch: Buffer.from('diff --git a/file.txt b/file.txt\n') };
 const completedChanges = { ...changes, verification: { version: 3, repoUrl: request.repoUrl, baseCommit: changes.baseCommit, patchSha256: 'fb6f3d476ca7ea43d75e41b36690c464b706e56179dacf4f1a72208ea895d6b4', goalCompleted: true, sandboxDeleted: true } };
-const artifact = Buffer.from(JSON.stringify({ baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64') }));
+const artifact = Buffer.from(JSON.stringify({ pullRequestBody, baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64') }));
 const runtime = await Promise.all(runtimeNames.map(async name => ({
   name: `${name}.js`,
   code: stripTypeScriptTypes(await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8')),
@@ -155,7 +156,7 @@ async function localFixture(t: TestContext, edits = '') {
   await mkdir(bin);
   const record = join(directory, 'protocol');
   const protocolFixture = fileURLToPath(new URL('./fixtures/goal-attempt.ts', import.meta.url));
-  await writeFile(join(bin, 'codex'), `#!/usr/bin/env node\n${edits}\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`, { mode: 0o700 });
+  await writeFile(join(bin, 'codex'), `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`, { mode: 0o700 });
   sandbox.fs.createFolder.mock.mockImplementation(async path => {
     await mkdir(path, { mode: 0o700 });
     t.after(() => rm(path, { recursive: true, force: true }));
@@ -189,6 +190,7 @@ async function localFixture(t: TestContext, edits = '') {
 test('uploaded runner executes the connected attempt with a local fake Codex and preserves an empty patch', { skip: process.platform === 'win32', timeout: 10_000 }, async t => {
   const { sandbox, run, record, baseCommit } = await localFixture(t);
   const result = await run();
+  assert.equal(result.pullRequestBody, pullRequestBody);
   assert.equal(result.baseCommit, baseCommit);
   assert.deepEqual(result.patch, Buffer.alloc(0));
   assert.equal(result.verification?.version, 3);
@@ -208,6 +210,8 @@ test('uploaded runner executes the connected attempt with a local fake Codex and
     model: 'gpt-6-luna', modelProvider: 'daytona_openai',
   });
   assert.ok(JSON.stringify(paramsFor('turn/start')).includes('externalSandbox'));
+  assert.match(JSON.stringify(paramsFor('turn/start')), /why you chose it/);
+  assert.match(JSON.stringify(paramsFor('turn/start')), /pr-description.md/);
   assert.deepEqual(events.slice(-2), [{ completed: 'completed' }, { eof: true }]);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
@@ -317,7 +321,7 @@ test('accepts the patch byte limit and rejects decoded overflow within the same 
   const { sandbox, run } = await fixture(t);
   for (const size of [MAX_PATCH_BYTES, MAX_PATCH_BYTES + 1]) {
     const patch = Buffer.alloc(size, 'a');
-    const encoded = Buffer.from(JSON.stringify({ baseCommit: changes.baseCommit, patchBase64: patch.toString('base64') }));
+    const encoded = Buffer.from(JSON.stringify({ pullRequestBody, baseCommit: changes.baseCommit, patchBase64: patch.toString('base64') }));
     assert.ok(encoded.length <= MAX_ARTIFACT_BYTES);
     sandbox.fs.downloadFileStream.mock.mockImplementation(async () => Readable.from([encoded]));
     if (size === MAX_PATCH_BYTES) assert.equal((await run()).patch.length, size);
@@ -422,4 +426,25 @@ test('cancellation during sandbox creation deletes the eventual sandbox without 
   create.mock.mockImplementation(async()=>{controller.abort();return sandbox;});
   await assert.rejects(run({signal:controller.signal}),error=>error instanceof DaytonaAttemptError&&error.cleanup==='confirmed');
   assert.equal(sandbox.delete.mock.callCount(),1);assert.equal(sandbox.process.executeCommand.mock.callCount(),0);
+});
+
+for (const body of [undefined, '', '   ', 123, 'x'.repeat(60_001)]) {
+  test(`rejects invalid agent description (${typeof body}, length ${String(body).length}) and deletes sandbox`, async t => {
+    const { sandbox, run } = await fixture(t);
+    sandbox.fs.downloadFileStream.mock.mockImplementation(async () => Readable.from([Buffer.from(JSON.stringify({
+      baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64'), pullRequestBody: body,
+    }))]));
+    await assert.rejects(run(), DaytonaAttemptError);
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}
+
+test('attempts for the same goal retain their own agent-authored descriptions', async t => {
+  const { sandbox, run } = await fixture(t);
+  for (const body of ['Fixed addition so totals are accurate.', 'Added empty-input handling so totals default to zero.']) {
+    sandbox.fs.downloadFileStream.mock.mockImplementation(async () => Readable.from([Buffer.from(JSON.stringify({
+      baseCommit: changes.baseCommit, patchBase64: changes.patch.toString('base64'), pullRequestBody: body,
+    }))]));
+    assert.equal((await run()).pullRequestBody, body);
+  }
 });

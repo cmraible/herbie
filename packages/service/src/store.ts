@@ -18,6 +18,7 @@ const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
 const artifactSchema = z.object({
   baseCommit: z.string(), patchBase64: z.string(),
+  pullRequestBody: z.string().trim().min(1).max(60_000).optional(),
   verification: z.object({ version: z.union([z.literal(2), z.literal(3)]).optional(), repoUrl: z.string(), baseCommit: z.string(), patchSha256: z.string(), goalCompleted: z.literal(true), sandboxDeleted: z.literal(true) }).optional(),
 });
 const jobRow = z.object({
@@ -42,7 +43,7 @@ function requestFingerprint({repository,prompt,name,maxWip}:GoalInput, mode:Goal
 }
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
-  const artifact = encoded ? { baseCommit: encoded.baseCommit, patch: Buffer.from(encoded.patchBase64, 'base64'), ...(encoded.verification ? { verification: encoded.verification } : {}) } : null;
+  const artifact = encoded ? { baseCommit: encoded.baseCommit, patch: Buffer.from(encoded.patchBase64, 'base64'), ...(encoded.pullRequestBody ? { pullRequestBody: encoded.pullRequestBody } : {}), ...(encoded.verification ? { verification: encoded.verification } : {}) } : null;
   return { id: row.id, attemptId: row.id, branch: row.branch, stage: row.stage, artifact, goal };
 }
 async function goalFrom(client: Pool | PoolClient, id: string, lock = false): Promise<Goal | null> {

@@ -26,6 +26,8 @@ type Request = Pick<CreateSandboxFromSnapshotParams, 'secrets' | 'outboundProxyU
 export interface DaytonaAttemptChanges {
   baseCommit: string;
   patch: Buffer;
+  // Optional only for artifacts saved before agent-authored descriptions.
+  pullRequestBody?: string;
   // Issued by the host only after the goal and sandbox deletion succeed.
   verification?: {
     // Version 2 also recorded tests; version 3 records completion and cleanup only.
@@ -162,7 +164,9 @@ export async function runDaytonaAttempt(
     const patch = Buffer.from(artifact.patchBase64, 'base64');
     if (patch.length > MAX_PATCH_BYTES) throw new Error('Repository patch exceeds its byte limit');
     if (patch.toString('base64') !== artifact.patchBase64) throw new Error('Invalid repository patch encoding');
-    changes = { baseCommit: artifact.baseCommit, patch };
+    if (!('pullRequestBody' in artifact) || typeof artifact.pullRequestBody !== 'string'
+      || !artifact.pullRequestBody.trim() || artifact.pullRequestBody.length > 60_000) throw new Error('Invalid pull request description');
+    changes = { baseCommit: artifact.baseCommit, patch, pullRequestBody: artifact.pullRequestBody };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
     diagnostics.push(attemptDiagnostic(cause,stage));

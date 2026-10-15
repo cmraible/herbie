@@ -376,3 +376,12 @@ for(const token of ['', 'with space', 'with\nnewline', 'with\rreturn', 'with\0nu
     await assert.rejects(github.installationToken(11,'alice/project','read'));
   });
 }
+
+test('live publication rejects a legacy artifact without an agent description before creating a PR', async t => {
+  const {github,requests} = await githubFixture(t);
+  const live = createLiveAdapters({apiKey:'fixture-never-used',openaiSecretName:'existing-secret'},github,{userToken:async()=> 'ghu_fixture'});
+  const goal = goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
+  await assert.rejects(live.publish({goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/attempt-1'},
+    {baseCommit:'0'.repeat(40),patch:Buffer.from('patch')},async()=>{}), /no agent-authored pull request description/);
+  assert.equal(requests.filter(request=>request.path==='/repos/alice/project/pulls').length,0);
+});
