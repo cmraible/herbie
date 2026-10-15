@@ -85,6 +85,7 @@ export async function runCiRepairOnce(
       return true;
     }
     await requireLease();
+    await store.beginCiPublication(id, workerId);
     await adapters.publish(execution, changes, requireLease);
     await requireLease();
     await store.finishCiRepair(

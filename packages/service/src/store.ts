@@ -1105,6 +1105,15 @@ export class Store {
     if (result.rowCount !== 1) throw conflict("CI repair lease lost");
   }
 
+  async beginCiPublication(id: string, workerId: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE ci_repairs SET publication_started=true WHERE id=$1 AND lease_owner=$2
+      AND state='running' AND lease_expires_at>clock_timestamp() AND artifact IS NOT NULL`,
+      [id, workerId],
+    );
+    if (result.rowCount !== 1) throw conflict("CI repair lease lost");
+  }
+
   async finishCiRepair(
     id: string,
     workerId: string,
@@ -1129,16 +1138,19 @@ export class Store {
 
   async recoverCiRepairs(): Promise<void> {
     await this.transaction(async (client) => {
-      const expired = await client.query<{
-        goal_id: string;
-      }>(`UPDATE ci_repairs r SET state='failed' FROM jobs j
-        WHERE r.job_id=j.id AND r.state='running' AND r.lease_expires_at<=clock_timestamp() RETURNING j.goal_id`);
+      const expired = await client.query<{ goal_id: string; state: string }>(
+        `UPDATE ci_repairs r SET state=CASE WHEN r.artifact IS NOT NULL AND NOT r.publication_started THEN 'waiting' ELSE 'failed' END
+        FROM jobs j WHERE r.job_id=j.id AND r.state='running' AND r.lease_expires_at<=clock_timestamp()
+        RETURNING j.goal_id,r.state`,
+      );
       for (const row of expired.rows)
         await addEvent(
           client,
           row.goal_id,
-          "ci_repair_failed",
-          "CI repair lease expired. Inspect sandbox cleanup and the PR head before manual recovery; the repair will not be replayed.",
+          row.state === "waiting" ? "ci_repair" : "ci_repair_failed",
+          row.state === "waiting"
+            ? "Recovered saved CI repair before publication; waiting to recheck current CI."
+            : "CI repair lease expired. Inspect sandbox cleanup and the PR head before manual recovery; the repair will not be replayed.",
         );
     });
   }

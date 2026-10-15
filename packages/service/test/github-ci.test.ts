@@ -15,6 +15,7 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   let mergeable: boolean | null = true;
   let headChecks = false,
     mergeChecks = true;
+  let suitePending = false;
   let limited = false;
   const paths: string[] = [];
   const server = createServer(async (req, res) => {
@@ -38,6 +39,15 @@ test("CI context uses current PR head and merge checks, waits for pending checks
         head: { sha: "a".repeat(40), ref: "herbie/fix", repo: { full_name: "owner/repo" } },
         mergeable,
         merge_commit_sha: "b".repeat(40),
+      };
+    else if (path.includes("/check-suites?"))
+      data = {
+        check_suites: [
+          {
+            status: suitePending ? "queued" : "completed",
+            conclusion: suitePending ? null : "success",
+          },
+        ],
       };
     else if (path.includes("/check-runs?"))
       data = {
@@ -129,6 +139,9 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(await get(), null);
   statusPending = false;
   conclusion = "success";
+  suitePending = true;
+  assert.equal(await get(), null, "a pending suite without check runs blocks promotion");
+  suitePending = false;
   assert.equal((await get())?.state, "passed");
   const ready = (head = "a".repeat(40), beforeWrite = async () => {}) =>
     github.markReady("token", "owner/repo", 1, "herbie/fix", head, beforeWrite);

@@ -96,8 +96,8 @@ it cannot undo an external call already in flight.
 - Once current CI passes, the worker marks the tracked draft PR ready for review,
   including PRs that never needed a repair. It rechecks CI, the PR head, owner access,
   and the active goal before the GitHub write. Pending, cancelled, unknown, or absent
-  checks leave the PR as draft; a known test-merge commit must also have CI evidence; at least one check/status must succeed, with other
-  checks successful, neutral, or skipped. Already-ready PRs are left alone. This
+  checks or unfinished check suites leave the PR as draft; a known test-merge commit must also have CI evidence; at least one check/status must succeed, with other
+  checks successful, neutral, or skipped. Already-ready PRs are left alone.
   Readiness intent is saved before the mutation; retries reconcile an already-ready
   PR and record the confirmation once if the response or event write was lost.
   Intent recovery runs independently of CI eligibility, including closed PRs and
@@ -109,7 +109,7 @@ it cannot undo an external call already in flight.
 - CI polling prioritizes the least recently reviewed PR. Failed reads wait for the
   next periodic poll, so expired credentials cannot monopolize the queue.
 - PostgreSQL deduplicates repairs by PR job and head SHA and allows at most three
-  sessions per PR. A failed/expired repair stops further automatic repairs for that
+  sessions per PR. Saved artifacts from expired leases can resume until publication starts. A failed repair or a lease expired during execution/publication stops further automatic repairs for that
   PR; ambiguous pushes are not replayed. A definitive stale-head rejection discards
   the repair without blocking a later head. The goal event feed records repair outcomes,
   and `ci_repairs.artifact` retains captured work. Repairs do not consume another WIP

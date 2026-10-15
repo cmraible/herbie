@@ -24,6 +24,8 @@ for (const outcome of [
   "rerun-passed",
   "rerun-changed",
   "rerun-closed",
+  "rerun-crash",
+  "rerun-publishing-crash",
 ] as const) {
   test(`durable CI repair: ${outcome}`, async (t) => {
     const database = process.env.HERBIE_TEST_DATABASE_URL;
@@ -200,6 +202,29 @@ for (const outcome of [
     }
     assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
     if (outcome.startsWith("rerun-")) {
+      if (outcome === "rerun-crash" || outcome === "rerun-publishing-crash") {
+        const id = await store.startCiRepair(job.id, head, "interrupted");
+        assert.ok(id);
+        if (outcome === "rerun-publishing-crash") await store.beginCiPublication(id, "interrupted");
+        await store.pool.query(
+          "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
+        );
+        await store.recoverCiRepairs();
+        assert.equal(
+          (await store.pool.query("SELECT state FROM ci_repairs")).rows[0].state,
+          outcome === "rerun-crash" ? "waiting" : "failed",
+        );
+        rerunning = false;
+        await store.requestCiReview();
+        await runCiRepairOnce(store, adapters, "recovered");
+        assert.equal(attempts, 1, "saved work never launches another session");
+        assert.equal(
+          pushes,
+          outcome === "rerun-crash" ? 1 : 0,
+          "only pre-publication crashes may resume",
+        );
+        return;
+      }
       if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
       else {
         if (outcome === "rerun-passed")

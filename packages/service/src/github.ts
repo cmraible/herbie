@@ -323,6 +323,33 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       ]),
     ];
     for (const sha of refs) {
+      // A fast check can finish before another suite has created its check runs.
+      for (let page = 1; ; page++) {
+        if (page > 10) throw new Error("CI suite listing exceeds supported limit");
+        const suites = z
+          .object({
+            check_suites: z.array(
+              z.object({
+                status: z.string(),
+                conclusion: z.string().nullable(),
+              }),
+            ),
+          })
+          .parse(
+            await request(
+              `/repos/${repository}/commits/${sha}/check-suites?per_page=100&page=${page}`,
+              token,
+            ),
+          ).check_suites;
+        if (suites.some((suite) => suite.status !== "completed")) pending = true;
+        if (
+          suites.some(
+            (suite) => !["success", "neutral", "skipped"].includes(suite.conclusion ?? ""),
+          )
+        )
+          passing = false;
+        if (suites.length < 100) break;
+      }
       let evidence = false;
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI check listing exceeds supported limit");
