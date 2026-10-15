@@ -2,7 +2,7 @@ import {registerDiagnosticSecret} from './diagnostic-log.js';
 import { Daytona } from '@daytona/sdk';
 import { runDaytonaAttempt } from '@herbie/loop/daytona-attempt';
 import { publishPatch } from '@herbie/loop/publish-patch';
-import {KnownAttemptFailure,type Adapters,type PublicationPhase} from './adapters.js';
+import {KnownAttemptFailure,PublicationBlockedError,type Adapters,type PublicationPhase} from './adapters.js';
 import type { Auth } from './auth.js';
 import type { Github } from './github.js';
 
@@ -51,7 +51,7 @@ Inspect these branches before choosing your change. Make one small, independentl
       const existing = await github.findPullRequest(token,access.repository,execution.branch);
       if (existing) return existing;
       await requireLease();
-      if (!changes.pullRequestBody?.trim()) throw new KnownAttemptFailure('Saved artifact has no agent-authored pull request description');
+      if (!changes.pullRequestBody?.trim()) throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description');
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
       const published = await publishPatch(request=>github.openPullRequest(token,request,requireLease), {
         beforeWrite:requireLease,

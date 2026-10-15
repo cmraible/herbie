@@ -22,6 +22,7 @@ export interface PullRequest {
 export type PublicationPhase = 'preflight_reconciliation'|'authorization'|'installation_token'|'existing_pr_check'|'git_preparation'|'branch_push'|'pull_request_creation'|'publication_confirmation'|'state_persistence';
 export type PublicationRetryCheck = 'ready'|'pull_request_exists'|'branch_exists'|'base_changed';
 export class KnownAttemptFailure extends Error {}
+export class PublicationBlockedError extends Error {}
 export interface Adapters {
   mode: 'demo' | 'live';
   authorize(userId: string, repository: string): Promise<RepositoryAccess>;

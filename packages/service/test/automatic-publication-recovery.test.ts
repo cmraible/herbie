@@ -6,7 +6,7 @@ import {Store} from '../src/store.js';
 import {runWorkerOnce} from '../src/worker.js';
 import {publicationBackoffMs} from '../src/publication-backoff.js';
 import {createDemoAdapters} from '../src/demo.js';
-import type {Adapters,PullRequest,PublicationRetryCheck} from '../src/adapters.js';
+import {PublicationBlockedError,type Adapters,type PullRequest,type PublicationRetryCheck} from '../src/adapters.js';
 
 async function fixture(t:TestContext){
   const connectionString=process.env.HERBIE_TEST_DATABASE_URL;
@@ -146,4 +146,17 @@ test('identical capped retries update status without flooding the event feed; ch
   await f.due();await runWorkerOnce(f.store,f.adapters,'recovered');
   assert.equal((await events()).filter(e=>e.type==='pull_request_opened').length,1);
   assert.equal((await f.store.getGoal(f.goal.id))?.state,'awaiting_review');
+});
+
+for (const recovering of [false, true]) test(`permanent publication failures stop automatic recovery (recovering: ${recovering})`, async t => {
+  const f = await fixture(t); if (!f) return;
+  if (recovering) await f.legacy();
+  f.adapters.publish = async () => { throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description'); };
+  await runWorkerOnce(f.store, f.adapters, 'publisher');
+  const row = await f.row();
+  assert.equal(row.publication_blocked, true);
+  assert.ok(row.artifact);
+  assert.match((await f.store.getGoal(f.goal.id))?.error ?? '', /no agent-authored pull request description/);
+  await f.due();
+  assert.equal(await runWorkerOnce(f.store, f.adapters, 'later'), false);
 });
