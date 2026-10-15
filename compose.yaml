@@ -1,18 +1,64 @@
+name: herbie-local-live
+
 services:
   postgres:
     image: postgres:17-alpine
+    command: postgres -c listen_addresses=127.0.0.1
+    # Share loopback with Herbie; live mode requires TLS for non-loopback databases.
+    ports:
+      - "127.0.0.1:${HERBIE_LOCAL_PORT:-8787}:8787"
+    networks:
+      default:
+        aliases: [herbie]
     environment:
       POSTGRES_USER: herbie
       POSTGRES_PASSWORD: herbie-local-only
       POSTGRES_DB: herbie
-    ports:
-      - "127.0.0.1:55432:5432"
     volumes:
-      - herbie-postgres:/var/lib/postgresql/data
+      - postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U herbie"]
+      test: ["CMD-SHELL", "pg_isready -U herbie -d herbie"]
       interval: 2s
       timeout: 2s
       retries: 15
+
+  herbie:
+    build:
+      context: .
+    init: true
+    network_mode: service:postgres
+    stop_grace_period: 40m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HERBIE_MODE: live
+      HERBIE_HOST: 0.0.0.0
+      HERBIE_PORT: 8787
+      DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:5432/herbie
+      HERBIE_PUBLIC_URL: ${HERBIE_PUBLIC_URL:?Set HERBIE_PUBLIC_URL}
+      HERBIE_ALLOWED_GITHUB_USER_ID: ${HERBIE_ALLOWED_GITHUB_USER_ID:?Set your numeric GitHub user ID}
+      HERBIE_CREDENTIAL_KEY: ${HERBIE_CREDENTIAL_KEY:?Set HERBIE_CREDENTIAL_KEY}
+      HERBIE_EXECUTION_ENABLED: ${HERBIE_EXECUTION_ENABLED:-false}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET}
+      GITHUB_PRIVATE_KEY: ${GITHUB_PRIVATE_KEY:?Set the test GitHub App PEM}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?Set GITHUB_WEBHOOK_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set the service OpenAI API key}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:?Set a test Daytona API key}
+      DAYTONA_API_URL: ${DAYTONA_API_URL:-https://app.daytona.io/api}
+      HERBIE_DAYTONA_OPENAI_SECRET: ${HERBIE_DAYTONA_OPENAI_SECRET:?Set the Daytona organization secret name}
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      herbie:
+        condition: service_healthy
+
 volumes:
-  herbie-postgres:
+  postgres:
