@@ -226,7 +226,10 @@ for (const phase of [
       assert.doesNotMatch(error.message, /private/);
       return true;
     });
-    assert.equal(sandbox.delete.mock.callCount(), 1);
+    assert.equal(
+      sandbox.delete.mock.callCount(),
+      phase.endsWith("-and-delete") || phase === "delete" ? 3 : 1,
+    );
     if (phase === "delete" || phase.endsWith("-and-delete"))
       assert.equal(
         reports.some((message) => message.startsWith("Deletion confirmed")),
@@ -742,7 +745,7 @@ for (const deleteFails of [false, true])
           error instanceof DaytonaAttemptError &&
           error.cleanup === (deleteFails ? "unconfirmed" : "confirmed"),
       );
-      assert.equal(sandbox.delete.mock.callCount(), 1);
+      assert.equal(sandbox.delete.mock.callCount(), deleteFails ? 3 : 1);
       assert.equal(sandbox.fs.downloadFileStream.mock.callCount(), 0);
     },
   );

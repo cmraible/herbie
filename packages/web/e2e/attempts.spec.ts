@@ -58,6 +58,7 @@ test("attempt accordion shows independent statuses, PRs and events with one pane
   await page.goto(`/#${goalId}`);
   const one = page.getByRole("button", { name: "Run 1 Merged" });
   const two = page.getByRole("button", { name: "Run 2 Ready for review" });
+  await two.click();
   await expect(two).toHaveAttribute("aria-expanded", "true");
   await expect(one).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
