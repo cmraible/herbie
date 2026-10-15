@@ -164,7 +164,7 @@ an integrated paid attempt. Before using live mode:
    encrypted credentials, or Git child environments.
 2. Register/configure a GitHub App with **Contents: read/write**, **Pull requests:
    read/write**, **Checks: read**, **Commit statuses: read**, **Actions: read**,
-   and **Metadata: read**. Use callback
+   and **Metadata: read**. Keep the existing callback
    `https://YOUR-HOST/api/auth/callback`, webhook
    `https://YOUR-HOST/api/webhooks/github`, and subscribe to **Pull request**,
    **Check run**, **Check suite**, and **Status** events. Existing installations must
@@ -204,28 +204,39 @@ For the Node container and private Supabase deployment, follow
 [the portable deployment runbook](portable-deployment.md), including draining and
 rollout instructions for changes to environment variables.
 
-GitHub OAuth access tokens are encrypted in Postgres; session tokens are hashed.
-Sessions and user authorization expire within eight hours in this slice; login
-again before new work. Automatic OAuth refresh is follow-up work. A job that
-cannot reauthorize enters attention rather than performing writes. Reconciliation
-of existing PRs remains independent of client sessions. Git write/API tokens are
-minted per publication, limited to one repository, and kept server-side in child
-process environment only. No global Git credential helper or identity is changed.
-The coding sandbox receives no GitHub write credential.
+Live sign-in and sessions use Better Auth with GitHub as the only provider.
+Passwords, email registration, and account linking are disabled. Browser and CLI
+sessions expire after eight hours without sliding renewal. GitHub access and
+refresh tokens are encrypted in Postgres; Better Auth session tokens are stored
+in its private database tables. Provider tokens are available only to the server;
+Better Auth account and token endpoints are not exposed over HTTP. Better Auth
+refreshes GitHub App access tokens when needed and a refresh token is available.
+Repository permissions are still checked before execution and publication.
+Installation tokens stay server-side and repository-scoped; the coding sandbox
+receives no GitHub write credential.
 
-CLI login prints a service URL and a one-time terminal code. The GitHub callback
-only opens a pending approval page: it does not release a CLI bearer or activate
-the pending GitHub credential. The browser shows the account, service, expiry,
-and access being granted. Enter the code from your own terminal and choose
-**Approve this CLI**, or choose **Reject request**. Approval requires the original
-browser cookie, CSRF token, and matching terminal code; wrong codes consume and
-reject the request. Pending requests expire after ten minutes and approval/poll
-delivery are single use. Do not approve unexpected requests or codes sent by
-someone else. This intent check does not prevent a user from being socially
-engineered into approving an attacker's terminal.
+CLI login uses Better Auth device authorization. The CLI prints a service URL
+and a terminal code; signing in with GitHub creates a browser session but does
+not authorize the CLI. Enter the code from your own terminal and choose
+**Approve this CLI** or **Reject request**. Both decisions require a signed-in
+owner, exact Origin, browser CSRF cookie/token, and the terminal code. Requests
+expire ten minutes after creation. Approval releases a separate CLI session once;
+rejection and expiry release none. Codes are never prefilled from a URL. An
+invalid code cannot authorize a request; the form can be retried with the correct
+code. Do not approve unexpected requests or codes sent by someone else.
 
-On upgrade, pending CLI flows created before this consent gate fail closed; start
-login again. Already-issued sessions are not automatically revoked by migration.
+The existing GitHub callback URL and App permissions remain valid. For private
+email accounts without email-read permission, Better Auth stores a deterministic
+GitHub-ID noreply placeholder; it is never used for email sign-in or account linking.
+When upgrading from custom auth, startup migrates the
+version-pinned Better Auth tables inside the private `herbie` schema, under an
+advisory lock and the existing schema protection. `HERBIE_CREDENTIAL_KEY` derives
+a separate Better Auth secret, so no additional secret is required. Existing
+custom sessions and pending CLI grants are not accepted: sign in again on web
+and CLI. Goals retain their original numeric GitHub owner IDs. Old auth tables
+remain for local demo/legacy compatibility; live authentication does not read
+those sessions or credentials. Drain old processes before rollout to avoid
+mixing authentication versions.
 
 GitHub documentation: [App user access tokens and PKCE](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app),
 [user-accessible installation repositories](https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-user-access-token).

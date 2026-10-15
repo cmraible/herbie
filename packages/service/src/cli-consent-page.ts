@@ -17,18 +17,19 @@ export function cliConsentPage(input: {
   expiresAt: Date;
   csrfToken: string;
   origin: string;
+  deviceFlow?: boolean;
 }): string {
   return document(
     "Approve a CLI sign-in?",
     `<h1>Approve a CLI sign-in?</h1>
 <p>GitHub identified your account. The waiting CLI has <strong>not</strong> been authorized.</p>
 <div class="warning"><strong>Only approve if you started <code>herbie login</code> on your own computer.</strong><p>Enter the code shown in that terminal. Never enter a code someone else sent you or approve an unexpected request.</p></div>
-<dl><dt>GitHub account</dt><dd>@${escape(input.login)}</dd><dt>Service</dt><dd>${escape(input.origin)}</dd><dt>Request</dt><dd>Herbie CLI sign-in</dd><dt>Expires</dt><dd>${escape(input.expiresAt.toISOString())}</dd></dl>
+<dl><dt>GitHub account</dt><dd>@${escape(input.login)}</dd><dt>Service</dt><dd>${escape(input.origin)}</dd><dt>Request</dt><dd>Herbie CLI sign-in</dd><dt>Expires</dt><dd>${input.deviceFlow ? "10 minutes after the CLI request" : escape(input.expiresAt.toISOString())}</dd></dl>
 <p>Approval lets this CLI read and manage your Herbie goals and start work on repositories allowed by your GitHub App installation. Starting work can incur model and sandbox charges.</p>
 <form method="post" action="/api/auth/cli" autocomplete="off"><input type="hidden" name="csrfToken" value="${escape(input.csrfToken)}">
 <label for="user-code">Terminal confirmation code</label><input id="user-code" name="userCode" required minlength="9" maxlength="9" pattern="[A-Z2-7]{4}-[A-Z2-7]{4}" placeholder="ABCD-EFGH" autocapitalize="characters" spellcheck="false" autocomplete="off">
-<small>The code is shown only by the CLI that requested access. A wrong code rejects this request.</small>
-<button type="submit" name="decision" value="approve">Approve this CLI</button><button type="submit" name="decision" value="reject" formnovalidate>Reject request</button></form>`,
+<small>The code is shown only by the CLI that requested access. ${input.deviceFlow ? "Enter the code to approve or reject its request." : "A wrong code rejects this request."}</small>
+<button type="submit" name="decision" value="approve">Approve this CLI</button><button type="submit" name="decision" value="reject" ${input.deviceFlow ? "" : "formnovalidate"}>Reject request</button></form>`,
   );
 }
 export function cliConsentResult(approved: boolean): string {

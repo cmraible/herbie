@@ -14,6 +14,7 @@
     "@daytona/sdk": "0.220.0",
     "@herbie/contracts": "workspace:*",
     "@herbie/loop": "workspace:*",
+    "better-auth": "1.7.10",
     "pg": "^8.16.3",
     "zod": "^4.3.6"
   },
