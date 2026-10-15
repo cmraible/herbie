@@ -103,15 +103,13 @@ test("missing database configuration is rejected by the schema", async () => {
 });
 
 test("OpenAI credentials are required in live mode even when execution is disabled", async () => {
-  assert.equal((await readConfig({ DATABASE_URL: live.DATABASE_URL })).openaiApiKey, undefined);
+  await assert.rejects(readConfig({ DATABASE_URL: live.DATABASE_URL }));
   assert.equal(
     (await readConfig({ ...live, OPENAI_API_KEY: "fixture-key" })).openaiApiKey,
     "fixture-key",
   );
-  assert.equal(
-    (await readConfig({ DATABASE_URL: live.DATABASE_URL, OPENAI_API_KEY: "fixture-key" }))
-      .openaiApiKey,
-    undefined,
+  await assert.rejects(
+    readConfig({ DATABASE_URL: live.DATABASE_URL, OPENAI_API_KEY: "fixture-key" }),
   );
   for (const value of [undefined, "", "   "]) {
     for (const execution of ["true", "false"])
