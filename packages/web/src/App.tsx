@@ -16,6 +16,7 @@ function initialDraft() { try { return draftSchema.parse(JSON.parse(sessionStora
 function Badge({goal}: {goal: Goal}) { return <span className="badge">{labels[goal.state]}</span>; }
 
 export function App() {
+  const [revision,setRevision] = useState<string|null>(null);
   const [mode,setMode] = useState<'demo'|'live'|null>(null);
   const [session,setSession] = useState<Session|null>(null);
   const [sessionState,setSessionState] = useState<'pending'|'signed-in'|'signed-out'|'error'>('pending');
@@ -58,6 +59,7 @@ export function App() {
       const healthRequest = api.health().then(health => {
         if (!alive) return;
         setMode(health.mode); setHealthState('ready');
+        setRevision([health.deploymentId,health.imageRevision].find(value => value && /^[a-f0-9]{40}$/i.test(value)) ?? null);
       }).catch(failure => {
         if (!alive) return;
         setHealthState('error'); setStartupError(message(failure));
@@ -286,6 +288,7 @@ export function App() {
         {creating && <section aria-label="New goal"><form onSubmit={event => { void createGoal(event); }}><RepositorySelect repositories={repositories} value={draft.repository} onChange={repository => edit({repository})} loading={repositoryLoading} disabled={busy} onRefresh={() => setRepositoryRefresh(current => current+1)}/><div className="repository-discovery" role={repositoryLoading ? 'status' : undefined}>{repositoryLoading && <span>Checking repository access…</span>}{mode === 'live' && <button type="button" className="text-button" disabled={busy} onClick={() => { void connectRepositories(); }}>Add repositories</button>}</div>{repositoryError && <div className="status-message" role="alert">{repositoryError}</div>}{repositories.length === 0 && !repositoryLoading && !repositoryError && <div className="status-message">No repositories available. Connect the GitHub App to a public repository you can access.</div>}<label>What should Herbie work on?<textarea required rows={4} maxLength={8000} placeholder="For example, add validation to the signup form and cover it with tests." value={draft.prompt} onChange={event => edit({prompt:event.target.value})}/></label>{mode === 'demo' && <label className="checkbox-label"><input type="checkbox" checked={draft.prompt.includes('[demo:fail]')} onChange={event => edit({prompt:event.target.checked ? `[demo:fail] ${draft.prompt}` : draft.prompt.replace('[demo:fail]','').trim()})}/><span>Simulate an attempt failure</span></label>}{formError && <div className="status-message" role="alert">{formError}</div>}<div className="form-actions"><button className="primary" type="submit" disabled={busy || !goalsLoaded || repositoryLoading || !repositoriesResolved || repositories.length === 0 || Boolean(repositoryError)}>{busy ? 'Starting…' : 'Start goal'}</button></div></form></section>}
       </>}
     </main>
+    <footer className="version-footer">{revision ? <>Version <a href={`https://github.com/cmraible/herbie/commit/${revision}`} title={revision} target="_blank" rel="noreferrer"><code>{revision.slice(0,7)}</code></a></> : 'Version unavailable'}</footer>
     {rename && <div className="modal-backdrop"><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><h2 id="rename-title">Rename goal</h2><form onSubmit={event => { void renameGoal(event); }}><label>Goal name<input autoFocus required disabled={busy} value={rename.name} onChange={event => { setRename({...rename,name:event.target.value}); setRenameError(null); }}/></label>{renameError && <div className="status-message" role="alert">{renameError}</div>}<div className="dialog-footer"><button type="button" disabled={busy} onClick={() => setRename(null)}>Cancel</button><button className="primary" type="submit" disabled={busy || !rename.name.trim()}>{busy ? 'Saving…' : 'Save name'}</button></div></form></section></div>}
   </div>;
 }

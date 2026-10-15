@@ -14,6 +14,37 @@ async function routeSignedIn(page:Page,goals:unknown[]=[fixtureGoal]){
   await page.route('**/api/goals/*/events**',route=>json(route,[]));
 }
 
+test('the deployed commit stays accessible across views',async({page})=>{
+  const revision='a'.repeat(40);
+  await routeSignedIn(page);
+  await page.route('**/api/health',route=>json(route,{...health,deploymentId:revision,imageRevision:'b'.repeat(40)}));
+  await page.goto('/');
+  const link=page.getByRole('contentinfo').getByRole('link',{name:revision.slice(0,7)});
+  await expect(link).toHaveAttribute('href',`https://github.com/cmraible/herbie/commit/${revision}`);
+  await expect(link).toHaveAttribute('title',revision);
+  await page.getByRole('button',{name:/Keep loaded work visible/}).click();
+  await expect(link).toBeVisible();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await expect(link).toBeVisible();
+});
+
+test('the welcome footer falls back to the image commit',async({page})=>{
+  const revision='b'.repeat(40);
+  await page.route('**/api/health',route=>json(route,{...health,deploymentId:'local',imageRevision:revision}));
+  await page.route('**/api/session',route=>json(route,null,401));
+  await page.goto('/');
+  await expect(page.getByRole('contentinfo').getByRole('link')).toHaveAttribute('href',`https://github.com/cmraible/herbie/commit/${revision}`);
+});
+
+test('missing revision metadata does not produce a broken commit link',async({page})=>{
+  await page.route('**/api/health',route=>json(route,{...health,imageRevision:'1'}));
+  await page.route('**/api/session',route=>json(route,null,401));
+  await page.goto('/');
+  await expect(page.getByRole('button',{name:'Enter demo'})).toBeVisible();
+  await expect(page.getByRole('contentinfo')).toHaveText('Version unavailable');
+  await expect(page.getByRole('contentinfo').getByRole('link')).toHaveCount(0);
+});
+
 test('the welcome copy renders immediately while health and session are pending',async({page})=>{
   let release!:()=>void;
   const gate=new Promise<void>(resolve=>{release=resolve;});
