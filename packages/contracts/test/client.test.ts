@@ -33,6 +33,7 @@ for (const maxWip of [undefined,1,2]) test(`goal creation preserves rollout comp
   const bodies: unknown[] = [];
   const id = '271de1c7-b32c-43b7-a61f-f0a2a1d53c0d';
   await withServer((request,response) => {
+    assert.equal(request.headers['x-herbie-goal-version'],'2');
     let body = '';
     request.setEncoding('utf8');
     request.on('data',chunk => { body += chunk; });

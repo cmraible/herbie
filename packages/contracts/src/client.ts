@@ -9,7 +9,7 @@ export class ApiError extends Error {
 export function createClient(options: { baseUrl?: string; token?: string; origin?: string } = {}) {
   const baseUrl = options.baseUrl?.replace(/\/$/, '') ?? '';
   async function request<T>(path: string, schema: z.ZodType<T>, body?: unknown, requestId?: string): Promise<T> {
-    const headers = new Headers({accept: 'application/json'});
+    const headers = new Headers({accept: 'application/json', 'x-herbie-goal-version': '2'});
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (body !== undefined && options.origin) headers.set('origin', options.origin);
     if (options.token) headers.set('authorization', `Bearer ${options.token}`);

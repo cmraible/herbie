@@ -26,3 +26,5 @@ Goals accept a repository and prompt, with an optional name and positive integer
 input or independent test run. The agent may run tests during its work; repository
 CI and human review validate the draft PR. Publication requires matching patch,
 repository, completion and cleanup evidence, without asserting tests passed.
+
+Goal responses use the legacy shape unless the client sends `X-Herbie-Goal-Version: 2`. Version 2 includes `maxWip` and `pullRequests` on every goal response (list, status, creation, and controls). The shared web/CLI client sends this header; older servers ignore it, and new clients accept their legacy responses.

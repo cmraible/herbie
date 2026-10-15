@@ -9,7 +9,8 @@ import {createDemoAdapters} from '../src/demo.js';
 import {createApiServer} from '../src/http.js';
 import {goalSchema,sessionSchema} from '@herbie/contracts';
 
-test('HTTP sessions protect durable goals, preserve idempotency and enforce cookie origin checks',async t=>{
+for(const version of [undefined,'2']) test(`HTTP goal contracts, sessions, idempotency and origin checks (version: ${version ?? 'legacy'})`,async t=>{
+  const responseSchema=version ? goalSchema : goalSchema.omit({maxWip:true,pullRequests:true}).strict();
   const database=process.env.HERBIE_TEST_DATABASE_URL;
   if(!database) return t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration');
   const schema=`http_${randomUUID().replaceAll('-','')}`;
@@ -27,25 +28,34 @@ test('HTTP sessions protect durable goals, preserve idempotency and enforce cook
   const login=await fetch(`${base}/api/demo/login`,{method:'POST',headers:{'content-type':'application/json',origin:'http://localhost:8787'},body:'{}'});
   assert.equal(login.status,200);sessionSchema.parse(await login.json());
   const cookie=login.headers.get('set-cookie')?.split(';')[0];assert.ok(cookie);
-  const input={repository:'demo/example',name:'Addition fix',prompt:'Make addition correct'};
+  const input={repository:'demo/example',name:'Addition fix',prompt:'Make addition correct',...(version ? {maxWip:2} : {})};
   const key=randomUUID();
-  const headers={'content-type':'application/json',cookie,'idempotency-key':key};
+  const versionHeaders:Record<string,string>=version ? {'x-herbie-goal-version':version} : {};
+  const headers={'content-type':'application/json',cookie,'idempotency-key':key,...versionHeaders};
   assert.equal((await fetch(`${base}/api/goals`,{method:'POST',headers,body:JSON.stringify(input)})).status,403);
   const request=()=>fetch(`${base}/api/goals`,{method:'POST',headers:{...headers,origin:'http://localhost:8787'},body:JSON.stringify(input)});
-  const first=await request();assert.equal(first.status,201);const goal=goalSchema.parse(await first.json());
-  const replay=await request();assert.equal(replay.status,200);assert.equal(goalSchema.parse(await replay.json()).id,goal.id);
+  const first=await request();assert.equal(first.status,201);const goal=responseSchema.parse(await first.json());
+  const replay=await request();assert.equal(replay.status,200);assert.equal(responseSchema.parse(await replay.json()).id,goal.id);
   assert.equal(goal.name,'Addition fix');
+  const status=responseSchema.parse(await (await fetch(`${base}/api/goals/${goal.id}`,{headers})).json());
+  assert.deepEqual(status,goal);
+  const goals=responseSchema.array().parse(await (await fetch(`${base}/api/goals`,{headers})).json());
+  assert.deepEqual(goals,[goal]);
+  if(version){
+    assert.equal(goalSchema.parse(goal).maxWip,2);
+    assert.deepEqual(goalSchema.parse(goal).pullRequests,[]);
+  }
   const rename=(name:string, extraHeaders={})=>fetch(`${base}/api/goals/${goal.id}/name`,{method:'POST',headers:{...headers,origin:'http://localhost:8787',...extraHeaders},body:JSON.stringify({name})});
   assert.equal((await rename('Blocked',{origin:'http://other.example'})).status,403);
   assert.equal((await rename('   ')).status,400);
-  const renamed=goalSchema.parse(await (await rename('Better addition')).json());
+  const renamed=responseSchema.parse(await (await rename('Better addition')).json());
   assert.equal(renamed.name,'Better addition');
   assert.equal(renamed.prompt,input.prompt);
-  assert.equal(goalSchema.parse(await (await request()).json()).name,'Better addition');
-  const paused=await fetch(`${base}/api/goals/${goal.id}/pause`,{method:'POST',headers:{cookie,origin:'http://localhost:8787'}});
-  assert.equal(goalSchema.parse(await paused.json()).state,'paused');
-  const cancel=()=>fetch(`${base}/api/goals/${goal.id}/cancel`,{method:'POST',headers:{cookie,origin:'http://localhost:8787'}});
-  assert.equal(goalSchema.parse(await (await cancel()).json()).state,'cancelled');
-  assert.equal(goalSchema.parse(await (await cancel()).json()).state,'cancelled');
+  assert.equal(responseSchema.parse(await (await request()).json()).name,'Better addition');
+  const paused=await fetch(`${base}/api/goals/${goal.id}/pause`,{method:'POST',headers:{cookie,origin:'http://localhost:8787',...versionHeaders}});
+  assert.equal(responseSchema.parse(await paused.json()).state,'paused');
+  const cancel=()=>fetch(`${base}/api/goals/${goal.id}/cancel`,{method:'POST',headers:{cookie,origin:'http://localhost:8787',...versionHeaders}});
+  assert.equal(responseSchema.parse(await (await cancel()).json()).state,'cancelled');
+  assert.equal(responseSchema.parse(await (await cancel()).json()).state,'cancelled');
   assert.equal((await fetch(`${base}/api/goals/${randomUUID()}`,{headers:{cookie}})).status,404);
 });

@@ -92,7 +92,8 @@ release check, not a claim that a generic secret scan can prove absence of secre
   During an upgrade from before `maxWip` support, keep new goals at the default
   WIP of 1 until every HTTP replica is upgraded. Clients omit that default field
   for older strict APIs; larger limits require the new API and are never silently
-  downgraded. A database trigger mirrors old coordinators' PR writes into job
+  downgraded. New clients request version 2 goal responses; older clients keep
+  receiving the original shape without the new fields. A database trigger mirrors old coordinators' PR writes into job
   history throughout the overlap, including publications after migration.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
   Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
