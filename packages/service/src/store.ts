@@ -180,6 +180,20 @@ export class Store {
       &&!goal.stopRequested&&job.artifact&&hasValidPublicationEvidence(goal.repository,job.artifact))return {kind:'retryable',job};
     return {kind:'unavailable',goal};
   }
+  async retryAttempt(id:string,ownerId:string):Promise<Goal>{
+    return this.transaction(async client=>{
+      const goal=await goalFrom(client,id,true);
+      if(!goal||goal.ownerId!==ownerId)throw new StoreError(404,'Goal not found');
+      if(['queued','running','awaiting_review'].includes(goal.state)&&!goal.stopRequested)return goal;
+      if(!['failed','needs_attention'].includes(goal.state)||goal.stopRequested)throw conflict('Only failed or interrupted goals can be retried');
+      const {rows}=await client.query<{stage:string}>("SELECT stage FROM jobs WHERE goal_id=$1 FOR UPDATE",[id]);
+      if(rows.some(row=>['queued','running','ready','publishing'].includes(row.stage)))throw conflict('Saved work must finish publication recovery before a new attempt can start');
+      await client.query("UPDATE goals SET state='queued',error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",[id]);
+      await advanceGoal(client,{...goal,state:'queued',error:null,stopRequested:null});
+      await addEvent(client,id,'retry','Retry requested. A fresh attempt will run when capacity is available; previous work and activity are retained.');
+      return (await goalFrom(client,id))!;
+    });
+  }
   async listGoals(ownerId: string): Promise<Goal[]> {
     const result = await this.pool.query<Record<string, unknown>>(`SELECT ${goalColumns} FROM goals WHERE owner_id=$1 ORDER BY created_at DESC`, [ownerId]);
     return result.rows.map(row => databaseGoal.parse(row));
@@ -393,7 +407,7 @@ export class Store {
         const uncertain = row.stage === 'running' || row.stage === 'publishing';
         await client.query("UPDATE jobs SET stage=CASE WHEN stage='running' THEN 'needs_attention' ELSE stage END,lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1", [id]);
         if (uncertain) {
-          const error = row.stage === 'running' ? 'Worker lease expired during an attempt; sandbox cleanup and outcome require operator attention. The paid attempt will not automatically repeat.' : 'Worker lease expired during publication; checking the existing branch before any further action.';
+          const error = row.stage === 'running' ? 'Worker connection was lost during an attempt. Use Retry to start a new attempt. The previous sandbox cleanup is unconfirmed; the paid attempt will not automatically repeat.' : 'Worker lease expired during publication; checking the existing branch before any further action.';
           await client.query("UPDATE goals SET state='needs_attention',error=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, error]);
           await addEvent(client, goal.id, 'recovery_required', error);
         } else await addEvent(client, goal.id, 'artifact_recovered', 'Recovered saved artifact after worker lease expired');

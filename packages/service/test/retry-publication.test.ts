@@ -172,3 +172,71 @@ for(const remote of ['pull_request_exists','branch_exists','error'] as const)tes
   assert.equal((await setup.store.getGoal(goal.id))?.cleanupStatus,'needs_attention');
   assert.equal((await setup.store.pool.query('SELECT stage FROM jobs WHERE id=$1',[jobId])).rows[0].stage,'cancelled');
 });
+
+for(const needsAttention of [false,true])test(`retry recovers ${needsAttention?'interrupted':'failed'} attempts without duplicating work`,async t=>{
+  const setup=await fixture(t);if(!setup)return;
+  const {store,base,session}=setup;
+  const {goal}=await store.createGoal('7',{repository,name:'Retry attempt',prompt:'Finish the task'},'live',randomUUID());
+  const old=await store.claim('old-worker',30_000,'live');assert.ok(old);
+  await store.fail(old.id,'old-worker','Synthetic failure',needsAttention);
+  const headers=await session();const path=base+'/api/goals/'+goal.id+'/retry';
+  const responses=await Promise.all([fetch(path,{method:'POST',headers}),fetch(path,{method:'POST',headers})]);
+  for(const response of responses){assert.equal(response.status,200);const result=await response.json();assert.equal(result.state,'queued');assert.equal(result.error,null);}
+  const next=await store.claim('new-worker',30_000,'live');assert.ok(next);
+  assert.notEqual(next.id,old.id);assert.notEqual(next.branch,old.branch);assert.equal(next.goal.id,goal.id);assert.equal(next.goal.attemptCount,2);
+  assert.equal(await store.claim('duplicate',30_000,'live'),null);
+  await assert.rejects(store.saveArtifact(old.id,'old-worker',{baseCommit:'a'.repeat(40),patch:Buffer.from('stale')}));
+  assert.equal((await store.events(goal.id)).filter(e=>e.type==='retry').length,1);
+});
+
+test('retry preserves saved publication instead of starting another attempt',async t=>{
+  const setup=await fixture(t);if(!setup)return;
+  const {goal,jobId}=await setup.retryableGoal();
+  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/retry',{method:'POST',headers:await setup.session()});
+  assert.equal(response.status,200);
+  const next=await setup.store.claim('retry-worker',30_000,'live');assert.ok(next);
+  assert.equal(next.id,jobId);assert.equal(next.stage,'ready');assert.equal(next.goal.attemptCount,1);
+});
+
+test('retry is owner scoped, CSRF protected, and cannot revive cancellation',async t=>{
+  const setup=await fixture(t);if(!setup)return;
+  const {goal}=await setup.store.createGoal('7',{repository,name:'Retry fixture',prompt:'Retry fixture'},'live',randomUUID());
+  const path=setup.base+'/api/goals/'+goal.id+'/retry';const headers=await setup.session();
+  assert.equal((await fetch(path,{method:'POST',headers:{cookie:headers.cookie}})).status,403);
+  const other=await setup.store.createGoal('other',{repository,name:'Other goal',prompt:'Other goal'},'live',randomUUID());
+  assert.equal((await fetch(setup.base+'/api/goals/'+other.goal.id+'/retry',{method:'POST',headers})).status,404);
+  await setup.store.control(goal.id,'7','cancel');
+  assert.equal((await fetch(path,{method:'POST',headers})).status,409);
+  assert.equal((await setup.store.getGoal(goal.id))?.state,'cancelled');
+});
+
+test('execution-disabled service rejects attempt retry',async t=>{
+  const setup=await fixture(t,{executionEnabled:false});if(!setup)return;
+  const {goal}=await setup.store.createGoal('7',{repository,name:'Retry fixture',prompt:'Retry fixture'},'live',randomUUID());
+  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/retry',{method:'POST',headers:await setup.session()});
+  assert.equal(response.status,503);
+});
+
+test('retry recovers an expired worker lease while fencing its late result',async t=>{
+  const setup=await fixture(t);if(!setup)return;
+  const {store}=setup;
+  const {goal}=await store.createGoal('7',{repository,name:'Retry fixture',prompt:'Retry fixture'},'live',randomUUID());
+  const old=await store.claim('expired-worker',30_000,'live');assert.ok(old);
+  await store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[old.id]);
+  await store.recoverExpired();
+  assert.equal((await store.getGoal(goal.id))?.state,'needs_attention');
+  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/retry',{method:'POST',headers:await setup.session()});
+  assert.equal(response.status,200);
+  const next=await store.claim('replacement-worker',30_000,'live');assert.ok(next);assert.notEqual(next.id,old.id);
+  await assert.rejects(store.fail(old.id,'expired-worker','Late failure'));
+  assert.equal((await store.getGoal(goal.id))?.state,'running');
+});
+
+for(const conflict of ['branch_exists','pull_request_exists','base_changed'] as const)test(`retry cannot discard saved publication on ${conflict}`,async t=>{
+  const setup=await fixture(t,{check:async()=>conflict});if(!setup)return;
+  const {goal,jobId}=await setup.retryableGoal();
+  const response=await fetch(setup.base+'/api/goals/'+goal.id+'/retry',{method:'POST',headers:await setup.session()});
+  assert.equal(response.status,409);
+  const {rows}=await setup.store.pool.query('SELECT id,stage,artifact FROM jobs WHERE goal_id=$1',[goal.id]);
+  assert.equal(rows.length,1);assert.equal(rows[0].id,jobId);assert.equal(rows[0].stage,'publishing');assert.ok(rows[0].artifact);
+});

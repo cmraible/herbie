@@ -28,3 +28,13 @@ CI and human review validate the draft PR. Publication requires matching patch,
 repository, completion and cleanup evidence, without asserting tests passed.
 
 Goal responses use the legacy shape unless the client sends `X-Herbie-Goal-Version: 2`. Version 2 includes `maxWip` and `pullRequests` on every goal response (list, status, creation, and controls). The shared web/CLI client sends this header; older servers ignore it, and new clients accept their legacy responses.
+
+`POST /api/goals/:id/retry` recovers failed or interrupted goals from the web Retry
+button. Failed/unpublished attempts queue a fresh job with a unique branch under
+the goal lock, retaining history and respecting maxWip. Concurrent requests while
+work is queued or running do not create extra jobs. Expired workers remain fenced.
+Saved publication uses the existing `/retry-publication` checks and reuses its
+artifact without a new model attempt; publication conflicts never fall back to a
+fresh attempt. Retry requires ownership, cookie CSRF protection, enabled execution,
+and repository authorization for a fresh attempt. Cancelled/completed/paused goals
+cannot be restarted through Retry. Uncertain attempts are not automatically repeated.

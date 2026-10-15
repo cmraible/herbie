@@ -227,11 +227,11 @@ export function App() {
     } catch (failure) { setRenameError(message(failure)); }
     finally { setBusy(false); }
   }
-  async function control(action: GoalAction|'merge'|'close', branch?: string) {
+  async function control(action: GoalAction|'merge'|'close'|'retry', branch?: string) {
     if (!goal) return;
     setBusy(true); setError(null);
     try {
-      const result = action === 'merge' || action === 'close' ? await api.demoAction(goal.id,action,branch) : await api.action(goal.id,action);
+      const result = action === 'retry' ? await api.retry(goal.id) : action === 'merge' || action === 'close' ? await api.demoAction(goal.id,action,branch) : await api.action(goal.id,action);
       setGoals(current => current.map(item => item.id === result.id ? result : item));
     } catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
@@ -276,9 +276,10 @@ export function App() {
           <p className="goal-brief">{goal.prompt.replace('[demo:fail]', '').trim()}</p>
           <p className="goal-meta">Attempt {goal.attemptCount} <span>·</span> Max WIP {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}</p>
           {goal.error && <div className="status-message" role="alert">{goal.error}</div>}
+          {['failed','needs_attention'].includes(goal.state) && <div className="status-message"><span>Retry recovers saved work when possible, or starts a new attempt.</span><button className="primary" disabled={busy} onClick={() => { void control('retry'); }}>{busy ? 'Retrying…' : 'Retry'}</button></div>}
           {goal.state === 'cancelled' && <p className="subtle-note" role="status">Goal cancelled. {goal.cleanupStatus === 'pending' ? 'Cleanup is pending.' : goal.cleanupStatus === 'needs_attention' ? 'Remote work may remain. Cleanup needs attention; your goal stays cancelled.' : goal.cleanupStatus === 'complete' ? 'Sandbox cleanup is complete.' : ''}</p>}
           {goal.stopRequested && <p className="subtle-note">{goal.stopRequested === 'pause' ? 'Pause' : 'Cancellation'} requested. The current attempt will finish before stopping.</p>}
-          <div className="controls">{!terminal.has(goal.state) && goal.state !== 'paused' && <button disabled={busy || Boolean(goal.stopRequested)} onClick={() => { void control('pause'); }}>Pause</button>}{goal.state === 'paused' && <button disabled={busy} onClick={() => { void control('resume'); }}>Resume</button>}{!terminal.has(goal.state) && <button disabled={busy} onClick={() => { void control('cancel'); }}>Cancel goal</button>}</div>
+          <div className="controls">{!terminal.has(goal.state) && !['paused','needs_attention'].includes(goal.state) && <button disabled={busy || Boolean(goal.stopRequested)} onClick={() => { void control('pause'); }}>Pause</button>}{goal.state === 'paused' && <button disabled={busy} onClick={() => { void control('resume'); }}>Resume</button>}{!terminal.has(goal.state) && <button disabled={busy} onClick={() => { void control('cancel'); }}>Cancel goal</button>}</div>
           {(goal.pullRequests.length ? goal.pullRequests : goal.pullRequest ? [goal.pullRequest] : []).map(pr => <div className="pr-card" key={pr.branch}><strong>{goal.mode === 'demo' ? 'Simulated pull request' : `Pull request #${pr.number}`}</strong><span>{pr.state === 'open' ? 'Ready for your review.' : `Pull request ${pr.state}.`}</span>{goal.mode === 'live' ? <a href={pr.url} target="_blank" rel="noreferrer">Review on GitHub ↗</a> : <span>Demo</span>}
             {goal.mode === 'demo' && pr.state === 'open' && <div className="controls"><span>Demo review:</span><button disabled={busy} onClick={() => { void control('merge',pr.branch); }}>Simulate merge</button><button disabled={busy} onClick={() => { void control('close',pr.branch); }}>Simulate close</button></div>}
           </div>)}
