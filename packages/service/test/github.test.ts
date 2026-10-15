@@ -7,7 +7,6 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { createAuth, AuthError } from "../src/auth.js";
 import { migrateAuth, PgAuthStore } from "../src/auth-store.js";
-import { PublicationBlockedError } from "../src/adapters.js";
 import { createLiveAdapters } from "../src/live.js";
 import { goalSchema } from "@herbie/contracts";
 
@@ -816,7 +815,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
   const lookups = requests.filter((request) =>
     request.path.startsWith("/repos/alice/project/pulls"),
   );
-  assert.equal(lookups.length, 2);
+  assert.equal(lookups.length, 3);
   assert.ok(
     lookups.every((request) => request.authorization === `Bearer ${fixture.installationToken}`),
   );
@@ -842,7 +841,7 @@ for (const token of ["", "with space", "with\nnewline", "with\rreturn", "with\0n
   });
 }
 
-test("live publication rejects a legacy artifact without an agent description before creating a PR", async (t) => {
+test("live publication rejects a legacy artifact without verification evidence before creating a PR", async (t) => {
   const { github, requests } = await githubFixture(t);
   const live = createLiveAdapters(
     { apiKey: "fixture-never-used", openaiSecretName: "existing-secret" },
@@ -875,9 +874,7 @@ test("live publication rejects a legacy artifact without an agent description be
       { baseCommit: "0".repeat(40), patch: Buffer.from("patch") },
       async () => {},
     ),
-    (error) =>
-      error instanceof PublicationBlockedError &&
-      /no agent-authored pull request description/.test(error.message),
+    (error) => error instanceof Error && /successful goal and cleanup evidence/.test(error.message),
   );
   assert.equal(
     requests.filter((request) => request.path === "/repos/alice/project/pulls").length,
