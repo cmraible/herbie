@@ -49,6 +49,7 @@ export type PublicationRetryCheck =
   | "base_changed";
 export class KnownAttemptFailure extends Error {}
 export class PublicationBlockedError extends Error {}
+export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
   ciStatus?(execution: Execution): Promise<CiStatus | null>;

@@ -939,11 +939,14 @@ export class Store {
       }>(`SELECT j.id FROM jobs j JOIN goals g ON j.goal_id=g.id
         WHERE j.ci_review_requested AND j.stage='awaiting_review' AND g.mode='live'
         AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL
-        ORDER BY j.created_at LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`);
+        ORDER BY j.ci_reviewed_at NULLS FIRST,j.created_at,j.id LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`);
       const id = selected.rows[0]?.id;
       if (!id) return null;
       const { row, goal } = await lockJob(client, id);
-      await client.query("UPDATE jobs SET ci_review_requested=false WHERE id=$1", [id]);
+      await client.query(
+        "UPDATE jobs SET ci_review_requested=false,ci_reviewed_at=clock_timestamp() WHERE id=$1",
+        [id],
+      );
       return decodeJob(row, goal);
     });
   }
@@ -956,6 +959,33 @@ export class Store {
       [jobId],
     );
     return result.rowCount === 1;
+  }
+
+  async beginReadiness(jobId: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE jobs j SET readiness_pending=true FROM goals g
+      WHERE j.id=$1 AND j.goal_id=g.id AND j.stage='awaiting_review' AND j.pull_request->>'state'='open'
+      AND g.mode='live' AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL`,
+      [jobId],
+    );
+    if (result.rowCount !== 1) throw conflict("Goal stopped before marking PR ready");
+  }
+
+  async confirmReadiness(jobId: string, url: string): Promise<void> {
+    await this.transaction(async (client) => {
+      const result = await client.query<{ goal_id: string }>(
+        `UPDATE jobs SET readiness_pending=false
+        WHERE id=$1 AND readiness_pending RETURNING goal_id`,
+        [jobId],
+      );
+      if (result.rows[0])
+        await addEvent(
+          client,
+          result.rows[0].goal_id,
+          "pull_request_ready",
+          `CI passed; confirmed ${url} ready for review.`,
+        );
+    });
   }
 
   async startCiRepair(jobId: string, head: string, workerId: string): Promise<string | null> {

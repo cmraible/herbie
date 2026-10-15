@@ -1,3 +1,4 @@
+import { StaleRepairError } from "./adapters.js";
 import type { Adapters, Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
 import type { Store } from "./store.js";
@@ -26,16 +27,10 @@ export async function runCiRepairOnce(
     const failure = await adapters.ciStatus(execution);
     if (!failure) return true;
     if (failure.state === "passed") {
-      const ready = await adapters.markReady?.(execution, failure.head, async () => {
-        if (!(await store.ciReviewActive(job.id)))
-          throw new Error("Goal stopped before marking PR ready");
-      });
-      if (ready)
-        await store.appendEvent(
-          job.goal.id,
-          "pull_request_ready",
-          `CI passed; marked ${failure.pullRequest.url} ready for review.`,
-        );
+      const ready = await adapters.markReady?.(execution, failure.head, () =>
+        store.beginReadiness(job.id),
+      );
+      if (ready) await store.confirmReadiness(job.id, failure.pullRequest.url);
       return true;
     }
     id = await store.startCiRepair(job.id, failure.head, workerId);
@@ -89,6 +84,15 @@ export async function runCiRepairOnce(
       `Locally verified CI fix pushed to ${failure.pullRequest.url}`,
     );
   } catch (error) {
+    if (id && error instanceof StaleRepairError) {
+      await store.finishCiRepair(
+        id,
+        workerId,
+        true,
+        "CI repair discarded: PR head changed before publication.",
+      );
+      return true;
+    }
     const reference = logFailure(error, {
       component: "ci-repair",
       goalId: job.goal.id,
@@ -101,7 +105,7 @@ export async function runCiRepairOnce(
         false,
         `CI repair stopped. Inspect diagnostics, sandbox cleanup, and PR state before manual recovery. Reference: ${reference}`,
       );
-    else await store.requestCiReview(job.goal.repository);
+    // The periodic poll retries failed reads; immediate requeue starves other PRs.
   } finally {
     if (heartbeat) clearInterval(heartbeat);
   }

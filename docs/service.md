@@ -96,13 +96,18 @@ it cannot undo an external call already in flight.
   and the active goal before the GitHub write. Pending, cancelled, unknown, or absent
   checks leave the PR as draft; at least one check/status must succeed, with other
   checks successful, neutral, or skipped. Already-ready PRs are left alone. This
+  Readiness intent is saved before the mutation; retries reconcile an already-ready
+  PR and record the confirmation once if the response or event write was lost. This
   transition uses the existing Pull requests write permission and launches no model
   session. GitHub's [ready-for-review mutation](https://docs.github.com/en/graphql/reference/pulls#markpullrequestreadyforreview)
   has no atomic expected-head condition; a concurrent external push after the final
   read remains a race. The event feed records confirmed transitions.
+- CI polling prioritizes the least recently reviewed PR. Failed reads wait for the
+  next periodic poll, so expired credentials cannot monopolize the queue.
 - PostgreSQL deduplicates repairs by PR job and head SHA and allows at most three
   sessions per PR. A failed/expired repair stops further automatic repairs for that
-  PR; ambiguous pushes are not replayed. The goal event feed records repair outcomes,
+  PR; ambiguous pushes are not replayed. A definitive stale-head rejection discards
+  the repair without blocking a later head. The goal event feed records repair outcomes,
   and `ci_repairs.artifact` retains captured work. Repairs do not consume another WIP
   slot or create a PR. Pause/cancel stops repair work through its heartbeat. Demo and
   execution-disabled mode do not run repairs. No live model/sandbox validation is

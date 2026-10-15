@@ -1,9 +1,14 @@
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 import { Daytona } from "@daytona/sdk";
 import { runDaytonaAttempt } from "@herbie/loop/daytona-attempt";
-import { publishPatch } from "@herbie/loop/publish-patch";
+import {
+  publishPatch,
+  PatchPublicationError,
+  PatchHeadChangedError,
+} from "@herbie/loop/publish-patch";
 import {
   KnownAttemptFailure,
+  StaleRepairError,
   PublicationBlockedError,
   type Adapters,
   type Execution,
@@ -147,11 +152,14 @@ Inspect these branches before choosing your change. Make one small, independentl
         if (
           !existing ||
           existing.state !== "open" ||
-          existing.number !== execution.ciRepair.pullRequest.number ||
-          (await github.branchCommit(token, access.repository, execution.branch)) !==
-            execution.ciRepair.head
+          existing.number !== execution.ciRepair.pullRequest.number
         )
-          throw new PublicationBlockedError("PR closed or its head changed during CI repair");
+          throw new PublicationBlockedError("PR closed during CI repair");
+        if (
+          (await github.branchCommit(token, access.repository, execution.branch)) !==
+          execution.ciRepair.head
+        )
+          throw new StaleRepairError("PR head changed during CI repair");
       } else if (existing) return existing;
       await requireLease();
       if (!changes.pullRequestBody?.trim())
@@ -214,7 +222,15 @@ Inspect these branches before choosing your change. Make one small, independentl
             GIT_COMMITTER_EMAIL: "herbie@example.invalid",
           },
         },
-      );
+      ).catch((error) => {
+        if (
+          error instanceof PatchPublicationError &&
+          error.errors.length === 1 &&
+          error.errors[0] instanceof PatchHeadChangedError
+        )
+          throw new StaleRepairError(error.errors[0].message);
+        throw error;
+      });
       await reportPhase?.("publication_confirmation");
       const confirmed = await github.findPullRequest(token, access.repository, execution.branch);
       if (!confirmed || confirmed.url !== published.url)

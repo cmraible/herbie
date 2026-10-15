@@ -557,7 +557,7 @@ export function App() {
                 {{
                   connected: "GitHub connected. Repositories are refreshing.",
                   permissions:
-                    "The app needs Contents and Pull requests write permissions. Update its GitHub permissions, then connect again.",
+                    "The app needs Contents and Pull requests write permissions, plus Checks, Commit statuses, and Actions read permissions. Update its GitHub permissions, then connect again.",
                   cancelled: "GitHub connection was cancelled.",
                   expired: "That installation link expired. Connect repositories again.",
                   failed: "Herbie could not verify the installation. Try connecting again.",

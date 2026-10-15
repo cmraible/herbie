@@ -19,6 +19,9 @@ export async function githubFixture(t: TestContext) {
     disabled: false,
     push: true,
     contents: "write",
+    checks: "read",
+    statuses: "read",
+    actions: "read",
     pullRequests: "write",
     installationId: 11,
     installationToken: "ghs_fixture",
@@ -58,7 +61,13 @@ export async function githubFixture(t: TestContext) {
           installations: [
             {
               id: fixture.installationId,
-              permissions: { contents: fixture.contents, pull_requests: fixture.pullRequests },
+              permissions: {
+                contents: fixture.contents,
+                pull_requests: fixture.pullRequests,
+                checks: fixture.checks,
+                statuses: fixture.statuses,
+                actions: fixture.actions,
+              },
             },
           ],
         }),
@@ -68,7 +77,13 @@ export async function githubFixture(t: TestContext) {
       res.end(
         JSON.stringify({
           id: 11,
-          permissions: { contents: fixture.contents, pull_requests: fixture.pullRequests },
+          permissions: {
+            contents: fixture.contents,
+            pull_requests: fixture.pullRequests,
+            checks: fixture.checks,
+            statuses: fixture.statuses,
+            actions: fixture.actions,
+          },
         }),
       );
     else if (path === "/repos/alice/project") res.end(JSON.stringify(repository));
@@ -853,3 +868,17 @@ test("live publication rejects a legacy artifact without an agent description be
     0,
   );
 });
+
+for (const permission of ["checks", "statuses", "actions"] as const) {
+  test(`installation setup and authorization require ${permission} access`, async (t) => {
+    const { github, fixture } = await githubFixture(t);
+    fixture[permission] = "";
+    assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "permissions");
+    await assert.rejects(
+      github.authorize("ghu_fixture", "alice/project"),
+      /Update the GitHub App installation permissions/,
+    );
+    fixture[permission] = "write";
+    assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "ready");
+  });
+}

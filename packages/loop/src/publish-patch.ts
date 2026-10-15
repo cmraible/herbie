@@ -39,6 +39,8 @@ export interface PublicationState {
   url?: string;
 }
 
+export class PatchHeadChangedError extends Error {}
+
 export class PatchPublicationError extends AggregateError {
   constructor(
     errors: unknown[],
@@ -130,8 +132,8 @@ export async function publishPatch(
     await git("remote", "add", "origin", remoteUrl);
     const update = request.updatePullRequest;
     const remoteHead = (await git("ls-remote", "--heads", "origin", headRef)).split("\t")[0];
-    if (update ? remoteHead !== update.head : !!remoteHead)
-      throw new Error(update ? "PR head changed" : "Publication branch already exists");
+    if (update && remoteHead !== update.head) throw new PatchHeadChangedError("PR head changed");
+    if (!update && remoteHead) throw new Error("Publication branch already exists");
     await git("fetch", "--no-tags", "origin", update ? headRef : `refs/heads/${baseBranch}`);
     // Keep the exact captured tree and parent even when other work advances main.
     await git("merge-base", "--is-ancestor", baseCommit, "FETCH_HEAD");
@@ -174,7 +176,17 @@ export async function publishPatch(
     state.stage = "published";
     result = { url, branch, commit };
   } catch (error) {
-    failures.push(error);
+    // Only a definitive Git lease rejection is a discard; transport failures remain uncertain.
+    const rejected =
+      request.updatePullRequest &&
+      state.stage === "pushing" &&
+      error instanceof Error &&
+      "stdout" in error &&
+      typeof error.stdout === "string" &&
+      error.stdout
+        .split("\n")
+        .some((line) => line.startsWith("!\t") && line.endsWith("[rejected] (stale info)"));
+    failures.push(rejected ? new PatchHeadChangedError("PR head changed during push") : error);
   } finally {
     try {
       await rm(directory, { recursive: true, force: true });

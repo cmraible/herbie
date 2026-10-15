@@ -9,7 +9,11 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { mock, test, type TestContext } from "node:test";
 import { runDaytonaAttempt } from "../src/daytona-attempt.js";
-import { PatchPublicationError, publishPatch } from "../src/publish-patch.js";
+import {
+  PatchPublicationError,
+  PatchHeadChangedError,
+  publishPatch,
+} from "../src/publish-patch.js";
 import { createArithmeticFixture, runArithmeticTests } from "./fixtures/arithmetic.js";
 
 const git = async (cwd: string, ...args: string[]) =>
@@ -441,7 +445,8 @@ test("CI repair refuses a concurrently advanced head and unverified changes", as
         await git(f.repo, "push", f.remote, `HEAD:refs/heads/${f.request.branch}`);
       },
     }),
-    PatchPublicationError,
+    (error: unknown) =>
+      error instanceof PatchPublicationError && error.errors[0] instanceof PatchHeadChangedError,
   );
   assert.equal(
     await git(f.remote, "rev-parse", f.request.branch),

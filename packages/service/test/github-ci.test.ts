@@ -12,6 +12,8 @@ test("CI context uses current PR head and merge checks, waits for pending checks
     noChecks = false,
     graphError = false,
     writes = 0;
+  let mergeable: boolean | null = true;
+  let headChecks = false;
   const paths: string[] = [];
   const server = createServer(async (req, res) => {
     const path = req.url!;
@@ -24,13 +26,13 @@ test("CI context uses current PR head and merge checks, waits for pending checks
         node_id: "PR_fixture",
         html_url: "https://github.com/owner/repo/pull/1",
         head: { sha: "a".repeat(40), ref: "herbie/fix", repo: { full_name: "owner/repo" } },
-        mergeable: true,
+        mergeable,
         merge_commit_sha: "b".repeat(40),
       };
     else if (path.includes("/check-runs?"))
       data = {
         check_runs:
-          !noChecks && path.includes("b".repeat(40))
+          !noChecks && (path.includes("b".repeat(40)) || headChecks)
             ? [
                 {
                   id: 7,
@@ -114,6 +116,14 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal((await get())?.state, "passed");
   const ready = (head = "a".repeat(40), beforeWrite = async () => {}) =>
     github.markReady("token", "owner/repo", 1, "herbie/fix", head, beforeWrite);
+  headChecks = true;
+  pending = true;
+  mergeable = null;
+  assert.equal(await get(), null);
+  assert.equal(await ready(), false);
+  mergeable = true;
+  pending = false;
+  headChecks = false;
   noChecks = true;
   assert.equal(await get(), null);
   assert.equal(await ready(), false);
@@ -137,7 +147,7 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   graphError = false;
   assert.equal(await ready(), true);
   assert.equal(writes, 2);
-  assert.equal(await ready(), false);
+  assert.equal(await ready(), true);
   assert.equal(writes, 2, "already-ready PR is not mutated again");
   draft = true;
   state = "closed";

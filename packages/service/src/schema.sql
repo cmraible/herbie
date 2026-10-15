@@ -91,3 +91,6 @@ CREATE TABLE IF NOT EXISTS ci_repairs (
   UNIQUE(job_id, head)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ci_repairs_one_running ON ci_repairs(job_id) WHERE state='running';
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ci_reviewed_at timestamptz;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS readiness_pending boolean NOT NULL DEFAULT false;

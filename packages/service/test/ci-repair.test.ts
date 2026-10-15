@@ -6,9 +6,18 @@ import { Store } from "../src/store.js";
 import { runWorkerOnce } from "../src/worker.js";
 import { runCiRepairOnce } from "../src/ci-repair.js";
 import { createDemoAdapters } from "../src/demo.js";
-import type { Adapters } from "../src/adapters.js";
+import { StaleRepairError, type Adapters } from "../src/adapters.js";
 
-for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"] as const) {
+for (const outcome of [
+  "success",
+  "failure",
+  "stale",
+  "cancel",
+  "lease",
+  "crash",
+  "queue",
+  "late-stale",
+] as const) {
   test(`durable CI repair: ${outcome}`, async (t) => {
     const database = process.env.HERBIE_TEST_DATABASE_URL;
     if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL");
@@ -36,6 +45,43 @@ for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
     const pr = job.goal.pullRequests[0]!;
+    if (outcome === "queue") {
+      for (let i = 0; i < 2; i++) {
+        await store.createGoal(
+          "demo-user",
+          { repository: "demo/example", prompt: "Other goal" },
+          "demo",
+          randomUUID(),
+        );
+        await runWorkerOnce(store, demo, "original");
+      }
+      await store.pool.query("UPDATE goals SET mode='live'");
+      await store.requestCiReview();
+      await runCiRepairOnce(
+        store,
+        {
+          ...demo,
+          mode: "live",
+          ciStatus: async () => null,
+          authorize: async () => {
+            throw new Error("Revoked login");
+          },
+        },
+        "failed-read",
+      );
+      const second = await store.takeCiReview();
+      assert.ok(
+        second && second.id !== job.id,
+        "failed read must not requeue the oldest job immediately",
+      );
+      await store.requestCiReview();
+      const third = await store.takeCiReview();
+      assert.ok(
+        third && third.id !== job.id && third.id !== second.id,
+        "global poll must not starve unreviewed PRs",
+      );
+      return;
+    }
     if (outcome === "crash") {
       const claims = await Promise.all([
         store.startCiRepair(job.id, "a".repeat(40), "one"),
@@ -87,6 +133,7 @@ for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"
       },
       publish: async (_execution, _changes, requireLease) => {
         await requireLease();
+        if (outcome === "late-stale") throw new StaleRepairError("PR head advanced before push");
         pushes++;
         return pr;
       },
@@ -103,6 +150,13 @@ for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"
       assert.equal(attempts, 1);
     }
     assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
+    if (outcome === "late-stale") {
+      head = "b".repeat(40);
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "new-head");
+      assert.equal(attempts, 2, "a definitive stale head must not disable future repairs");
+    }
+
     if (outcome === "success") {
       for (const char of ["b", "c", "d"]) {
         head = char.repeat(40);
@@ -115,13 +169,28 @@ for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"
       adapters.ciStatus = async () => ({ state: "passed", head, pullRequest: pr });
       adapters.markReady = async (_execution, expectedHead, beforeWrite) => {
         assert.equal(expectedHead, head);
+        if (ready) return true;
         await beforeWrite();
-        if (ready) return false;
         ready = true;
         return true;
       };
       await store.requestCiReview();
+      const confirm = store.confirmReadiness.bind(store);
+      let failedConfirmation = false;
+      t.mock.method(store, "confirmReadiness", async (id: string, url: string) => {
+        if (!failedConfirmation) {
+          failedConfirmation = true;
+          throw new Error("Database disconnected after GitHub mutation");
+        }
+        return confirm(id, url);
+      });
       await runCiRepairOnce(store, adapters, "ready");
+      assert.equal(
+        (await store.pool.query("SELECT readiness_pending FROM jobs WHERE id=$1", [job.id])).rows[0]
+          .readiness_pending,
+        true,
+      );
+
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "ready-again");
       assert.equal(ready, true);
@@ -147,7 +216,9 @@ for (const outcome of ["success", "failure", "stale", "cancel", "lease", "crash"
       events.rows.some(
         (row) =>
           row.type ===
-          (["success", "stale"].includes(outcome) ? "ci_repair_completed" : "ci_repair_failed"),
+          (["success", "stale", "late-stale"].includes(outcome)
+            ? "ci_repair_completed"
+            : "ci_repair_failed"),
       ),
     );
   });

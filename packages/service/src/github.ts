@@ -31,8 +31,23 @@ const repositorySchema = z.object({
 });
 const installationSchema = z.object({
   id: z.number().int(),
-  permissions: z.object({ contents: z.string().optional(), pull_requests: z.string().optional() }),
+  permissions: z.object({
+    contents: z.string().optional(),
+    pull_requests: z.string().optional(),
+    checks: z.string().optional(),
+    statuses: z.string().optional(),
+    actions: z.string().optional(),
+  }),
 });
+function requiredPermissions({ permissions }: z.infer<typeof installationSchema>): boolean {
+  return (
+    permissions.contents === "write" &&
+    permissions.pull_requests === "write" &&
+    [permissions.checks, permissions.statuses, permissions.actions].every(
+      (value) => value === "read" || value === "write",
+    )
+  );
+}
 const branchSchema = z.object({
   commit: z.object({ sha: z.string().regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/) }),
 });
@@ -106,11 +121,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         .object({ installations: z.array(installationSchema) })
         .parse(await request(`/user/installations?per_page=100&page=${page}`, token)).installations;
       for (const installation of installations) {
-        if (
-          installation.permissions.contents !== "write" ||
-          installation.permissions.pull_requests !== "write"
-        )
-          continue;
+        if (!requiredPermissions(installation)) continue;
         for (let repoPage = 1; repoPage <= 100; repoPage++) {
           const repos = z
             .object({ repositories: z.array(repositorySchema) })
@@ -151,7 +162,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     if (!accessible)
       throw new GithubError(
         403,
-        "An installation with contents and pull request write permissions is required",
+        "Update the GitHub App installation permissions: Contents and Pull requests write, plus Checks, Commit statuses and Actions read are required",
       );
     return {
       repository: accessible.fullName,
@@ -276,6 +287,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       pr.head.repo?.full_name.toLowerCase() !== repository.toLowerCase()
     )
       return null;
+    if (pr.mergeable === null) return null;
     const details: unknown[] = [];
     let pending = false;
     let passing = true;
@@ -421,8 +433,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           head: z.object({ sha: z.string(), ref: z.string() }),
         })
         .parse(await request(`/repos/${repository}/pulls/${number}`, token));
-      if (!pr.draft || pr.state !== "open" || pr.head.sha !== head || pr.head.ref !== branch)
-        return false;
+      if (pr.state !== "open" || pr.head.sha !== head || pr.head.ref !== branch) return false;
+      if (!pr.draft) return true; // Reconcile a prior successful mutation after a lost response.
       await beforeWrite();
       // GitHub has no expected-head argument for this mutation; recheck immediately above.
       const result = z
@@ -471,11 +483,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
             await request(`/user/installations?per_page=100&page=${page}`, token),
           ).installations;
         const installation = installations.find((item) => item.id === installationId);
-        if (installation)
-          return installation.permissions.contents === "write" &&
-            installation.permissions.pull_requests === "write"
-            ? "ready"
-            : "permissions";
+        if (installation) return requiredPermissions(installation) ? "ready" : "permissions";
         if (installations.length < 100) return "missing";
       }
       throw new Error("Installation listing exceeds supported limit");
