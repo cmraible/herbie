@@ -525,6 +525,44 @@ integration('closing a sibling PR during publication pauses when publication fin
   assert.ok(await store.claim('worker'));
 });
 
+for (const recovery of ['uncertain','expired','blocked'] as const) integration(`closure pause survives ${recovery} publication recovery`, async () => {
+  const {goal} = await store.createGoal('owner',{...input(),name:'Recovery fixture',maxWip:2},'live',randomUUID());
+  const first = await publishNext(1);
+  const second = await store.claim('worker');
+  assert.ok(second);
+  const patch = Buffer.from('saved');
+  const baseCommit = 'a'.repeat(40);
+  await store.saveArtifact(second.id,'worker',{baseCommit,patch,verification:{
+    version:3,repoUrl:`https://github.com/${goal.repository}.git`,baseCommit,
+    patchSha256:createHash('sha256').update(patch).digest('hex'),goalCompleted:true,sandboxDeleted:true,
+  }});
+  await store.beginPublication(second.id,'worker');
+  await store.reconcile(first.id,'closed');
+  if (recovery === 'expired') {
+    await store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[second.id]);
+    await store.recoverExpired();
+  } else if (recovery === 'blocked') {
+    await store.blockPublication(second.id,'worker','fixture safety conflict');
+    assert.equal(await store.claim('extra'),null);
+    assert.equal((await store.publicationRetryCandidate(goal.id,'owner'))?.kind,'retryable');
+    const held = await store.queueSavedPublication(second.id,'owner',second.branch,baseCommit);
+    assert.equal(held.state,'paused');
+    assert.equal(await store.claim('extra'),null);
+    await store.control(goal.id,'owner','resume');
+  } else {
+    await store.publicationUncertain(second.id,'worker','fixture uncertain');
+    await store.pool.query('UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1',[second.id]);
+  }
+  const resumed = await store.claim('recovery');
+  assert.equal(resumed?.id,second.id);
+  if (recovery === 'blocked') await store.beginPublication(second.id,'recovery');
+  else assert.equal(resumed?.goal.stopRequested,'pause');
+  const after = await store.completePublication(second.id,'recovery',{url:'https://github.com/example/repo/pull/2',number:2,branch:second.branch});
+  assert.equal(after.state,recovery === 'blocked' ? 'queued' : 'paused');
+  assert.equal(after.attemptCount,2);
+  if (recovery !== 'blocked') assert.equal(await store.claim('extra'),null);
+});
+
 integration('closing a PR pauses a goal until resumed and repeated reconciliation is harmless', async () => {
   const {goal} = await store.createGoal('owner',input(),'demo',randomUUID());
   const first = await publishNext(1);

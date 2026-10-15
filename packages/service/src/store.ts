@@ -177,7 +177,7 @@ export class Store {
     if(row.stage==='publishing'&&row.lease_valid)return {kind:'in_progress',goal};
     if(row.stage==='ready'&&row.artifact&&['queued','running'].includes(goal.state))return {kind:'already_queued',goal};
     if(goal.mode==='live'&&row.stage==='publishing'&&!row.lease_valid&&['needs_attention','running'].includes(goal.state)
-      &&!goal.stopRequested&&job.artifact&&hasValidPublicationEvidence(goal.repository,job.artifact))return {kind:'retryable',job};
+      &&goal.stopRequested!=='cancel'&&job.artifact&&hasValidPublicationEvidence(goal.repository,job.artifact))return {kind:'retryable',job};
     return {kind:'unavailable',goal};
   }
   async retryAttempt(id:string,ownerId:string):Promise<Goal>{
@@ -262,7 +262,7 @@ export class Store {
     return this.transaction(async client => {
       const selected = await client.query<Record<string, unknown>>(`SELECT j.id FROM jobs j JOIN goals g ON g.id=j.goal_id
         WHERE j.stage IN ('queued','ready','publishing') AND j.eligible_at<=clock_timestamp() AND ($1::text IS NULL OR g.mode=$1)
-        AND NOT j.publication_blocked AND g.stop_requested IS NULL
+        AND NOT j.publication_blocked AND (g.stop_requested IS NULL OR (j.stage='publishing' AND g.stop_requested='pause'))
         AND (j.lease_owner IS NULL OR j.lease_expires_at<=clock_timestamp())
         AND (g.state IN ('queued','running') OR (j.stage='publishing' AND g.state='needs_attention'))
         ORDER BY j.created_at LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`, [mode ?? null]);
@@ -368,12 +368,13 @@ export class Store {
       if(goal.ownerId!==ownerId)throw new StoreError(404,'Goal not found');
       if(row.stage==='ready'&&row.artifact&&['queued','running'].includes(goal.state))return goal;
       const job=decodeJob(row,goal);
-      if(goal.mode!=='live'||row.stage!=='publishing'||row.lease_valid||!['needs_attention','running'].includes(goal.state)||goal.stopRequested
+      if(goal.mode!=='live'||row.stage!=='publishing'||row.lease_valid||!['needs_attention','running'].includes(goal.state)||goal.stopRequested==='cancel'
         ||!job.artifact||row.branch!==expectedBranch||job.artifact.baseCommit!==expectedBaseCommit
         ||!hasValidPublicationEvidence(goal.repository,job.artifact))throw conflict('Saved publication is no longer eligible for a safe retry');
       await client.query("UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,publication_blocked=false,eligible_at=clock_timestamp() WHERE id=$1",[jobId]);
-      await client.query("UPDATE goals SET state='queued',error=NULL,updated_at=clock_timestamp() WHERE id=$1",[goal.id]);
-      await addEvent(client,goal.id,'publication_retry_queued','Queued the saved captured artifact for publication; no new attempt will run.');
+      const paused = goal.stopRequested === 'pause';
+      await client.query("UPDATE goals SET state=$2,error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",[goal.id,paused ? 'paused' : 'queued']);
+      await addEvent(client,goal.id,'publication_retry_queued',paused ? 'Saved captured artifact held while paused; resume to publish it.' : 'Queued the saved captured artifact for publication; no new attempt will run.');
       const updated=await goalFrom(client,goal.id);
       if(!updated)throw new Error('Missing retried publication goal');
       return updated;
@@ -408,7 +409,7 @@ export class Store {
         await client.query("UPDATE jobs SET stage=CASE WHEN stage='running' THEN 'needs_attention' ELSE stage END,lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1", [id]);
         if (uncertain) {
           const error = row.stage === 'running' ? 'Worker connection was lost during an attempt. Use Retry to start a new attempt. The previous sandbox cleanup is unconfirmed; the paid attempt will not automatically repeat.' : 'Worker lease expired during publication; checking the existing branch before any further action.';
-          await client.query("UPDATE goals SET state='needs_attention',error=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, error]);
+          await client.query("UPDATE goals SET state='needs_attention',error=$2,stop_requested=$3,updated_at=clock_timestamp() WHERE id=$1", [goal.id, error, row.stage === 'publishing' ? goal.stopRequested : null]);
           await addEvent(client, goal.id, 'recovery_required', error);
         } else await addEvent(client, goal.id, 'artifact_recovered', 'Recovered saved artifact after worker lease expired');
       }
