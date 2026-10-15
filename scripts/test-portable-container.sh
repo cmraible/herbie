@@ -29,6 +29,13 @@ docker run -d --name "$prefix-app" --network "$prefix" \
   --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
   -e HERBIE_MODE=live -e HERBIE_HOST=127.0.0.1 -e HERBIE_EXECUTION_ENABLED=false \
+  -e HERBIE_PUBLIC_URL=https://herbie.example.test \
+  -e HERBIE_ALLOWED_GITHUB_USER_ID=7 \
+  -e HERBIE_CREDENTIAL_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8= \
+  -e GITHUB_APP_ID=fixture -e GITHUB_CLIENT_ID=fixture \
+  -e GITHUB_CLIENT_SECRET=fixture -e GITHUB_WEBHOOK_SECRET=fixture \
+  -e GITHUB_PRIVATE_KEY_FILE=/tmp/unused-private-key.pem \
+  -e OPENAI_API_KEY=fixture \
   -e DATABASE_URL=postgresql://fixture:fixture@postgres:5432/fixture \
   -e HERBIE_DEPLOYMENT_ID="$revision" "$image" >/dev/null
 for ((i=0;i<75;i++)); do
