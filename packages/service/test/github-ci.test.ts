@@ -15,6 +15,9 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   let mergeable: boolean | null = true;
   let headChecks = false,
     mergeChecks = true;
+  let headPending = false;
+  let headConclusion = "success";
+  let requiredWorkflow = false;
   let suitePending = false;
   let suiteFailure = false;
   let requiredContext = "verify";
@@ -75,11 +78,13 @@ test("CI context uses current PR head and merge checks, waits for pending checks
                   app: { id: 1 },
                   name: "verify",
                   status: path.includes("a".repeat(40))
-                    ? "completed"
+                    ? headPending
+                      ? "in_progress"
+                      : "completed"
                     : pending
                       ? "in_progress"
                       : "completed",
-                  conclusion: path.includes("a".repeat(40)) ? "success" : conclusion,
+                  conclusion: path.includes("a".repeat(40)) ? headConclusion : conclusion,
                   details_url: "https://github.com/owner/repo/actions/runs/8/job/9",
                   output: { title: null, summary: "assertion failed", text: null },
                 },
@@ -88,6 +93,16 @@ test("CI context uses current PR head and merge checks, waits for pending checks
       };
     else if (path.startsWith("/repos/owner/repo/rules/branches/main"))
       data = [
+        ...(requiredWorkflow
+          ? [
+              {
+                type: "workflows",
+                parameters: {
+                  workflows: [{ path: ".github/workflows/required.yml", repository_id: 5 }],
+                },
+              },
+            ]
+          : []),
         {
           type: "required_status_checks",
           parameters: {
@@ -202,6 +217,28 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   protectedContext = "legacy-required";
   assert.equal(await get(), null, "classic branch protection is also enforced");
   protectedContext = null;
+  requiredWorkflow = true;
+  assert.equal(
+    await get(),
+    null,
+    "required-workflow rules cannot be satisfied by unrelated passing checks",
+  );
+  requiredWorkflow = false;
+  headChecks = true;
+  headConclusion = "failure";
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "successful merge checks replace stale failing head checks",
+  );
+  headPending = true;
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "successful merge checks replace pending head checks",
+  );
+  headPending = false;
+  headConclusion = "success";
   const ready = (head = "a".repeat(40), beforeWrite = async () => {}) =>
     github.markReady("token", "owner/repo", 1, "herbie/fix", head, beforeWrite);
   headChecks = true;

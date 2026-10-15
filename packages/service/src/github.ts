@@ -334,6 +334,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
             token,
           ),
         );
+      if (rules.some((rule) => rule.type === "workflows")) return null;
       for (const rule of rules)
         if (rule.type === "required_status_checks") {
           const parameters = z
@@ -382,19 +383,20 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     )
       return null;
     if (pr.mergeable === null) return null;
-    const details: unknown[] = [];
-    let pending = false;
-    let passing = true;
-    let succeeded = false;
     const refs = [
       ...new Set([
         pr.head.sha,
         ...(pr.mergeable && pr.merge_commit_sha ? [pr.merge_commit_sha] : []),
       ]),
     ];
-    let observed: { context: string; app: number | null }[] = [];
-    for (const sha of refs) {
-      const contexts: typeof observed = [];
+    // Evaluate the populated merge ref first; never mix it with stale head results.
+    for (const sha of refs.reverse()) {
+      const details: unknown[] = [];
+      let pending = false,
+        passing = true,
+        succeeded = false,
+        evidence = false;
+      const contexts: { context: string; app: number | null }[] = [];
       // A fast check can finish before another suite has created its check runs.
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI suite listing exceeds supported limit");
@@ -417,6 +419,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
             ),
           ).check_suites;
         for (const suite of suites) {
+          if (suite.latest_check_runs_count > 0 || suite.status === "completed") evidence = true;
           if (suite.latest_check_runs_count > 0 && suite.status !== "completed") pending = true;
           if (
             (suite.latest_check_runs_count > 0 || suite.status === "completed") &&
@@ -525,7 +528,6 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         })
         .parse(await request(`/repos/${repository}/commits/${sha}/status?per_page=100`, token));
       contexts.push(...statuses.statuses.map((status) => ({ context: status.context, app: null })));
-      if (contexts.length) observed = contexts; // Prefer merge checks when present; otherwise use the head.
       if (statuses.total_count > 100) throw new Error("CI status listing exceeds supported limit");
       if (statuses.statuses.some((status) => status.state === "pending")) pending = true;
       if (statuses.statuses.some((status) => status.state === "success")) succeeded = true;
@@ -533,35 +535,38 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       details.push(
         ...statuses.statuses.filter((status) => ["error", "failure"].includes(status.state)),
       );
-    }
-    if (pending) return null;
-    if (!details.length) {
-      if (!passing || !succeeded) return null;
-      const required = await requiredChecks(token, repository, pr.base.ref);
-      if (
-        required.some(
-          (check) =>
-            !observed.some(
-              (current) =>
-                current.context === check.context &&
-                (check.app === null || current.app === check.app),
-            ),
+      if (!evidence && !contexts.length) continue;
+      if (pending) return null;
+      if (!details.length) {
+        if (!passing || !succeeded) return null;
+        const required = await requiredChecks(token, repository, pr.base.ref);
+        if (
+          required === null ||
+          required.some(
+            (check) =>
+              !contexts.some(
+                (current) =>
+                  current.context === check.context &&
+                  (check.app === null || current.app === check.app),
+              ),
+          )
         )
-      )
-        return null;
+          return null;
+        return {
+          state: "passed",
+          draft: pr.draft,
+          head: pr.head.sha,
+          pullRequest: { number, url: pr.html_url },
+        };
+      }
       return {
-        state: "passed",
-        draft: pr.draft,
         head: pr.head.sha,
         pullRequest: { number, url: pr.html_url },
+        state: "failed",
+        details: JSON.stringify(details).slice(0, 60000),
       };
     }
-    return {
-      head: pr.head.sha,
-      pullRequest: { number, url: pr.html_url },
-      state: "failed",
-      details: JSON.stringify(details).slice(0, 60000),
-    };
+    return null;
   }
   return {
     ciStatus,
