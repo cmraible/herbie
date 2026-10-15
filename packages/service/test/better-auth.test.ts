@@ -16,15 +16,24 @@ async function fixture(t: TestContext) {
     t.skip("Set HERBIE_TEST_DATABASE_URL for PostgreSQL integration");
     return;
   }
-  const schema = `better_auth_${randomUUID().replaceAll("-", "")}`;
+  const database = `better_auth_${randomUUID().replaceAll("-", "")}`;
+  const databaseAddress = new URL(connectionString);
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(databaseAddress.hostname))
+    throw new Error("Auth integration requires disposable loopback PostgreSQL");
   const admin = new Pool({ connectionString });
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  const pool = new Pool({ connectionString, options: `-c search_path=${schema}` });
+  // Kysely introspects all schemas; isolate it from concurrent tests dropping theirs.
+  await admin.query(`CREATE DATABASE ${database}`);
+  databaseAddress.pathname = `/${database}`;
+  const pool = new Pool({
+    connectionString: databaseAddress.href,
+    options: "-c search_path=herbie",
+  });
   t.after(async () => {
     await pool.end();
-    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin.query(`DROP DATABASE ${database}`);
     await admin.end();
   });
+  await pool.query("CREATE SCHEMA herbie");
   await migrateAuth(pool);
   const githubConfig = {
     appId: "fixture",
