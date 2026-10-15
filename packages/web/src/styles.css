@@ -154,3 +154,27 @@ input::placeholder, textarea::placeholder { color: #777; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+
+.repository-picker { font-size: 13px; }
+.repository-label { display: flex; align-items: center; gap: 6px; margin-top: 16px; }
+.repository-label label { margin: 0; }
+.repository-refresh { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; color: #999; background: transparent; }
+.repository-refresh:hover { color: #fff; }
+.repository-select__control { margin-top: 6px; min-height: 44px; padding: 2px 12px; border: 1px solid #444; border-radius: 8px; background: #101010; cursor: pointer; }
+.repository-select__control:hover { border-color: #777; }
+.repository-select__control--is-focused { border-color: #aaa; box-shadow: 0 0 0 2px #ffffff18; }
+.repository-select__control--is-disabled { opacity: .5; }
+.repository-select__value-container { padding: 6px 0; gap: 4px; }
+.repository-select__input-container { color: #f5f5f5; }
+.repository-picker input { margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; outline: none; }
+.repository-select__placeholder, .repository-select__dropdown-indicator { color: #888; }
+.repository-select__indicators { padding-left: 10px; }
+.repository-select__menu { margin-top: 6px; padding: 5px; border: 1px solid #444; border-radius: 10px; background: #171717; box-shadow: 0 12px 32px #0009; z-index: 3 !important; }
+.repository-select__option { padding: 10px 12px; border-radius: 5px; cursor: pointer; overflow-wrap: anywhere; }
+.repository-select__option--is-focused { background: #303030; }
+.repository-select__option--is-selected { background: #363636; color: #fff; }
+.repository-select__no-options-message { padding: 20px 12px; color: #999; }
+.repository-name { overflow-wrap: anywhere; }
+.repository-name > span { color: #999; }
+.repository-name strong { font-weight: 500; }
+.repository-hint { margin-top: 6px; color: #888; font-size: 11px; }
