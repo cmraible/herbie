@@ -531,3 +531,22 @@ integration('migration backfills existing PRs and defaults WIP to one without lo
   await store.reconcile(second.id,'merged');
   assert.equal((await store.getGoal(goal.id))?.state,'queued');
 });
+
+for (const outcome of ['merged','closed'] as const) integration(`published sibling PRs still record ${outcome} after cancellation without restarting work`, async () => {
+  const {goal} = await store.createGoal('owner',{...input(),maxWip:2},'demo',randomUUID());
+  const first = await publishNext(1);
+  const second = await publishNext(2);
+  await store.reconcile(first.id,'closed');
+  assert.equal((await store.getGoal(goal.id))?.state,'cancelled');
+  assert.deepEqual((await store.reviewJobs()).map(job => job.id),[second.id]);
+  const updated = await store.reconcile(second.id,outcome);
+  assert.equal(updated.state,'cancelled');
+  assert.deepEqual(updated.pullRequests.map(pr => pr.state),['closed',outcome]);
+  const events = await store.events(goal.id);
+  await store.reconcile(second.id,outcome);
+  assert.deepEqual(await store.events(goal.id),events);
+  assert.equal(events.filter(event => event.type === 'cancel').length,1);
+  assert.equal(events.at(-1)?.type,outcome === 'merged' ? 'pull_request_merged' : 'pull_request_closed');
+  assert.equal(await store.claim('extra'),null);
+  assert.deepEqual(await store.reviewJobs(),[]);
+});

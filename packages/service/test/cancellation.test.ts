@@ -63,9 +63,11 @@ test('cancel fences a publisher already in flight and preserves its eventual PR 
   await store.control(goal.id,'owner','cancel');await assert.rejects(fence!(),/lease/);
   release.resolve();await work;
   const saved=await store.getGoal(goal.id);assert.equal(saved?.state,'cancelled');assert.equal(saved.cleanupStatus,'needs_attention');assert.equal(saved.pullRequest?.number,1);
-  assert.equal(await store.claim('next'),null);assert.deepEqual(await store.reviewJobs(),[]);
+  assert.equal(await store.claim('next'),null);assert.equal((await store.reviewJobs()).length,1);
   const job=(await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[goal.id])).rows[0];
   await store.reconcile(job.id,'merged');assert.equal((await store.getGoal(goal.id))?.state,'cancelled');
+  assert.equal((await store.getGoal(goal.id))?.pullRequest?.state,'merged');
+  assert.deepEqual(await store.reviewJobs(),[]);
   assert.equal((await store.pool.query('SELECT count(*)::int n FROM jobs WHERE goal_id=$1',[goal.id])).rows[0].n,1);
 });
 

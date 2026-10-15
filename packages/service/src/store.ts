@@ -230,7 +230,7 @@ export class Store {
         await client.query('UPDATE jobs SET artifact=COALESCE(artifact,$2) WHERE id=$1',[jobId,JSON.stringify(artifact)]);
       }
       if(pullRequest&&pullRequest.branch===row.branch){
-        const pr=goalSchema.shape.pullRequest.unwrap().parse({...pullRequest,state:'open'});
+        const pr=goalSchema.shape.pullRequest.unwrap().parse({state:'open',...pullRequest});
         await client.query('UPDATE jobs SET pull_request=$2 WHERE id=$1',[jobId,JSON.stringify(pr)]);
         await client.query('UPDATE goals SET pull_request=$2 WHERE id=$1',[goal.id,JSON.stringify(pr)]);
       }
@@ -306,13 +306,15 @@ export class Store {
       return true;
     });
   }
-  async completePublication(jobId: string, workerId: string, pullRequest: Omit<PullRequest, 'state'>): Promise<Goal> {
-    const pr = goalSchema.shape.pullRequest.unwrap().parse({ ...pullRequest, state: 'open' });
+  async completePublication(jobId: string, workerId: string, pullRequest: Omit<PullRequest, 'state'> & {state?:PullRequest['state']}): Promise<Goal> {
+    const pr = goalSchema.shape.pullRequest.unwrap().parse({ state: 'open', ...pullRequest });
     return this.transaction(async client => {
       const { row, goal } = await lockJob(client, jobId, workerId);
-      if (row.stage !== 'publishing' || pr.branch !== row.branch || pr.state !== 'open') throw conflict('Publication does not match the expected attempt branch');
+      if (row.stage !== 'publishing' || pr.branch !== row.branch) throw conflict('Publication does not match the expected attempt branch');
       await client.query("UPDATE jobs SET stage='awaiting_review',pull_request=$2,lease_owner=NULL,lease_expires_at=NULL,publication_retry_count=0,publication_blocked=false WHERE id=$1", [jobId,JSON.stringify(pr)]);
       await client.query("UPDATE goals SET state='awaiting_review',pull_request=$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1", [goal.id, JSON.stringify(pr)]);
+      // Apply an already-known merge/close in this transaction before exposing capacity.
+      if (pr.state !== 'open') return this.reconcileReview(client,jobId,pr.state);
       await advanceGoal(client,{...goal,state:'awaiting_review',error:null});
       await addEvent(client, goal.id, 'pull_request_opened', `Pull request #${pr.number} awaits review: ${pr.url}`);
       const updated = await goalFrom(client, goal.id);
@@ -402,7 +404,8 @@ export class Store {
 
   async reviewJobs(mode?: 'demo' | 'live'): Promise<Job[]> {
     const result = await this.pool.query<Record<string, unknown>>(`SELECT j.*, (j.lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs j JOIN goals g ON g.id=j.goal_id
-      WHERE j.stage='awaiting_review' AND g.state!='cancelled' AND ($1::text IS NULL OR g.mode=$1) ORDER BY j.created_at`, [mode ?? null]);
+      WHERE j.stage IN ('awaiting_review','cancelled') AND j.pull_request->>'state'='open'
+      AND ($1::text IS NULL OR g.mode=$1) ORDER BY j.created_at`, [mode ?? null]);
     const jobs: Job[] = [];
     for (const selected of result.rows) {
       const row = jobRow.parse(selected);
@@ -412,22 +415,23 @@ export class Store {
     return jobs;
   }
   async reconcile(jobId: string, outcome: 'merged' | 'closed'): Promise<Goal> {
-    return this.transaction(async client => {
-      const { row, goal } = await lockJob(client, jobId);
-      if (row.stage === 'completed' || row.stage === 'cancelled') return goal;
-      const pr = goal.pullRequests.find(pr => pr.branch === row.branch);
-      if (row.stage !== 'awaiting_review' || !pr) throw conflict('Only a published pull request can be reconciled');
-      const cancelled = outcome === 'closed';
-      const updatedPr = JSON.stringify({...pr,state:outcome});
-      await client.query('UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed',updatedPr]);
-      await client.query("UPDATE goals SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1", [goal.id,row.branch,updatedPr]);
-      if (cancelled) await cancelGoal(client,goal);
-      else await advanceGoal(client,goal);
-      const updated = await goalFrom(client, goal.id);
-      if (!updated) throw new Error('Missing reconciled goal');
-      await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged; work continues within the WIP limit');
-      return updated;
-    });
+    return this.transaction(client => this.reconcileReview(client,jobId,outcome));
+  }
+  private async reconcileReview(client: PoolClient, jobId: string, outcome: 'merged' | 'closed'): Promise<Goal> {
+    const { row, goal } = await lockJob(client, jobId);
+    const pr = goal.pullRequests.find(pr => pr.branch === row.branch);
+    if (row.stage === 'completed' || row.stage === 'cancelled' && pr?.state !== 'open') return goal;
+    if (!['awaiting_review','cancelled'].includes(row.stage) || !pr) throw conflict('Only a published pull request can be reconciled');
+    const cancelled = outcome === 'closed';
+    const updatedPr = JSON.stringify({...pr,state:outcome});
+    await client.query('UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1', [jobId, cancelled ? 'cancelled' : 'completed',updatedPr]);
+    await client.query("UPDATE goals SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1", [goal.id,row.branch,updatedPr]);
+    if (cancelled && goal.state !== 'cancelled') await cancelGoal(client,goal);
+    else await advanceGoal(client,goal);
+    const updated = await goalFrom(client, goal.id);
+    if (!updated) throw new Error('Missing reconciled goal');
+    await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : goal.state === 'cancelled' ? 'Pull request merged; goal remains cancelled' : 'Pull request merged; work continues within the WIP limit');
+    return updated;
   }
 
 }

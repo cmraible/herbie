@@ -49,7 +49,7 @@ Inspect these branches before choosing your change. Make one small, independentl
       const token = await github.installationToken(access.installationId,access.repository);
       await reportPhase?.('existing_pr_check');
       const existing = await github.findPullRequest(token,access.repository,execution.branch);
-      if (existing) return {url:existing.url,number:existing.number,branch:existing.branch};
+      if (existing) return existing;
       await requireLease();
       const title = `Herbie: ${execution.goal.prompt.split('\n')[0].slice(0,180)}`;
       const published = await publishPatch(request=>github.openPullRequest(token,request,requireLease), {
@@ -72,7 +72,7 @@ Inspect these branches before choosing your change. Make one small, independentl
       await reportPhase?.('publication_confirmation');
       const confirmed = await github.findPullRequest(token,access.repository,execution.branch);
       if (!confirmed || confirmed.url!==published.url) throw new Error('Published PR could not be reconciled');
-      return {url:confirmed.url,number:confirmed.number,branch:confirmed.branch};
+      return confirmed;
     },
     async reconcile(execution) {
       const token = await github.installationToken(execution.repository.installationId,execution.repository.repository,'read');
