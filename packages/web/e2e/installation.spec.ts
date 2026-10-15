@@ -46,8 +46,7 @@ test('repository setup runs during onboarding, refreshes access, and survives Ba
   await page.getByRole('button',{name:'Back to goals'}).click();
 
   await page.goBack();
-  await expect(page.getByRole('heading',{name:'New goal',exact:true})).toBeVisible();
-  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await expect.poll(()=>repositoryRequests).toBeGreaterThanOrEqual(3);

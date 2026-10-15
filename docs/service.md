@@ -95,8 +95,8 @@ This command does not retry sandbox execution or bypass publication checks.
 Demo rows and sessions are separate from live work by mode. Prefer a separate
 Postgres database for production; the sample password and fixed demo encryption
 key are only for local demo. Keep the database and encryption key together in
-backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters,
-attempts to five. Existing Daytona deadlines and
+backups. HTTP bodies are bounded; goal prompts are limited to 8,000 characters.
+Goals have no total attempt limit. Existing Daytona deadlines and
 cancellation protections remain in force. Herbie does not impose a dollar spending cap.
 
 The agent owns setup and testing in its coding checkout. Herbie captures the patch,

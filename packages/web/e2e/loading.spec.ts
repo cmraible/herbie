@@ -179,6 +179,10 @@ test('the goal list hides finished work until requested and opens details separa
   await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
   await page.getByRole('button',{name:'Back to goals'}).click();
   await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
 });
 
 test('mobile loading and repeated refresh clicks remain within the viewport',async({page})=>{

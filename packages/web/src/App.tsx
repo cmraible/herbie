@@ -171,7 +171,8 @@ export function App() {
     setScreen(id);
   }
   function navigateToList() {
-    history.pushState(null,'',location.pathname + location.search);
+    if (creating) history.replaceState(null,'',location.pathname + location.search);
+    else history.pushState(null,'',location.pathname + location.search);
     setScreen(null);
   }
 
