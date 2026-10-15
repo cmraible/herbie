@@ -2,7 +2,6 @@ import {logFailure} from './diagnostic-log.js';
 import pg from 'pg';
 import {safeStartupCauses,type StartupProgress} from './startup-progress.js';
 import {StartupConfigurationError,startupDiagnostic} from './startup-diagnostic.js';
-import {z} from 'zod';
 import {readConfig} from './config.js';
 import {Store} from './store.js';
 import {createGoalNamer} from './goal-name.js';
@@ -25,7 +24,7 @@ export async function createRuntime(startup?:StartupProgress){
   })();
   const pool=new pg.Pool(poolConfig);
   pool.on('error',error=>{logFailure(error,{component:'database-pool'});console.error(`Herbie database pool error: ${startupDiagnostic(error)} causes=${safeStartupCauses(error)}.`);});
-  const store=new Store(pool,Math.random,createGoalNamer(config.mode==='live'?process.env.OPENAI_API_KEY:undefined,process.env.HERBIE_GOAL_NAME_MODEL));
+  const store=new Store(pool,Math.random,createGoalNamer(config.openaiApiKey,config.goalNameModel));
   try {
     startup?.begin('database-connect');
     const connection=await pool.connect();connection.release();
@@ -33,11 +32,7 @@ export async function createRuntime(startup?:StartupProgress){
     startup?.begin('auth-setup');
     const auth=createAuth(config,new PgAuthStore(pool),github);
     startup?.begin('adapter-setup');
-    const adapters=config.mode==='live'&&github?createLiveAdapters(config.executionEnabled?{
-      apiKey:z.string().min(1).parse(process.env.DAYTONA_API_KEY),apiUrl:process.env.DAYTONA_API_URL,
-      openaiSecretName:z.string().min(1).parse(process.env.HERBIE_DAYTONA_OPENAI_SECRET),
-      snapshot:process.env.HERBIE_DAYTONA_SNAPSHOT,
-    }:undefined,github,auth):createDemoAdapters();
+    const adapters=config.mode==='live'&&github?createLiveAdapters(config.executionEnabled?config.daytona:undefined,github,auth):createDemoAdapters();
     return {config,store,auth,adapters,github};
   }catch(error){
     startup?.failure(error);startup?.begin('database-cleanup');

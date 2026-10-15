@@ -47,6 +47,20 @@ See [service operations and live setup](docs/service.md) for recovery behavior,
 testing, security boundaries, and the precise one-time GitHub App/Daytona setup.
 No live execution or public deployment is enabled by the demo configuration.
 
+Environment configuration is validated together by the Zod schema in
+`packages/service/src/config.ts` before connecting to PostgreSQL. Errors name the
+variables that need fixing without displaying their values. Live execution also
+requires `DAYTONA_API_KEY` and `HERBIE_DAYTONA_OPENAI_SECRET` at this stage.
+
+With `pnpm service`, `NODE_ENV` defaults to `development`. Invalid configuration
+serves a detailed error page on the service's loopback address (normally
+http://127.0.0.1:8787), returning HTTP 503 even for health checks. An invalid port
+falls back to 8787 for this diagnostic page. Correct `.env` or the shell environment,
+then restart the service and reload. `NODE_ENV=production` exits with status 1
+instead of starting a diagnostic server. The hosted entrypoint and standalone
+worker always exit on invalid configuration.
+
+
 The [portable deployment runbook](docs/portable-deployment.md) describes the
 Node container, private Supabase database, and automatic GHCR → Flux OCI → k3s delivery.
 Production releases use [GitHub Actions](docs/github-actions.md), with verification,
