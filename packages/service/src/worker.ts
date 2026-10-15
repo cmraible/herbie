@@ -252,10 +252,12 @@ export async function runWorkerOnce(
 
 export async function reconcileReviews(store: Store, adapters: Adapters): Promise<void> {
   // Recovery of a past write must not depend on current CI, goal state, or PR state.
-  if (adapters.isReady)
+  if (adapters.readinessState)
     for (const job of await store.reviewJobs(adapters.mode, true)) {
       try {
-        if (await adapters.isReady(await executionFor(adapters, job, true))) {
+        const state = await adapters.readinessState(await executionFor(adapters, job, true));
+        if (state === "closed") await store.cancelReadiness(job.id);
+        if (state === "ready") {
           const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
           if (pr) await store.confirmReadiness(job.id, pr.url);
         }
@@ -285,12 +287,16 @@ export async function runWorker(
   signal: AbortSignal,
 ): Promise<void> {
   let nextReconciliation = 0;
+  let nextCiPoll = 0;
   while (!signal.aborted) {
     try {
       if (Date.now() >= nextReconciliation) {
         await reconcileReviews(store, adapters);
-        if (adapters.ciStatus) await store.requestCiReview();
         nextReconciliation = Date.now() + 30_000;
+      }
+      if (adapters.ciStatus && Date.now() >= nextCiPoll) {
+        await store.requestCiReview();
+        nextCiPoll = Date.now() + 10 * 60_000;
       }
       if (!signal.aborted) await runCiRepairOnce(store, adapters, workerId);
       if (!signal.aborted) await runWorkerOnce(store, adapters, workerId);

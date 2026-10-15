@@ -76,7 +76,7 @@ it cannot undo an external call already in flight.
   branch is never overwritten. Transient network/authentication failures keep
   backing off so fixing credentials can recover the saved work automatically.
 - Signed GitHub webhooks request reconciliation and CI review for Herbie's tracked
-  open PRs. A 30-second worker poll covers missed deliveries. Trusted GitHub API reads
+  open PRs. A ten-minute worker poll covers missed deliveries. GitHub rate-limit responses pause requests until the indicated reset (at least one minute). Trusted GitHub API reads
   determine merge/close state and current CI failures; webhook bodies never supply
   agent instructions. Read-only merge/close reconciliation uses the App installation
   even after the initiating user's login expires.

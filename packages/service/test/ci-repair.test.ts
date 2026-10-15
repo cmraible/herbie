@@ -19,7 +19,11 @@ for (const outcome of [
   "late-stale",
   "audit-closed",
   "audit-pending",
+  "audit-abandoned",
   "rerun",
+  "rerun-passed",
+  "rerun-changed",
+  "rerun-closed",
 ] as const) {
   test(`durable CI repair: ${outcome}`, async (t) => {
     const database = process.env.HERBIE_TEST_DATABASE_URL;
@@ -48,13 +52,13 @@ for (const outcome of [
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
     const pr = job.goal.pullRequests[0]!;
-    if (outcome === "audit-closed" || outcome === "audit-pending") {
+    if (outcome.startsWith("audit-")) {
       await store.beginReadiness(job.id);
-      if (outcome === "audit-closed") await store.reconcile(job.id, "closed");
+      if (outcome !== "audit-pending") await store.reconcile(job.id, "closed");
       const adapters: Adapters = {
         ...demo,
         mode: "live",
-        isReady: async () => true,
+        readinessState: async () => (outcome === "audit-abandoned" ? "closed" : "ready"),
         ciStatus: async () => null,
         authorize: async () => {
           throw new Error("User authorization unavailable");
@@ -74,7 +78,7 @@ for (const outcome of [
             [goal.id],
           )
         ).rowCount,
-        1,
+        outcome === "audit-abandoned" ? 0 : 1,
       );
       return;
     }
@@ -138,7 +142,7 @@ for (const outcome of [
       pushes = 0,
       reads = 0;
     let head = "a".repeat(40);
-    let rerunning = outcome === "rerun";
+    let rerunning = outcome.startsWith("rerun");
     const adapters: Adapters = {
       ...demo,
       mode: "live",
@@ -195,6 +199,35 @@ for (const outcome of [
       assert.equal(attempts, 1);
     }
     assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
+    if (outcome.startsWith("rerun-")) {
+      if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
+      else {
+        if (outcome === "rerun-passed")
+          adapters.ciStatus = async () => ({
+            state: "passed",
+            draft: false,
+            head,
+            pullRequest: pr,
+          });
+        else {
+          rerunning = false;
+          head = "b".repeat(40);
+        }
+        await store.requestCiReview();
+        await runCiRepairOnce(store, adapters, "discard");
+      }
+      const terminal = await store.pool.query(
+        "SELECT message FROM goal_events WHERE goal_id=$1 AND type='ci_repair_completed'",
+        [goal.id],
+      );
+      assert.ok(terminal.rows.some((row) => row.message.includes("discarded")));
+      assert.equal(
+        (await store.pool.query("SELECT state FROM ci_repairs WHERE head=$1", ["a".repeat(40)]))
+          .rows[0].state,
+        "completed",
+      );
+      return;
+    }
     if (outcome === "rerun") {
       assert.equal(
         (await store.pool.query("SELECT state FROM ci_repairs")).rows[0].state,
@@ -222,7 +255,7 @@ for (const outcome of [
       assert.equal(attempts, 3, "repair budget is per PR");
       assert.equal(pushes, 3);
       let ready = false;
-      adapters.ciStatus = async () => ({ state: "passed", head, pullRequest: pr });
+      adapters.ciStatus = async () => ({ state: "passed", draft: true, head, pullRequest: pr });
       adapters.markReady = async (_execution, expectedHead, beforeWrite) => {
         assert.equal(expectedHead, head);
         if (ready) return true;
@@ -260,6 +293,15 @@ for (const outcome of [
         ).rowCount,
         1,
       );
+      adapters.ciStatus = async () => ({ state: "passed", draft: false, head, pullRequest: pr });
+      let redundantWrites = 0;
+      adapters.markReady = async () => {
+        redundantWrites++;
+        throw new Error("Already-ready PR must not be revalidated");
+      };
+      await store.requestCiReview();
+      await runCiRepairOnce(store, adapters, "already-ready");
+      assert.equal(redundantWrites, 0);
       assert.equal(await store.ciReviewActive(job.id), true);
       await store.control(goal.id, "demo-user", "pause");
       assert.equal(await store.ciReviewActive(job.id), false);

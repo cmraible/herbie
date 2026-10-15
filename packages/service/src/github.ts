@@ -86,8 +86,11 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
   }
   const api = testEndpoints?.api ?? "https://api.github.com";
   const oauth = testEndpoints?.oauth ?? "https://github.com";
+  // A shared cooldown also covers freshly issued tokens after installation throttling.
+  let retryAt = 0;
   async function request(path: string, token: string, body?: unknown): Promise<unknown> {
     registerDiagnosticSecret(token);
+    if (Date.now() < retryAt) throw new GithubError(429, "GitHub rate limit cooldown");
     const response = await fetch(`${api}${path}`, {
       method: body === undefined ? "GET" : "POST",
       redirect: "error",
@@ -100,6 +103,26 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    if (
+      response.status === 429 ||
+      (response.status === 403 &&
+        (response.headers.has("retry-after") ||
+          response.headers.get("x-ratelimit-remaining") === "0"))
+    ) {
+      const retry = response.headers.get("retry-after");
+      const delay =
+        retry === null
+          ? 0
+          : /^\d+$/.test(retry)
+            ? Date.now() + Number(retry) * 1000
+            : Date.parse(retry);
+      const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
+      retryAt = Math.max(
+        Date.now() + 60_000,
+        Number.isFinite(delay) ? delay : 0,
+        Number.isFinite(reset) ? reset : 0,
+      );
+    }
     if (!response.ok)
       throw new GithubError(
         [401, 403, 404].includes(response.status) ? response.status : 502,
@@ -274,6 +297,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         html_url: z.string(),
         merge_commit_sha: z.string().nullable(),
         mergeable: z.boolean().nullable(),
+        draft: z.boolean(),
         head: z.object({
           sha: z.string().regex(/^[a-f0-9]{40}$/),
           ref: z.string(),
@@ -399,6 +423,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       return passing && succeeded
         ? {
             state: "passed",
+            draft: pr.draft,
             head: pr.head.sha,
             pullRequest: { number, url: pr.html_url },
           }
@@ -418,11 +443,15 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     branchCommit,
     isAncestor,
     installationToken,
-    async isReady(token: string, repository: string, number: number): Promise<boolean> {
+    async readinessState(
+      token: string,
+      repository: string,
+      number: number,
+    ): Promise<"ready" | "draft" | "closed"> {
       const pr = z
-        .object({ draft: z.boolean() })
+        .object({ draft: z.boolean(), state: z.enum(["open", "closed"]) })
         .parse(await request(`/repos/${repository}/pulls/${number}`, token));
-      return !pr.draft;
+      return !pr.draft ? "ready" : pr.state === "closed" ? "closed" : "draft";
     },
     async markReady(
       token: string,

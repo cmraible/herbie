@@ -23,6 +23,7 @@ export type CiStatus =
   | (CiFailure & { state: "failed" })
   | {
       state: "passed";
+      draft: boolean;
       head: string;
       pullRequest: { number: number; url: string };
     };
@@ -52,7 +53,7 @@ export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
-  isReady?(execution: Execution): Promise<boolean>;
+  readinessState?(execution: Execution): Promise<"ready" | "draft" | "closed">;
   ciStatus?(execution: Execution): Promise<CiStatus | null>;
   markReady?(
     execution: Execution,

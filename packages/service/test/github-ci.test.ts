@@ -15,10 +15,19 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   let mergeable: boolean | null = true;
   let headChecks = false,
     mergeChecks = true;
+  let limited = false;
   const paths: string[] = [];
   const server = createServer(async (req, res) => {
     const path = req.url!;
     paths.push(path);
+    if (limited) {
+      res.writeHead(403, {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 300),
+      });
+      res.end("{}");
+      return;
+    }
     let data: unknown;
     if (path === "/repos/owner/repo/pulls/1")
       data = {
@@ -161,15 +170,30 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(await ready(), true);
   assert.equal(writes, 2, "already-ready PR is not mutated again");
   pending = true;
-  assert.equal(await github.isReady("token", "owner/repo", 1), true);
+  assert.equal(await github.readinessState("token", "owner/repo", 1), "ready");
   state = "closed";
-  assert.equal(await github.isReady("token", "owner/repo", 1), true);
+  assert.equal(await github.readinessState("token", "owner/repo", 1), "ready");
   pending = false;
   draft = true;
   state = "closed";
   assert.equal(await ready(), false);
   conclusion = "failure";
   assert.equal(await get(), null);
+  draft = true;
+  assert.equal(await github.readinessState("token", "owner/repo", 1), "closed");
+  state = "open";
+  assert.equal(await github.readinessState("token", "owner/repo", 1), "draft");
+  limited = true;
+  await assert.rejects(get());
+  const count = paths.length;
+  await assert.rejects(get(), /cooldown/);
+  assert.equal(paths.length, count, "rate limit reset suppresses requests even with fresh tokens");
+  await assert.rejects(github.readinessState("new-token", "owner/repo", 1), /cooldown/);
+  assert.equal(paths.length, count);
+  limited = false;
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now + 301_000);
+  assert.equal(await github.readinessState("new-token", "owner/repo", 1), "draft");
 });
 
 test("signed CI webhooks enqueue repository reviews without executing agents", async (t) => {

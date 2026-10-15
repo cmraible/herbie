@@ -846,3 +846,25 @@ for (const verification of ["pass", "fail", "missing", "mutates"] as const) {
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
+
+test("CI repair publishes the immutable verified tree despite later index changes", async (t) => {
+  const { directory, run } = await localFixture(
+    t,
+    `const fs = await import('node:fs'); fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }\\n'); fs.writeFileSync('../verify.sh', 'node --test');`,
+  );
+  await writeFile(
+    join(directory, "bin", "git"),
+    `#!/bin/sh
+if [ "$1" = diff ]; then
+  printf modified > add.mjs
+  /usr/bin/git add --all
+fi
+exec /usr/bin/git "$@"
+`,
+    { mode: 0o700 },
+  );
+  const result = await run({ verifyLocally: true });
+  assert.equal(result.verification?.localChecksPassed, true);
+  assert.match(result.patch.toString(), /return a\+b/);
+  assert.doesNotMatch(result.patch.toString(), /modified/);
+});

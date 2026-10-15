@@ -976,6 +976,10 @@ export class Store {
     if (result.rowCount !== 1) throw conflict("Goal stopped before marking PR ready");
   }
 
+  async cancelReadiness(jobId: string): Promise<void> {
+    await this.pool.query("UPDATE jobs SET readiness_pending=false WHERE id=$1", [jobId]);
+  }
+
   async confirmReadiness(jobId: string, url: string): Promise<void> {
     await this.transaction(async (client) => {
       const result = await client.query<{ goal_id: string }>(
@@ -1002,10 +1006,7 @@ export class Store {
         !["queued", "running", "awaiting_review"].includes(goal.state)
       )
         return null;
-      await client.query(
-        "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state='waiting' AND head<>$2",
-        [jobId, head],
-      );
+      await this.discardWaitingCiWith(client, jobId, head);
       const resumed = await client.query<{ id: string }>(
         `UPDATE ci_repairs SET state='running',lease_owner=$3,lease_expires_at=clock_timestamp()+interval '30 seconds'
         WHERE job_id=$1 AND head=$2 AND state='waiting' RETURNING id`,
@@ -1067,10 +1068,27 @@ export class Store {
   }
 
   async discardWaitingCi(jobId: string): Promise<void> {
-    await this.pool.query(
-      "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state='waiting'",
-      [jobId],
+    await this.transaction((client) => this.discardWaitingCiWith(client, jobId));
+  }
+
+  private async discardWaitingCiWith(
+    client: PoolClient,
+    jobId: string,
+    keepHead?: string,
+  ): Promise<void> {
+    const result = await client.query<{ goal_id: string; head: string }>(
+      `UPDATE ci_repairs r SET state='completed' FROM jobs j
+      WHERE r.job_id=$1 AND r.job_id=j.id AND r.state='waiting'
+      AND ($2::text IS NULL OR r.head<>$2) RETURNING j.goal_id,r.head`,
+      [jobId, keepHead ?? null],
     );
+    for (const row of result.rows)
+      await addEvent(
+        client,
+        row.goal_id,
+        "ci_repair_completed",
+        `CI repair at ${row.head} discarded: checks or PR state changed.`,
+      );
   }
 
   async saveCiArtifact(
@@ -1154,6 +1172,7 @@ export class Store {
       return goal;
     if (!["awaiting_review", "cancelled"].includes(row.stage) || !pr)
       throw conflict("Only a published pull request can be reconciled");
+    await this.discardWaitingCiWith(client, jobId);
     const closed = outcome === "closed";
     const updatedPr = JSON.stringify({ ...pr, state: outcome });
     await client.query(

@@ -45,9 +45,10 @@ Explain the specific change you actually made, why you chose it, and how it help
     turnTimeoutMs: 20 * 60_000,
     disposableDaytona: true,
   });
+  let verifiedTree: string | undefined;
   if (verifyLocally) {
     await git("add", "--all");
-    const verifiedTree = (await git("write-tree")).trim();
+    verifiedTree = (await git("write-tree")).trim();
     if (!(await readFile(verificationFile, "utf8")).trim())
       throw new Error("Missing local verification commands");
     await promisify(execFile)("bash", ["-euo", "pipefail", fileURLToPath(verificationFile)], {
@@ -67,11 +68,11 @@ Explain the specific change you actually made, why you chose it, and how it help
   if (!pullRequestBody || pullRequestBody.length > 60_000)
     throw new Error("Invalid pull request description");
   // This checkout is disposable. Stage its final state to include new, non-ignored files.
-  await git("add", "--all");
+  if (!verifiedTree) await git("add", "--all");
   const patchFile = new URL("./changes.patch", import.meta.url);
   await git(
     "diff",
-    "--cached",
+    ...(verifiedTree ? [] : ["--cached"]),
     "--binary",
     "--full-index",
     "--no-color",
@@ -79,6 +80,7 @@ Explain the specific change you actually made, why you chose it, and how it help
     "--no-textconv",
     `--output=${fileURLToPath(patchFile)}`,
     baseCommit,
+    ...(verifiedTree ? [verifiedTree] : []),
     "--",
   );
   await writeFile(

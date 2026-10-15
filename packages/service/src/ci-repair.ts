@@ -28,6 +28,7 @@ export async function runCiRepairOnce(
     if (!failure) return true;
     if (failure.state === "passed") {
       await store.discardWaitingCi(job.id);
+      if (!failure.draft) return true;
       const ready = await adapters.markReady?.(execution, failure.head, () =>
         store.beginReadiness(job.id),
       );
