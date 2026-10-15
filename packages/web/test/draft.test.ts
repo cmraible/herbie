@@ -16,7 +16,7 @@ test('legacy named drafts preserve the original request for idempotent retries',
   const draft = {...newDraft('demo/example'),prompt:'Fix arithmetic'};
   const restored = draftSchema.parse({...draft,name:'Old custom name'});
   assert.equal(restored.requestId,draft.requestId);
-  assert.deepEqual(parseDraft(restored),{repository:'demo/example',name:'Old custom name',prompt:'Fix arithmetic'});
+  assert.deepEqual(parseDraft(restored),{repository:'demo/example',name:'Old custom name',prompt:'Fix arithmetic',maxWip:1});
 });
 
 test('WIP defaults to one for saved drafts and rejects invalid limits', () => {
