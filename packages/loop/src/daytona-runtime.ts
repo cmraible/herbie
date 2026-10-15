@@ -49,12 +49,12 @@ request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 45000
 HERBIE_CONFIG
-chown -R compat:compat /home/compat/.codex
+chown -R compat:compat /home/compat
 chmod 700 /home/compat/.codex
 chmod 600 /home/compat/.codex/config.toml
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} codex --version
 env PATH=${daytonaPath} node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
 env PATH=${daytonaPath} git --version
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -c 'import pathlib, sys, sysconfig; assert sys.prefix != sys.base_prefix or not pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").exists(), "Snapshot Python must allow user installs; provide standalone Python or a writable virtual environment"; print(sys.version)'
+runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -c 'import pathlib, sys, sysconfig; sys.exit("Snapshot Python must allow user installs; provide standalone Python") if pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").exists() else None; print(sys.version)'
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -m pip --version
 `;

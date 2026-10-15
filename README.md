@@ -270,12 +270,13 @@ inside that disposable sandbox. Archive digests are verified before extraction. 
 the runtime pins from the successful compatibility probe; it does not build a custom
 reusable snapshot or install repository dependencies. An optional snapshot must be
 a root-accessible Ubuntu-compatible runtime with Node 24+, Python 3 with pip, Git,
-Codex and `runuser`. Python must permit user installs (standalone Python or a
-writable virtual environment); externally managed system Python is rejected during preflight.
+Codex and `runuser`. Use standalone Python that permits user installs; externally managed system Python
+is rejected during preflight. Snapshot tools must be exposed in `/usr/local/bin`,
+`/usr/bin`, or `/bin`. Custom image `PATH` and `VIRTUAL_ENV` settings are not
+inherited by the agent; virtual-environment snapshots are not supported.
 The adapter runs Codex as the unprivileged `compat` user. Its user tool directory
 (`~/.local/bin`) follows system directories on `PATH`, so the agent can install optional tools with
-`python3 -m pip install --user lizard` in the default runtime; omit `--user` for
-a writable virtual-environment snapshot. Lizard is not preinstalled.
+`python3 -m pip install --user lizard`. Lizard is not preinstalled.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
