@@ -1,3 +1,4 @@
+import {serveConfigurationError} from './configuration-page.js';
 import {logFailure} from './diagnostic-log.js';
 import {createRuntime} from './runtime.js';
 import {createApiServer} from './http.js';
@@ -14,4 +15,7 @@ function shutdown(){
 }
 process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);
 
-}catch(error){logFailure(error,{component:'index-entrypoint'});process.exitCode=1;}
+}catch(error){
+  try{if(!await serveConfigurationError(error)){logFailure(error,{component:'index-entrypoint'});process.exitCode=1;}}
+  catch(error){logFailure(error,{component:'configuration-listener'});process.exitCode=1;}
+}
