@@ -17,8 +17,9 @@ organization secret). `HERBIE_GOAL_NAME_MODEL` defaults to `gpt-6-luna`.
 Naming uses the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/text)
 with a 10-second timeout. Provider failures or invalid names fail the create request;
 no goal, request record, or job is committed. Resolve the error and retry with the
-same idempotency key. Concurrent retries are serialized so a successful request
-creates one named goal and one job. Explicit names bypass the model call.
+same idempotency key. Naming runs without holding a database connection. Concurrent retries may each
+request a name, but the final transaction rechecks idempotency and commits only
+one named goal and one job. Explicit names bypass the model call.
 Demo mode generates names deterministically from the brief without calling a model.
 Existing goals keep their names. Renaming preserves the original create request
 for safe retries and does not change the prompt or start work.

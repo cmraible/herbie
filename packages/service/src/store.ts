@@ -87,6 +87,14 @@ export class Store {
     const request = goalInput.parse(input);
     z.string().uuid().parse(key);
     const fingerprint = requestFingerprint(request,mode);
+    let name=request.name;
+    if(name===undefined){
+      const existing=await this.pool.query('SELECT 1 FROM goal_requests WHERE owner_id=$1 AND request_key=$2',[ownerId,key]);
+      if(!existing.rowCount){
+        if(mode==='live'&&!this.nameGoal)throw new Error('Live goal naming is not configured');
+        name=goalName.parse(await (mode==='demo'?demoGoalName(request.prompt):this.nameGoal!(request.prompt)));
+      }
+    }
     return this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`request:${ownerId}:${key}`]);
       const existing = await client.query<Record<string, unknown>>('SELECT r.fingerprint,r.goal_id,(g.test_command IS NOT NULL) AS legacy FROM goal_requests r JOIN goals g ON g.id=r.goal_id WHERE r.owner_id=$1 AND r.request_key=$2', [ownerId, key]);
@@ -101,8 +109,7 @@ export class Store {
         return { goal, created: false };
       }
       const id = randomUUID();
-      if(request.name===undefined&&mode==='live'&&!this.nameGoal)throw new Error('Live goal naming is not configured');
-      const name=request.name??goalName.parse(await (mode==='demo'?demoGoalName(request.prompt):this.nameGoal!(request.prompt)));
+      if(name===undefined)throw new Error('Missing goal name');
       await client.query("INSERT INTO goals(id,owner_id,repository,prompt,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", [id, ownerId, request.repository, request.prompt, mode, name]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
