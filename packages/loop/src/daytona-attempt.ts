@@ -50,6 +50,8 @@ export interface DaytonaAttemptChanges {
   patch: Buffer;
   // Optional only for artifacts saved before agent-authored descriptions.
   pullRequestBody?: string;
+  // Optional only for artifacts saved before agent-authored titles.
+  pullRequestTitle?: string;
   // Issued by the host only after the goal and sandbox deletion succeed.
   verification?: {
     // Version 2 also recorded tests; version 3 records completion and cleanup only.
@@ -267,7 +269,20 @@ export async function runDaytonaAttempt(
       artifact.pullRequestBody.length > 60_000
     )
       throw new Error("Invalid pull request description");
-    changes = { baseCommit: artifact.baseCommit, patch, pullRequestBody: artifact.pullRequestBody };
+    if (
+      !("pullRequestTitle" in artifact) ||
+      typeof artifact.pullRequestTitle !== "string" ||
+      !artifact.pullRequestTitle.trim() ||
+      artifact.pullRequestTitle.length > 256 ||
+      /[\r\n]/.test(artifact.pullRequestTitle)
+    )
+      throw new Error("Invalid pull request title");
+    changes = {
+      pullRequestTitle: artifact.pullRequestTitle.trim(),
+      baseCommit: artifact.baseCommit,
+      patch,
+      pullRequestBody: artifact.pullRequestBody,
+    };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
     diagnostics.push(attemptDiagnostic(cause, stage));
