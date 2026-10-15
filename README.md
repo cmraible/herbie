@@ -80,7 +80,6 @@ then restart the service and reload. `NODE_ENV=production` exits with status 1
 instead of starting a diagnostic server. The hosted entrypoint and standalone
 worker always exit on invalid configuration.
 
-
 The [portable deployment runbook](docs/portable-deployment.md) describes the
 Node container, private Supabase database, and automatic GHCR → Flux OCI → k3s delivery.
 Production releases use [GitHub Actions](docs/github-actions.md), with verification,
@@ -122,16 +121,21 @@ pnpm build
 
 These commands run across the workspace. To target one package, use `pnpm --filter @herbie/demo test` or `pnpm --filter @herbie/loop build`.
 
+Run `pnpm lint` and `pnpm format:check` to check the repo with Oxlint and Oxfmt.
+Use `pnpm lint:fix` and `pnpm format` to apply fixes and formatting. Both tools use their default configurations.
+CI checks lint and formatting. `pnpm install` installs a pre-commit hook that formats
+staged files with Oxfmt, preserving unstaged changes through lint-staged.
+
 The internal app-server helpers are not wired into the CLI. After building, one
 complete attempt can be called with:
 
 ```js
-import { runCodexAttempt } from './packages/loop/dist/codex-process.js';
+import { runCodexAttempt } from "./packages/loop/dist/codex-process.js";
 
 const controller = new AbortController();
-await runCodexAttempt('codex', ['app-server'], {
-  cwd: '/path/to/checkout',
-  goal: 'Fix the failing addition test',
+await runCodexAttempt("codex", ["app-server"], {
+  cwd: "/path/to/checkout",
+  goal: "Fix the failing addition test",
   signal: controller.signal, // optional AbortController owned by the caller
 });
 ```
@@ -240,18 +244,22 @@ After `pnpm build`, `runDaytonaAttempt` in
 `packages/loop/dist/daytona-attempt.js` connects the repo and goal flow to Daytona:
 
 ```js
-import { runDaytonaAttempt } from './packages/loop/dist/daytona-attempt.js';
+import { runDaytonaAttempt } from "./packages/loop/dist/daytona-attempt.js";
 
 // daytona is an already configured SDK client with requestTimeoutMs: 30_000.
-const changes = await runDaytonaAttempt((params, options) => daytona.create(params, options), {
-  // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
-  repoUrl: 'https://github.com/your-org/test-repo.git',
-  // commit: 'full commit SHA', // optional; otherwise clones the default branch
-  goal: 'Fix the failing addition test',
-  // Default organization networking is inherited; no network override is required.
-  secrets: { OPENAI_API_KEY: 'existing-organization-secret-name' },
-  // outboundProxyUrl: 'http://approved-proxy:8080',
-}, console.log);
+const changes = await runDaytonaAttempt(
+  (params, options) => daytona.create(params, options),
+  {
+    // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
+    repoUrl: "https://github.com/your-org/test-repo.git",
+    // commit: 'full commit SHA', // optional; otherwise clones the default branch
+    goal: "Fix the failing addition test",
+    // Default organization networking is inherited; no network override is required.
+    secrets: { OPENAI_API_KEY: "existing-organization-secret-name" },
+    // outboundProxyUrl: 'http://approved-proxy:8080',
+  },
+  console.log,
+);
 // changes.baseCommit is the cloned HEAD; changes.patch is a Buffer to apply there.
 // Persist this returned artifact in the caller for PR publication.
 ```
@@ -337,20 +345,25 @@ API client must already be configured on the host; neither is sent to the Codex
 sandbox. The caller supplies a narrow `createPullRequest` adapter for that client:
 
 ```js
-import { publishPatch } from './packages/loop/dist/publish-patch.js';
+import { publishPatch } from "./packages/loop/dist/publish-patch.js";
 
 // changes is the successful return from runDaytonaAttempt.
 // github is an existing authenticated client; this example uses Octokit's shape.
-const published = await publishPatch(async ({ repository, ...pull }) => {
-  const [owner, repo] = repository.split('/');
-  const { data } = await github.rest.pulls.create({ owner, repo, ...pull });
-  return { url: data.html_url };
-}, {
-  repository: 'your-org/test-repo', baseBranch: 'main',
-  branch: 'herbie/fix-addition-001', // caller-owned, stable, new branch name
-  title: 'Fix addition', body: 'Review the changes and repository CI results before merging.',
-  changes,
-});
+const published = await publishPatch(
+  async ({ repository, ...pull }) => {
+    const [owner, repo] = repository.split("/");
+    const { data } = await github.rest.pulls.create({ owner, repo, ...pull });
+    return { url: data.html_url };
+  },
+  {
+    repository: "your-org/test-repo",
+    baseBranch: "main",
+    branch: "herbie/fix-addition-001", // caller-owned, stable, new branch name
+    title: "Fix addition",
+    body: "Review the changes and repository CI results before merging.",
+    changes,
+  },
+);
 console.log(published.url); // also returns branch and commit
 ```
 

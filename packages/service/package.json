@@ -11,9 +11,9 @@
     "worker": "tsx src/worker-main.ts"
   },
   "dependencies": {
+    "@daytona/sdk": "0.220.0",
     "@herbie/contracts": "workspace:*",
     "@herbie/loop": "workspace:*",
-    "@daytona/sdk": "0.220.0",
     "pg": "^8.16.3",
     "zod": "^4.3.6"
   },

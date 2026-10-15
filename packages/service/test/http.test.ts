@@ -1,77 +1,166 @@
-import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
-import test from 'node:test';
-import pg from 'pg';
-import {Store} from '../src/store.js';
-import {PgAuthStore,migrateAuth} from '../src/auth-store.js';
-import {createAuth} from '../src/auth.js';
-import {createDemoAdapters} from '../src/demo.js';
-import {createApiServer} from '../src/http.js';
-import {goalSchema,sessionSchema} from '@herbie/contracts';
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import test from "node:test";
+import pg from "pg";
+import { Store } from "../src/store.js";
+import { PgAuthStore, migrateAuth } from "../src/auth-store.js";
+import { createAuth } from "../src/auth.js";
+import { createDemoAdapters } from "../src/demo.js";
+import { createApiServer } from "../src/http.js";
+import { goalSchema, sessionSchema } from "@herbie/contracts";
 
-for(const version of [undefined,'2']) test(`HTTP goal contracts, sessions, idempotency and origin checks (version: ${version ?? 'legacy'})`,async t=>{
-  const responseSchema=version ? goalSchema : goalSchema.omit({maxWip:true,pullRequests:true}).strict();
-  const database=process.env.HERBIE_TEST_DATABASE_URL;
-  if(!database) return t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration');
-  const schema=`http_${randomUUID().replaceAll('-','')}`;
-  const admin=new pg.Pool({connectionString:database});
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  const pool=new pg.Pool({connectionString:database,options:`-c search_path=${schema}`});
-  const store=new Store(pool); await store.migrate(); await migrateAuth(pool);
-  const auth=createAuth({mode:'demo',publicUrl:'http://localhost:8787',credentialKey:Buffer.alloc(32,7).toString('base64')},new PgAuthStore(pool));
-  const server=createApiServer({store,auth,adapters:createDemoAdapters(),publicUrl:'http://localhost:8787'});
-  t.after(async()=>{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
-  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const address=server.address(); assert.ok(address&&typeof address==='object');
-  const base=`http://127.0.0.1:${address.port}`;
-  assert.equal((await fetch(`${base}/api/goals`)).status,401);
-  const login=await fetch(`${base}/api/demo/login`,{method:'POST',headers:{'content-type':'application/json',origin:'http://localhost:8787'},body:'{}'});
-  assert.equal(login.status,200);sessionSchema.parse(await login.json());
-  const cookie=login.headers.get('set-cookie')?.split(';')[0];assert.ok(cookie);
-  const input={repository:'demo/example',name:'Addition fix',prompt:'Make addition correct',...(version ? {maxWip:2} : {})};
-  const key=randomUUID();
-  const versionHeaders:Record<string,string>=version ? {'x-herbie-goal-version':version} : {};
-  const headers={'content-type':'application/json',cookie,'idempotency-key':key,...versionHeaders};
-  assert.equal((await fetch(`${base}/api/goals`,{method:'POST',headers,body:JSON.stringify(input)})).status,403);
-  const request=()=>fetch(`${base}/api/goals`,{method:'POST',headers:{...headers,origin:'http://localhost:8787'},body:JSON.stringify(input)});
-  const first=await request();assert.equal(first.status,201);const goal=responseSchema.parse(await first.json());
-  const replay=await request();assert.equal(replay.status,200);assert.equal(responseSchema.parse(await replay.json()).id,goal.id);
-  assert.equal(goal.name,'Addition fix');
-  const status=responseSchema.parse(await (await fetch(`${base}/api/goals/${goal.id}`,{headers})).json());
-  assert.deepEqual(status,goal);
-  const goals=responseSchema.array().parse(await (await fetch(`${base}/api/goals`,{headers})).json());
-  assert.deepEqual(goals,[goal]);
-  if(version){
-    assert.equal(goalSchema.parse(goal).maxWip,2);
-    assert.deepEqual(goalSchema.parse(goal).pullRequests,[]);
-  }
-  const rename=(name:string, extraHeaders={})=>fetch(`${base}/api/goals/${goal.id}/name`,{method:'POST',headers:{...headers,origin:'http://localhost:8787',...extraHeaders},body:JSON.stringify({name})});
-  assert.equal((await rename('Blocked',{origin:'http://other.example'})).status,403);
-  assert.equal((await rename('   ')).status,400);
-  const renamed=responseSchema.parse(await (await rename('Better addition')).json());
-  assert.equal(renamed.name,'Better addition');
-  assert.equal(renamed.prompt,input.prompt);
-  assert.equal(responseSchema.parse(await (await request()).json()).name,'Better addition');
-  const editPrompt=(prompt:string, extraHeaders={})=>fetch(`${base}/api/goals/${goal.id}/prompt`,{method:'POST',headers:{...headers,origin:'http://localhost:8787',...extraHeaders},body:JSON.stringify({prompt})});
-  assert.equal((await editPrompt('Blocked',{origin:'http://other.example'})).status,403);
-  assert.equal((await editPrompt('   ')).status,400);
-  assert.equal((await editPrompt('x'.repeat(8001))).status,400);
-  const edited=responseSchema.parse(await (await editPrompt('  Also cover subtraction  ')).json());
-  assert.equal(edited.prompt,'Also cover subtraction');
-  assert.equal(edited.name,'Better addition');
-  assert.equal(responseSchema.parse(await (await request()).json()).prompt,edited.prompt);
-  const update=(input:unknown)=>fetch(`${base}/api/goals/${goal.id}`,{method:'POST',headers:{...headers,origin:'http://localhost:8787'},body:JSON.stringify(input)});
-  assert.equal((await update({name:'Changed',prompt:'New',maxWip:0})).status,400);
-  assert.equal((await update({repository:'other/repo'})).status,400);
-  const updated=responseSchema.parse(await (await update({name:'Updated goal',prompt:'Updated prompt',maxWip:3})).json());
-  assert.equal(updated.name,'Updated goal');
-  assert.equal(updated.prompt,'Updated prompt');
-  if(version) assert.equal(goalSchema.parse(updated).maxWip,3);
-  assert.equal(responseSchema.parse(await (await request()).json()).prompt,'Updated prompt');
-  const paused=await fetch(`${base}/api/goals/${goal.id}/pause`,{method:'POST',headers:{cookie,origin:'http://localhost:8787',...versionHeaders}});
-  assert.equal(responseSchema.parse(await paused.json()).state,'paused');
-  const cancel=()=>fetch(`${base}/api/goals/${goal.id}/cancel`,{method:'POST',headers:{cookie,origin:'http://localhost:8787',...versionHeaders}});
-  assert.equal(responseSchema.parse(await (await cancel()).json()).state,'cancelled');
-  assert.equal(responseSchema.parse(await (await cancel()).json()).state,'cancelled');
-  assert.equal((await fetch(`${base}/api/goals/${randomUUID()}`,{headers:{cookie}})).status,404);
-});
+for (const version of [undefined, "2"])
+  test(`HTTP goal contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
+    const responseSchema = version
+      ? goalSchema
+      : goalSchema.omit({ maxWip: true, pullRequests: true }).strict();
+    const database = process.env.HERBIE_TEST_DATABASE_URL;
+    if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
+    const schema = `http_${randomUUID().replaceAll("-", "")}`;
+    const admin = new pg.Pool({ connectionString: database });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new pg.Pool({ connectionString: database, options: `-c search_path=${schema}` });
+    const store = new Store(pool);
+    await store.migrate();
+    await migrateAuth(pool);
+    const auth = createAuth(
+      {
+        mode: "demo",
+        publicUrl: "http://localhost:8787",
+        credentialKey: Buffer.alloc(32, 7).toString("base64"),
+      },
+      new PgAuthStore(pool),
+    );
+    const server = createApiServer({
+      store,
+      auth,
+      adapters: createDemoAdapters(),
+      publicUrl: "http://localhost:8787",
+    });
+    t.after(async () => {
+      await new Promise<void>((resolve, reject) =>
+        server.close((e) => (e ? reject(e) : resolve())),
+      );
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const base = `http://127.0.0.1:${address.port}`;
+    assert.equal((await fetch(`${base}/api/goals`)).status, 401);
+    const login = await fetch(`${base}/api/demo/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
+      body: "{}",
+    });
+    assert.equal(login.status, 200);
+    sessionSchema.parse(await login.json());
+    const cookie = login.headers.get("set-cookie")?.split(";")[0];
+    assert.ok(cookie);
+    const input = {
+      repository: "demo/example",
+      name: "Addition fix",
+      prompt: "Make addition correct",
+      ...(version ? { maxWip: 2 } : {}),
+    };
+    const key = randomUUID();
+    const versionHeaders: Record<string, string> = version
+      ? { "x-herbie-goal-version": version }
+      : {};
+    const headers = {
+      "content-type": "application/json",
+      cookie,
+      "idempotency-key": key,
+      ...versionHeaders,
+    };
+    assert.equal(
+      (await fetch(`${base}/api/goals`, { method: "POST", headers, body: JSON.stringify(input) }))
+        .status,
+      403,
+    );
+    const request = () =>
+      fetch(`${base}/api/goals`, {
+        method: "POST",
+        headers: { ...headers, origin: "http://localhost:8787" },
+        body: JSON.stringify(input),
+      });
+    const first = await request();
+    assert.equal(first.status, 201);
+    const goal = responseSchema.parse(await first.json());
+    const replay = await request();
+    assert.equal(replay.status, 200);
+    assert.equal(responseSchema.parse(await replay.json()).id, goal.id);
+    assert.equal(goal.name, "Addition fix");
+    const status = responseSchema.parse(
+      await (await fetch(`${base}/api/goals/${goal.id}`, { headers })).json(),
+    );
+    assert.deepEqual(status, goal);
+    const goals = responseSchema
+      .array()
+      .parse(await (await fetch(`${base}/api/goals`, { headers })).json());
+    assert.deepEqual(goals, [goal]);
+    if (version) {
+      assert.equal(goalSchema.parse(goal).maxWip, 2);
+      assert.deepEqual(goalSchema.parse(goal).pullRequests, []);
+    }
+    const rename = (name: string, extraHeaders = {}) =>
+      fetch(`${base}/api/goals/${goal.id}/name`, {
+        method: "POST",
+        headers: { ...headers, origin: "http://localhost:8787", ...extraHeaders },
+        body: JSON.stringify({ name }),
+      });
+    assert.equal((await rename("Blocked", { origin: "http://other.example" })).status, 403);
+    assert.equal((await rename("   ")).status, 400);
+    const renamed = responseSchema.parse(await (await rename("Better addition")).json());
+    assert.equal(renamed.name, "Better addition");
+    assert.equal(renamed.prompt, input.prompt);
+    assert.equal(responseSchema.parse(await (await request()).json()).name, "Better addition");
+    const editPrompt = (prompt: string, extraHeaders = {}) =>
+      fetch(`${base}/api/goals/${goal.id}/prompt`, {
+        method: "POST",
+        headers: { ...headers, origin: "http://localhost:8787", ...extraHeaders },
+        body: JSON.stringify({ prompt }),
+      });
+    assert.equal((await editPrompt("Blocked", { origin: "http://other.example" })).status, 403);
+    assert.equal((await editPrompt("   ")).status, 400);
+    assert.equal((await editPrompt("x".repeat(8001))).status, 400);
+    const edited = responseSchema.parse(
+      await (await editPrompt("  Also cover subtraction  ")).json(),
+    );
+    assert.equal(edited.prompt, "Also cover subtraction");
+    assert.equal(edited.name, "Better addition");
+    assert.equal(responseSchema.parse(await (await request()).json()).prompt, edited.prompt);
+    const update = (input: unknown) =>
+      fetch(`${base}/api/goals/${goal.id}`, {
+        method: "POST",
+        headers: { ...headers, origin: "http://localhost:8787" },
+        body: JSON.stringify(input),
+      });
+    assert.equal((await update({ name: "Changed", prompt: "New", maxWip: 0 })).status, 400);
+    assert.equal((await update({ repository: "other/repo" })).status, 400);
+    const updated = responseSchema.parse(
+      await (await update({ name: "Updated goal", prompt: "Updated prompt", maxWip: 3 })).json(),
+    );
+    assert.equal(updated.name, "Updated goal");
+    assert.equal(updated.prompt, "Updated prompt");
+    if (version) assert.equal(goalSchema.parse(updated).maxWip, 3);
+    assert.equal(responseSchema.parse(await (await request()).json()).prompt, "Updated prompt");
+    const paused = await fetch(`${base}/api/goals/${goal.id}/pause`, {
+      method: "POST",
+      headers: { cookie, origin: "http://localhost:8787", ...versionHeaders },
+    });
+    assert.equal(responseSchema.parse(await paused.json()).state, "paused");
+    const cancel = () =>
+      fetch(`${base}/api/goals/${goal.id}/cancel`, {
+        method: "POST",
+        headers: { cookie, origin: "http://localhost:8787", ...versionHeaders },
+      });
+    assert.equal(responseSchema.parse(await (await cancel()).json()).state, "cancelled");
+    assert.equal(responseSchema.parse(await (await cancel()).json()).state, "cancelled");
+    assert.equal(
+      (await fetch(`${base}/api/goals/${randomUUID()}`, { headers: { cookie } })).status,
+      404,
+    );
+  });

@@ -3,13 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "description": "Herbie workspace: an AI loop controller and ChatGPT demo.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
+    "prepare": "node -e \"if (require('node:fs').existsSync('.git') && process.env.NODE_ENV !== 'production' && !process.env.CI) import('husky').then(m => console.log(m.default()))\"",
     "verify": "bash scripts/verify.sh",
     "start": "pnpm --filter @herbie/loop start",
     "demo": "pnpm --filter @herbie/demo start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @herbie/loop test:e2e",
     "test:daytona": "pnpm --filter @herbie/loop test:daytona",
@@ -18,16 +24,22 @@
     "cli": "pnpm --filter @herbie/cli start",
     "test:web": "pnpm --filter @herbie/web test:e2e"
   },
-  "engines": {
-    "node": ">=24"
-  },
   "dependencies": {
     "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.88.0",
     "typescript": "^7.0.2"
   },
-  "packageManager": "pnpm@10.34.6",
-  "license": "MIT"
+  "lint-staged": {
+    "*": "oxfmt --write"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.34.6"
 }

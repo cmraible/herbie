@@ -1,143 +1,176 @@
-import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
-import { test, type TestContext } from 'node:test';
-import { Pool } from 'pg';
-import { Store } from '../src/store.js';
-import { createDemoAdapters } from '../src/demo.js';
-import { runWorkerOnce } from '../src/worker.js';
-import type { Adapters } from '../src/adapters.js';
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import { test, type TestContext } from "node:test";
+import { Pool } from "pg";
+import { Store } from "../src/store.js";
+import { createDemoAdapters } from "../src/demo.js";
+import { runWorkerOnce } from "../src/worker.js";
+import type { Adapters } from "../src/adapters.js";
 
 async function database(t: TestContext): Promise<Store | null> {
   const connectionString = process.env.HERBIE_TEST_DATABASE_URL;
-  if (!connectionString) { t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration'); return null; }
-  const schema = `recovery_${randomUUID().replaceAll('-', '')}`;
+  if (!connectionString) {
+    t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
+    return null;
+  }
+  const schema = `recovery_${randomUUID().replaceAll("-", "")}`;
   const admin = new Pool({ connectionString });
   await admin.query(`CREATE SCHEMA ${schema}`);
   const store = new Store(new Pool({ connectionString, options: `-c search_path=${schema}` }));
-  t.after(async () => { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
+  t.after(async () => {
+    await store.close();
+    await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+    await admin.end();
+  });
   await store.migrate();
   return store;
 }
-const request = { repository: 'demo/example', prompt: 'Fix arithmetic' };
-const artifact = { baseCommit: '0'.repeat(40), patch: Buffer.from('DEMO recovered artifact') };
+const request = { repository: "demo/example", prompt: "Fix arithmetic" };
+const artifact = { baseCommit: "0".repeat(40), patch: Buffer.from("DEMO recovered artifact") };
 
-test('worker survives losing its attempt lease without publishing or repeating paid work', async t => {
+test("worker survives losing its attempt lease without publishing or repeating paid work", async (t) => {
   const store = await database(t);
   if (!store) return;
-  const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+  const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
   const adapters: Adapters = {
     ...createDemoAdapters(),
     async attempt(execution) {
       // Simulate an unresponsive worker being recovered while its external attempt completes.
-      assert.equal(await store.heartbeat(execution.attemptId, 'old-worker', 1), true);
+      assert.equal(await store.heartbeat(execution.attemptId, "old-worker", 1), true);
       await delay(15);
       assert.equal(await store.recoverExpired(), 1);
       return artifact;
     },
-    async publish() { throw new Error('A worker without a lease must not publish'); },
+    async publish() {
+      throw new Error("A worker without a lease must not publish");
+    },
   };
-  assert.equal(await runWorkerOnce(store, adapters, 'old-worker'), true);
+  assert.equal(await runWorkerOnce(store, adapters, "old-worker"), true);
   const interrupted = await store.getGoal(goal.id);
-  assert.equal(interrupted?.state, 'needs_attention');
+  assert.equal(interrupted?.state, "needs_attention");
   assert.equal(interrupted.attemptCount, 1);
   assert.equal(interrupted.pullRequest, null);
-  assert.equal(await runWorkerOnce(store, adapters, 'new-worker'), false);
+  assert.equal(await runWorkerOnce(store, adapters, "new-worker"), false);
 });
 
-test('a replacement worker reconciles an interrupted publication without calling publish again', async t => {
+test("a replacement worker reconciles an interrupted publication without calling publish again", async (t) => {
   const store = await database(t);
   if (!store) return;
-  const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
-  const claimed = await store.claim('lost-publisher');
+  const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
+  const claimed = await store.claim("lost-publisher");
   assert.ok(claimed);
-  await store.saveArtifact(claimed.id, 'lost-publisher', artifact);
-  await store.beginPublication(claimed.id, 'lost-publisher');
+  await store.saveArtifact(claimed.id, "lost-publisher", artifact);
+  await store.beginPublication(claimed.id, "lost-publisher");
   // Remote PR creation succeeded just before the service process disappeared.
-  const remotePr = { url: 'https://demo.invalid/herbie/pull/42', number: 42, branch: claimed.branch };
-  await store.heartbeat(claimed.id, 'lost-publisher', 1);
+  const remotePr = {
+    url: "https://demo.invalid/herbie/pull/42",
+    number: 42,
+    branch: claimed.branch,
+  };
+  await store.heartbeat(claimed.id, "lost-publisher", 1);
   await delay(15);
   const adapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt() { throw new Error('Recovered publication must not rerun its attempt'); },
-    async publish() { throw new Error('Recovered publication must not repeat its write'); },
+    async attempt() {
+      throw new Error("Recovered publication must not rerun its attempt");
+    },
+    async publish() {
+      throw new Error("Recovered publication must not repeat its write");
+    },
     async reconcile(execution) {
       assert.equal(execution.branch, remotePr.branch);
-      return { ...remotePr, state: 'open' };
+      return { ...remotePr, state: "open" };
     },
   };
-  assert.equal(await runWorkerOnce(store, adapters, 'replacement'), true);
-  assert.equal((await store.getGoal(goal.id))?.state, 'awaiting_review');
-  assert.deepEqual((await store.getGoal(goal.id))?.pullRequest, { ...remotePr, state: 'open' });
-  assert.equal(await runWorkerOnce(store, adapters, 'another-worker'), false);
+  assert.equal(await runWorkerOnce(store, adapters, "replacement"), true);
+  assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
+  assert.deepEqual((await store.getGoal(goal.id))?.pullRequest, { ...remotePr, state: "open" });
+  assert.equal(await runWorkerOnce(store, adapters, "another-worker"), false);
 });
 
-test('worker resumes a held artifact after restart and cooperative cancellation never publishes', async t => {
+test("worker resumes a held artifact after restart and cooperative cancellation never publishes", async (t) => {
   const store = await database(t);
   if (!store) return;
-  const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
-  const claimed = await store.claim('old-worker');
+  const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
+  const claimed = await store.claim("old-worker");
   assert.ok(claimed);
-  await store.control(goal.id, 'demo-user', 'pause');
-  await store.saveArtifact(claimed.id, 'old-worker', artifact);
+  await store.control(goal.id, "demo-user", "pause");
+  await store.saveArtifact(claimed.id, "old-worker", artifact);
   const resumeAdapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt() { throw new Error('A saved artifact must not rerun its paid attempt'); },
+    async attempt() {
+      throw new Error("A saved artifact must not rerun its paid attempt");
+    },
   };
-  assert.equal(await runWorkerOnce(store, resumeAdapters, 'new-worker'), false);
-  await store.control(goal.id, 'demo-user', 'resume');
-  assert.equal(await runWorkerOnce(store, resumeAdapters, 'new-worker'), true);
-  assert.equal((await store.getGoal(goal.id))?.state, 'awaiting_review');
+  assert.equal(await runWorkerOnce(store, resumeAdapters, "new-worker"), false);
+  await store.control(goal.id, "demo-user", "resume");
+  assert.equal(await runWorkerOnce(store, resumeAdapters, "new-worker"), true);
+  assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
   assert.equal((await store.getGoal(goal.id))?.attemptCount, 1);
-  await store.control(goal.id, 'demo-user', 'cancel');
-  const { goal: cancelled } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+  await store.control(goal.id, "demo-user", "cancel");
+  const { goal: cancelled } = await store.createGoal("demo-user", request, "demo", randomUUID());
   const cancelAdapters: Adapters = {
     ...createDemoAdapters(),
     async attempt(execution) {
-      await store.control(execution.goal.id, 'demo-user', 'cancel');
+      await store.control(execution.goal.id, "demo-user", "cancel");
       return artifact;
     },
-    async publish() { throw new Error('Cancellation must discard the artifact before publication'); },
+    async publish() {
+      throw new Error("Cancellation must discard the artifact before publication");
+    },
   };
-  assert.equal(await runWorkerOnce(store, cancelAdapters, 'new-worker'), true);
-  assert.equal((await store.getGoal(cancelled.id))?.state, 'cancelled');
+  assert.equal(await runWorkerOnce(store, cancelAdapters, "new-worker"), true);
+  assert.equal((await store.getGoal(cancelled.id))?.state, "cancelled");
   assert.equal((await store.getGoal(cancelled.id))?.pullRequest, null);
-  assert.equal(await runWorkerOnce(store, cancelAdapters, 'another-worker'), false);
+  assert.equal(await runWorkerOnce(store, cancelAdapters, "another-worker"), false);
 });
 
-test('a stale publisher cannot overwrite a replacement worker that already recovered its PR', async t => {
+test("a stale publisher cannot overwrite a replacement worker that already recovered its PR", async (t) => {
   const store = await database(t);
   if (!store) return;
-  const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+  const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
   let remotePr: { url: string; number: number; branch: string } | null = null;
   const adapters: Adapters = {
     ...createDemoAdapters(),
     async publish(execution) {
-      if (remotePr) throw new Error('Duplicate remote publication');
-      const published = { url: 'https://demo.invalid/herbie/pull/43', number: 43, branch: execution.branch };
+      if (remotePr) throw new Error("Duplicate remote publication");
+      const published = {
+        url: "https://demo.invalid/herbie/pull/43",
+        number: 43,
+        branch: execution.branch,
+      };
       remotePr = published;
-      await store.heartbeat(execution.attemptId, 'stale-publisher', 1);
+      await store.heartbeat(execution.attemptId, "stale-publisher", 1);
       await delay(15);
-      assert.equal(await runWorkerOnce(store, adapters, 'replacement'), true);
+      assert.equal(await runWorkerOnce(store, adapters, "replacement"), true);
       return published;
     },
-    async reconcile() { return remotePr ? { ...remotePr, state: 'open' } : null; },
+    async reconcile() {
+      return remotePr ? { ...remotePr, state: "open" } : null;
+    },
   };
-  assert.equal(await runWorkerOnce(store, adapters, 'stale-publisher'), true);
+  assert.equal(await runWorkerOnce(store, adapters, "stale-publisher"), true);
   const recovered = await store.getGoal(goal.id);
-  assert.equal(recovered?.state, 'awaiting_review');
+  assert.equal(recovered?.state, "awaiting_review");
   assert.equal(recovered.error, null);
   assert.equal(recovered.pullRequest?.number, 43);
   assert.equal(recovered.attemptCount, 1);
-  assert.equal((await store.events(goal.id)).filter(event => event.type === 'pull_request_opened').length, 1);
+  assert.equal(
+    (await store.events(goal.id)).filter((event) => event.type === "pull_request_opened").length,
+    1,
+  );
 });
 
 for (const heartbeatMs of [5000, 400]) {
-  const observed = heartbeatMs === 400 ? 'after a heartbeat reports lease loss' : 'before the first scheduled heartbeat';
-  test(`authorization finishing ${observed} cannot start a paid attempt`, async t => {
+  const observed =
+    heartbeatMs === 400
+      ? "after a heartbeat reports lease loss"
+      : "before the first scheduled heartbeat";
+  test(`authorization finishing ${observed} cannot start a paid attempt`, async (t) => {
     const store = await database(t);
     if (!store) return;
-    const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+    const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const effects: string[] = [];
@@ -149,10 +182,16 @@ for (const heartbeatMs of [5000, 400]) {
         await release.promise;
         return demo.authorize(userId, repository);
       },
-      async attempt() { effects.push('paid attempt'); return artifact; },
-      async publish(execution, changes, requireLease) { effects.push('publication'); return demo.publish(execution, changes, requireLease); },
+      async attempt() {
+        effects.push("paid attempt");
+        return artifact;
+      },
+      async publish(execution, changes, requireLease) {
+        effects.push("publication");
+        return demo.publish(execution, changes, requireLease);
+      },
     };
-    const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
+    const running = runWorkerOnce(store, adapters, "stale-worker", { leaseMs: 250, heartbeatMs });
     await entered.promise;
     await delay(600);
     const recovered = await store.recoverExpired();
@@ -160,25 +199,34 @@ for (const heartbeatMs of [5000, 400]) {
     await running;
     assert.equal(recovered, 1);
     assert.deepEqual(effects, []);
-    assert.equal((await store.getGoal(goal.id))?.state, 'needs_attention');
-    assert.equal(await runWorkerOnce(store, adapters, 'replacement'), false);
+    assert.equal((await store.getGoal(goal.id))?.state, "needs_attention");
+    assert.equal(await runWorkerOnce(store, adapters, "replacement"), false);
   });
 
-  test(`reconciliation finishing ${observed} cannot publish`, async t => {
+  test(`reconciliation finishing ${observed} cannot publish`, async (t) => {
     const store = await database(t);
     if (!store) return;
-    const { goal } = await store.createGoal('demo-user', request, 'demo', randomUUID());
+    const { goal } = await store.createGoal("demo-user", request, "demo", randomUUID());
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const effects: string[] = [];
     const demo = createDemoAdapters();
     const adapters: Adapters = {
       ...demo,
-      async attempt() { return artifact; },
-      async reconcile() { entered.resolve(); await release.promise; return null; },
-      async publish(execution, changes, requireLease) { effects.push('publication'); return demo.publish(execution, changes, requireLease); },
+      async attempt() {
+        return artifact;
+      },
+      async reconcile() {
+        entered.resolve();
+        await release.promise;
+        return null;
+      },
+      async publish(execution, changes, requireLease) {
+        effects.push("publication");
+        return demo.publish(execution, changes, requireLease);
+      },
     };
-    const running = runWorkerOnce(store, adapters, 'stale-worker', { leaseMs: 250, heartbeatMs });
+    const running = runWorkerOnce(store, adapters, "stale-worker", { leaseMs: 250, heartbeatMs });
     await entered.promise;
     await delay(600);
     const recovered = await store.recoverExpired();
@@ -187,52 +235,75 @@ for (const heartbeatMs of [5000, 400]) {
     assert.equal(recovered, 1);
     assert.deepEqual(effects, []);
     const interrupted = await store.getGoal(goal.id);
-    assert.equal(interrupted?.state, 'needs_attention');
+    assert.equal(interrupted?.state, "needs_attention");
     assert.equal(interrupted.pullRequest, null);
   });
 }
 
-for (const recovering of [false,true]) for (const outcome of ['closed','merged'] as const) {
-  test(`known ${outcome} PR is persisted before another worker can claim (recovery: ${recovering})`, async t => {
-    const store = await database(t);
-    if (!store) return;
-    const {goal} = await store.createGoal('demo-user',{...request,maxWip:2},'demo',randomUUID());
-    if (recovering) {
-      const job = await store.claim('lost-publisher');
-      assert.ok(job);
-      await store.saveArtifact(job.id,'lost-publisher',artifact);
-      await store.beginPublication(job.id,'lost-publisher');
-      await store.pool.query("UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[job.id]);
-    }
-    // Observe the commit before the worker can perform a subsequent transaction.
-    const complete = store.completePublication.bind(store);
-    let observedState: string | undefined;
-    let competing: Awaited<ReturnType<Store['claim']>> | undefined;
-    store.completePublication = async (...args) => {
-      const result = await complete(...args);
-      observedState = result.pullRequests[0]?.state;
-      competing = await store.claim('competing-worker');
-      return result;
-    };
-    const adapters: Adapters = {
-      ...createDemoAdapters(),
-      async attempt() { assert.equal(recovering,false); return artifact; },
-      async publish() { throw new Error('An existing PR must not be published again'); },
-      async reconcile(execution) {
-        return {url:'https://demo.invalid/herbie/pull/42',number:42,branch:execution.branch,state:outcome};
-      },
-    };
-    await runWorkerOnce(store,adapters,'worker');
-    assert.equal(observedState,outcome);
-    if (outcome === 'closed') {
-      assert.equal(competing,null);
-      assert.equal((await store.getGoal(goal.id))?.state,'paused');
-      assert.equal((await store.getGoal(goal.id))?.attemptCount,1);
-      assert.equal((await store.pool.query('SELECT count(*)::int n FROM jobs WHERE goal_id=$1',[goal.id])).rows[0].n,1);
-    } else {
-      assert.ok(competing);
-      assert.equal(competing.goal.attemptCount,2);
-      assert.equal(competing.goal.pullRequests[0]?.state,'merged');
-    }
-  });
-}
+for (const recovering of [false, true])
+  for (const outcome of ["closed", "merged"] as const) {
+    test(`known ${outcome} PR is persisted before another worker can claim (recovery: ${recovering})`, async (t) => {
+      const store = await database(t);
+      if (!store) return;
+      const { goal } = await store.createGoal(
+        "demo-user",
+        { ...request, maxWip: 2 },
+        "demo",
+        randomUUID(),
+      );
+      if (recovering) {
+        const job = await store.claim("lost-publisher");
+        assert.ok(job);
+        await store.saveArtifact(job.id, "lost-publisher", artifact);
+        await store.beginPublication(job.id, "lost-publisher");
+        await store.pool.query(
+          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+          [job.id],
+        );
+      }
+      // Observe the commit before the worker can perform a subsequent transaction.
+      const complete = store.completePublication.bind(store);
+      let observedState: string | undefined;
+      let competing: Awaited<ReturnType<Store["claim"]>> | undefined;
+      store.completePublication = async (...args) => {
+        const result = await complete(...args);
+        observedState = result.pullRequests[0]?.state;
+        competing = await store.claim("competing-worker");
+        return result;
+      };
+      const adapters: Adapters = {
+        ...createDemoAdapters(),
+        async attempt() {
+          assert.equal(recovering, false);
+          return artifact;
+        },
+        async publish() {
+          throw new Error("An existing PR must not be published again");
+        },
+        async reconcile(execution) {
+          return {
+            url: "https://demo.invalid/herbie/pull/42",
+            number: 42,
+            branch: execution.branch,
+            state: outcome,
+          };
+        },
+      };
+      await runWorkerOnce(store, adapters, "worker");
+      assert.equal(observedState, outcome);
+      if (outcome === "closed") {
+        assert.equal(competing, null);
+        assert.equal((await store.getGoal(goal.id))?.state, "paused");
+        assert.equal((await store.getGoal(goal.id))?.attemptCount, 1);
+        assert.equal(
+          (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE goal_id=$1", [goal.id]))
+            .rows[0].n,
+          1,
+        );
+      } else {
+        assert.ok(competing);
+        assert.equal(competing.goal.attemptCount, 2);
+        assert.equal(competing.goal.pullRequests[0]?.state, "merged");
+      }
+    });
+  }
