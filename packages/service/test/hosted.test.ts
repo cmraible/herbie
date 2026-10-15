@@ -83,7 +83,7 @@ test('overlapping hosted processes keep exactly one coordinator during a rollout
   const app=await fixture(database);
   const runtimes=await Promise.all([app.runtime(true),app.runtime(true)]);
   for(const [index,runtime] of runtimes.entries()){
-    await runtime.store.createGoal('demo-user',{repository:`demo/example-${index}`,prompt:`Exclusive coordinator ${index}`},'demo',randomUUID());
+    await runtime.store.createGoal('demo-user',{repository:'demo/example',prompt:`Exclusive coordinator ${index}`},'demo',randomUUID());
   }
   let active=0;let maximumActive=0;
   const entered=Promise.withResolvers<void>();
