@@ -161,6 +161,23 @@ test('an automatic name can be edited without changing the brief and survives re
   expect(await detail(page).getByRole('textbox',{name:'Goal name'}).evaluate(element=>(element as HTMLTextAreaElement).selectionStart)).toBe(7);
 
   const editor=detail(page).getByRole('textbox',{name:'Goal name'});
+  let rejectSave!:()=>void;
+  const pendingSave=new Promise<void>(resolve=>{rejectSave=resolve;});
+  await page.route('**/api/goals/*/name',async route=>{
+    await pendingSave;
+    await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Rename temporarily unavailable'})});
+  });
+  await editor.fill('Keep this unsaved draft');
+  await detail(page).getByRole('button',{name:'All goals'}).click();
+  await expect(detail(page).getByRole('button',{name:'All goals'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'New goal',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Sign out'})).toBeDisabled();
+  await page.getByRole('link',{name:'herbie 🥁'}).click();
+  await expect(editor).toHaveValue('Keep this unsaved draft');
+  rejectSave();
+  await expect(detail(page).getByRole('alert')).toContainText('Rename temporarily unavailable');
+  await expect(editor).toHaveValue('Keep this unsaved draft');
+  await page.unroute('**/api/goals/*/name');
   await editor.fill('   ');
   await editor.press('Enter');
   await expect(detail(page).getByRole('alert')).toContainText('Enter a goal name');

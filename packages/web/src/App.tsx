@@ -15,7 +15,7 @@ function time(value: string) { return new Date(value).toLocaleString(undefined,{
 function initialDraft() { try { return draftSchema.parse(JSON.parse(sessionStorage.getItem('herbie-draft') ?? 'null')); } catch { return newDraft(); } }
 function Badge({goal}: {goal: Goal}) { return <span className="badge">{labels[goal.state]}</span>; }
 
-function GoalName({goal,onSave}: {goal: Goal;onSave: (goal: Goal) => void}) {
+function GoalName({goal,onSave,onSavingChange}: {goal: Goal;onSave: (goal: Goal) => void;onSavingChange: (saving: boolean) => void}) {
   const [draft,setDraft] = useState<string|null>(null);
   const initialCaret = useRef<number|null>(null);
   const [saving,setSaving] = useState(false);
@@ -25,10 +25,10 @@ function GoalName({goal,onSave}: {goal: Goal;onSave: (goal: Goal) => void}) {
     const name = draft.trim();
     if (!name) { setError('Enter a goal name.'); return; }
     if (name === goal.name) { setDraft(null); setError(null); return; }
-    setSaving(true); setError(null);
+    setSaving(true); onSavingChange(true); setError(null);
     try { onSave(await api.rename(goal.id,name)); setDraft(null); }
     catch (failure) { setError(message(failure)); }
-    finally { setSaving(false); }
+    finally { setSaving(false); onSavingChange(false); }
   }
   return <>
     <h2>{draft === null
@@ -265,7 +265,7 @@ export function App() {
 
   return <div className="app">
     <header className="topbar">
-      <a className="brand" href="/">herbie 🥁</a>
+      <a className="brand" href="/" onClick={event => { if (busy) event.preventDefault(); }}>herbie 🥁</a>
       <div className="topbar-actions">
         {mode !== 'live' && <span className="mode-pill" role={healthState === 'pending' ? 'status' : undefined}>{mode === 'demo' ? 'Demo' : healthState === 'error' ? 'Offline' : 'Connecting'}</span>}
         {sessionState === 'signed-in' && session && <><span className="user-name">{session.user.login}</span><button onClick={() => { void logout(); }} disabled={busy}>Sign out</button></>}
@@ -297,8 +297,8 @@ export function App() {
           {goalsLoaded && visibleGoals.length === 0 && <section className="empty-state"><h2>All goals are finished</h2><p>Completed and cancelled goals are hidden.</p></section>}
         </>}
         {selected && goal && <section className="goal-detail" aria-label="Selected goal" aria-busy={eventsState === 'loading'}>
-          <button className="back-button" onClick={navigateToList}>← All goals</button>
-          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><GoalName key={goal.id} goal={goal} onSave={result => setGoals(current => current.map(item => item.id === result.id ? result : item))}/></div><Badge goal={goal}/></div>
+          <button className="back-button" onClick={navigateToList} disabled={busy}>← All goals</button>
+          <div className="detail-heading"><div><p className="subtle-note">{goal.repository}</p><GoalName key={goal.id} goal={goal} onSavingChange={setBusy} onSave={result => setGoals(current => current.map(item => item.id === result.id ? result : item))}/></div><Badge goal={goal}/></div>
           <p className="goal-brief">{goal.prompt.replace('[demo:fail]', '').trim()}</p>
           <p className="goal-meta">Attempt {goal.attemptCount} <span>·</span> Max WIP {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}</p>
           {goal.error && <div className="status-message" role="alert">{goal.error}</div>}
