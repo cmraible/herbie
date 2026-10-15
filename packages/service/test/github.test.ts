@@ -298,9 +298,9 @@ test("recovers a successful PR creation with a lost response and never duplicate
 test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t) => {
   const { github, fixture } = await githubFixture(t);
   fixture.pr = true;
-  fixture.patch = "@@ -1,1 +1,1 @@\n-old\n+new";
+  fixture.patch = "@@ -1,3 +1,3 @@\n function alpha() {\n-old\n+new\n }";
   const before = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
-  fixture.patch = "@@ -101,1 +101,1 @@\n-old\n+new";
+  fixture.patch = "@@ -101,3 +101,3 @@\n function alpha() {\n-old\n+new\n }";
   const after = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
   assert.ok(before?.patchSha);
   assert.equal(after?.patchSha, before.patchSha);
@@ -309,6 +309,9 @@ test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t
   fixture.patch = "@@ -101 +101 @@\n---before\n+++changed";
   const changed = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
   assert.notEqual(changed?.patchSha, edge?.patchSha);
+  fixture.patch = "@@ -201,3 +201,3 @@\n function beta() {\n-old\n+new\n }";
+  const moved = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.notEqual(moved?.patchSha, before?.patchSha);
 });
 
 test("review reconciliation uses only repository-scoped read permission after user login expires", async (t) => {
