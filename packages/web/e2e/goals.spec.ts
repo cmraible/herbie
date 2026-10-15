@@ -164,3 +164,25 @@ test('a custom name can be edited without changing the brief and survives reload
   await detail(page).getByRole('button',{name:'All goals'}).click();
   await expect(page.getByRole('button',{name:/Better signup errors/})).toBeVisible();
 });
+
+
+test('web names support the same Unicode length limit as the API',async({page})=>{
+  await login(page);
+  const name='🥁'.repeat(120);
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('Goal name',{exact:true}).fill(name);
+  await expect(page.getByLabel('Goal name',{exact:true})).toHaveValue(name);
+  await page.getByLabel('What should Herbie work on?').fill('Exercise Unicode goal names');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(detail(page).getByRole('heading',{name,exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Rename goal'});
+  await dialog.getByLabel('Goal name').fill(name+'🥁');
+  await dialog.getByRole('button',{name:'Save name'}).click();
+  await expect(dialog.getByRole('alert')).toContainText('at most 120 characters');
+  const renamed='✅'+name.slice(2);
+  await dialog.getByLabel('Goal name').fill(renamed);
+  await expect(dialog.getByLabel('Goal name')).toHaveValue(renamed);
+  await dialog.getByRole('button',{name:'Save name'}).click();
+  await expect(detail(page).getByRole('heading',{name:renamed,exact:true})).toBeVisible();
+});
