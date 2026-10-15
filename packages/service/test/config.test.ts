@@ -1,4 +1,7 @@
-import {generateKeyPairSync} from 'node:crypto';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createSign,generateKeyPairSync} from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readConfig} from '../src/config.js';
@@ -62,4 +65,22 @@ test('OpenAI credentials are optional, validated, and only used in live mode',as
   assert.equal((await readConfig({...live,OPENAI_API_KEY:'fixture-key'})).openaiApiKey,'fixture-key');
   assert.equal((await readConfig({DATABASE_URL:live.DATABASE_URL,OPENAI_API_KEY:'fixture-key'})).openaiApiKey,undefined);
   for(const value of ['', '   '])await assert.rejects(readConfig({...live,OPENAI_API_KEY:value}),/OPENAI_API_KEY/);
+});
+
+test('rejects unsupported Daytona URLs during environment validation',async()=>{
+  const environment={...live,HERBIE_EXECUTION_ENABLED:'true',DAYTONA_API_KEY:'key',HERBIE_DAYTONA_OPENAI_SECRET:'secret'};
+  for(const url of ['http://daytona.example/api','https://user:password@daytona.example/api','https://daytona.example/api?query=1','https://daytona.example/api#fragment']){
+    await assert.rejects(readConfig({...environment,DAYTONA_API_URL:url}),/DAYTONA_API_URL: Must use HTTPS/);
+  }
+  assert.equal((await readConfig({...environment,DAYTONA_API_URL:'https://daytona.example/api'})).daytona.apiUrl,'https://daytona.example/api');
+});
+
+test('normalizes file-based private keys before passing them to GitHub',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'herbie-config-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const path=join(directory,'key.pem');
+  await writeFile(path,`  \n${privateKey}  \n`);
+  const config=await readConfig({...live,GITHUB_PRIVATE_KEY:undefined,GITHUB_PRIVATE_KEY_FILE:path});
+  assert.equal(config.github?.privateKey,privateKey.trim());
+  assert.ok(createSign('RSA-SHA256').update('jwt').sign(config.github!.privateKey).length);
 });

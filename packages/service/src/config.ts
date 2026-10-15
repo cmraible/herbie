@@ -23,7 +23,9 @@ export const environmentSchema=z.object({
   GITHUB_APP_ID:text.optional(),GITHUB_CLIENT_ID:text.optional(),GITHUB_CLIENT_SECRET:text.optional(),
   GITHUB_PRIVATE_KEY:privateKeySchema.optional(),GITHUB_PRIVATE_KEY_FILE:text.optional(),GITHUB_WEBHOOK_SECRET:text.optional(),
   HERBIE_DATABASE_CA:text.optional(),HERBIE_DATABASE_CA_FILE:text.optional(),
-  DAYTONA_API_KEY:text.optional(),DAYTONA_API_URL:httpUrl.optional(),
+  DAYTONA_API_KEY:text.optional(),DAYTONA_API_URL:httpUrl.refine(value=>{
+    try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash;}catch{return false;}
+  },'Must use HTTPS without credentials, a query, or a fragment').optional(),
   HERBIE_DAYTONA_OPENAI_SECRET:text.optional(),HERBIE_DAYTONA_SNAPSHOT:text.optional(),
   OPENAI_API_KEY:text.optional(),HERBIE_GOAL_NAME_MODEL:text.optional(),
   HERBIE_DEPLOYMENT_ID:revision.optional(),HERBIE_IMAGE_REVISION:revision.optional(),
@@ -64,7 +66,9 @@ export async function readConfig(environment:NodeJS.ProcessEnv=process.env){
   if(mode==='live'&&env.GITHUB_PRIVATE_KEY_FILE){
     try{privateKey=await readFile(env.GITHUB_PRIVATE_KEY_FILE,'utf8');}
     catch{throw new ConfigurationError([{variable:'GITHUB_PRIVATE_KEY_FILE',message:'Could not read the private key file; check its path and permissions'}]);}
-    if(!privateKeySchema.safeParse(privateKey).success)throw new ConfigurationError([{variable:'GITHUB_PRIVATE_KEY_FILE',message:'File must contain a PEM-encoded RSA private key'}]);
+    const parsedKey=privateKeySchema.safeParse(privateKey);
+    if(!parsedKey.success)throw new ConfigurationError([{variable:'GITHUB_PRIVATE_KEY_FILE',message:'File must contain a PEM-encoded RSA private key'}]);
+    privateKey=parsedKey.data;
   }
   return {mode,host:env.HERBIE_HOST,port:env.HERBIE_PORT,publicUrl,databaseUrl:env.DATABASE_URL,
     credentialKey:mode==='live'?env.HERBIE_CREDENTIAL_KEY!:Buffer.alloc(32,7).toString('base64'),
