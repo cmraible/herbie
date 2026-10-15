@@ -61,7 +61,7 @@ test('HTTP rejects expired and wrong-mode sessions and hides another owner’s g
   const setup = await fixture(t);
   if (!setup) return;
   const { store, session, base } = setup;
-  const { goal } = await store.createGoal('owner', { repository: 'demo/example', prompt: 'Private goal text' }, 'live', randomUUID());
+  const { goal } = await store.createGoal('owner', { repository: 'demo/example', name:'Private goal text',prompt:'Private goal text' }, 'live', randomUUID());
   const other = await session('7');
   for (const path of [`/api/goals/${goal.id}`, `/api/goals/${goal.id}/events`]) {
     const response = await fetch(`${base}${path}`, { headers: other });

@@ -11,7 +11,7 @@ const live = {
   HERBIE_MODE:'live',HERBIE_ALLOWED_GITHUB_USER_ID:'7',HERBIE_HOST:'0.0.0.0',HERBIE_PUBLIC_URL:'https://herbie.example',
   DATABASE_URL:'postgresql://fixture:fixture@database.example/postgres',HERBIE_CREDENTIAL_KEY:Buffer.alloc(32,1).toString('base64'),
   GITHUB_APP_ID:'fixture',GITHUB_CLIENT_ID:'fixture',GITHUB_CLIENT_SECRET:'fixture',
-  GITHUB_PRIVATE_KEY:privateKey,GITHUB_WEBHOOK_SECRET:'fixture',
+  GITHUB_PRIVATE_KEY:privateKey,GITHUB_WEBHOOK_SECRET:'fixture',OPENAI_API_KEY:'fixture-key',
 };
 
 test('hosted live configuration accepts an injected private key and leaves execution disabled by default',async()=>{
@@ -60,11 +60,13 @@ test('missing database configuration is rejected by the schema',async()=>{
   await assert.rejects(readConfig({}),/DATABASE_URL: Must be a PostgreSQL URL/);
 });
 
-test('OpenAI credentials are optional, validated, and only used in live mode',async()=>{
-  assert.equal((await readConfig(live)).openaiApiKey,undefined);
+test('OpenAI credentials are required in live mode even when execution is disabled',async()=>{
+  assert.equal((await readConfig({DATABASE_URL:live.DATABASE_URL})).openaiApiKey,undefined);
   assert.equal((await readConfig({...live,OPENAI_API_KEY:'fixture-key'})).openaiApiKey,'fixture-key');
   assert.equal((await readConfig({DATABASE_URL:live.DATABASE_URL,OPENAI_API_KEY:'fixture-key'})).openaiApiKey,undefined);
-  for(const value of ['', '   '])await assert.rejects(readConfig({...live,OPENAI_API_KEY:value}),/OPENAI_API_KEY/);
+  for(const value of [undefined,'', '   ']){
+    for(const execution of ['true','false'])await assert.rejects(readConfig({...live,HERBIE_EXECUTION_ENABLED:execution,DAYTONA_API_KEY:'key',HERBIE_DAYTONA_OPENAI_SECRET:'secret',OPENAI_API_KEY:value}),/OPENAI_API_KEY/);
+  }
 });
 
 test('rejects unsupported Daytona URLs during environment validation',async()=>{

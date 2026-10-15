@@ -85,7 +85,7 @@ test('private schema denies Data API roles, repairs old grants, and remains usab
   await pool.query("CREATE FUNCTION herbie.legacy_secret() RETURNS text LANGUAGE sql AS 'SELECT ''legacy secret''' ");
   await prepareDatabase(pool, 'live');
   await prepareDatabase(pool, 'live');
-  const { goal } = await store.createGoal('owner', { repository: 'example/private', prompt: 'Sensitive goal' }, 'live', randomUUID());
+  const { goal } = await store.createGoal('owner', { repository: 'example/private', name:'Sensitive goal',prompt:'Sensitive goal' }, 'live', randomUUID());
   assert.equal((await store.getGoal(goal.id, 'owner'))?.prompt, 'Sensitive goal');
   const auth = new PgAuthStore(pool);
   await auth.putCredential({ id: 'owner', login: 'owner' }, 'encrypted-fixture-token', new Date(Date.now() + 60_000));

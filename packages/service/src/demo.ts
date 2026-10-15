@@ -32,3 +32,7 @@ export function createDemoAdapters(): Adapters {
     },
   };
 }
+
+export function demoGoalName(prompt:string):string {
+  return Array.from(prompt.replaceAll('[demo:fail]', '').trim()).slice(0,120).join('').trim() || 'Demo goal';
+}
