@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
-import { goalName, goalInput, goalSchema, eventSchema, type Goal, type GoalInput, type GoalAction, type GoalEvent } from '@herbie/contracts';
+import { goalUpdate, type GoalUpdate, goalName, goalInput, goalSchema, eventSchema, type Goal, type GoalInput, type GoalAction, type GoalEvent } from '@herbie/contracts';
 import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
@@ -163,6 +163,28 @@ export class Store {
       return databaseGoal.parse(result.rows[0]);
     });
   }
+  async editGoalPrompt(id: string, ownerId: string, prompt: string): Promise<Goal> {
+    return this.updateGoal(id,ownerId,{prompt});
+  }
+  async updateGoal(id: string, ownerId: string, input: GoalUpdate): Promise<Goal> {
+    const parsed = goalUpdate.parse(input);
+    return this.transaction(async client=>{
+      const goal = await goalFrom(client,id,true);
+      if (!goal || goal.ownerId !== ownerId) throw new StoreError(404, 'Goal not found');
+      // Normalize legacy request hashes before their fallback loses the original prompt.
+      await client.query(`UPDATE goal_requests SET fingerprint=$2 WHERE goal_id=$1
+        AND EXISTS (SELECT 1 FROM goals WHERE id=$1 AND test_command IS NOT NULL)`,
+        [id,requestFingerprint({...goal,name:undefined},goal.mode)]);
+      const result = await client.query<Record<string, unknown>>(
+        `UPDATE goals SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${goalColumns}`,
+        [id,parsed.name,parsed.prompt,parsed.maxWip]);
+      const updated = databaseGoal.parse(result.rows[0]);
+      if (updated.maxWip !== goal.maxWip && !['completed','cancelled','failed','needs_attention'].includes(goal.state)) await advanceGoal(client,updated);
+      const promptOnly = Object.keys(parsed).length === 1 && parsed.prompt !== undefined;
+      await addEvent(client,id,promptOnly ? 'prompt_updated' : 'updated',promptOnly ? 'Goal prompt updated. Future attempts will use the new prompt.' : 'Goal settings updated. Future attempts will use the new settings.');
+      return (await goalFrom(client,id))!;
+    });
+  }
   async getGoal(id: string, ownerId?: string): Promise<Goal | null> {
     const goal = await goalFrom(this.pool, id);
     return goal && (ownerId === undefined || goal.ownerId === ownerId) ? goal : null;
@@ -261,7 +283,9 @@ export class Store {
     z.number().int().positive().max(3_600_000).parse(leaseMs);
     return this.transaction(async client => {
       const selected = await client.query<Record<string, unknown>>(`SELECT j.id FROM jobs j JOIN goals g ON g.id=j.goal_id
-        WHERE j.stage IN ('queued','ready','publishing') AND j.eligible_at<=clock_timestamp() AND ($1::text IS NULL OR g.mode=$1)
+        WHERE j.stage IN ('queued','ready','publishing')
+        AND (j.stage <> 'queued' OR (SELECT count(*) FROM jobs reviewing WHERE reviewing.goal_id=g.id AND reviewing.stage='awaiting_review') < g.max_wip)
+        AND j.eligible_at<=clock_timestamp() AND ($1::text IS NULL OR g.mode=$1)
         AND NOT j.publication_blocked AND (g.stop_requested IS NULL OR (j.stage='publishing' AND g.stop_requested='pause'))
         AND (j.lease_owner IS NULL OR j.lease_expires_at<=clock_timestamp())
         AND (g.state IN ('queued','running') OR (j.stage='publishing' AND g.state='needs_attention'))

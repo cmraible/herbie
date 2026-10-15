@@ -153,16 +153,16 @@ test('an automatic name can be edited without changing the brief and survives re
   await page.getByLabel('What should Herbie work on?').fill('Validate email addresses and show helpful errors.');
   await page.getByRole('button',{name:'Start goal',exact:true}).click();
   await expect(detail(page).getByRole('heading',{name:'Validate email addresses and show helpful errors.',exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Rename goal'});
-  await dialog.getByLabel('Goal name').fill('   ');
-  await expect(dialog.getByRole('button',{name:'Save name'})).toBeDisabled();
-  await dialog.getByLabel('Goal name').fill('Discard this name');
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  const dialog=page.getByRole('region',{name:'Edit goal',exact:true});
+  await dialog.getByLabel('Goal name',{exact:true}).fill('   ');
+  await expect(dialog.getByRole('button',{name:'Save changes'})).toBeDisabled();
+  await dialog.getByLabel('Goal name',{exact:true}).fill('Discard this name');
   await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
   await expect(detail(page).getByRole('heading',{name:'Validate email addresses and show helpful errors.',exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
-  await dialog.getByLabel('Goal name').fill('  Better signup errors  ');
-  await dialog.getByRole('button',{name:'Save name'}).click();
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  await dialog.getByLabel('Goal name',{exact:true}).fill('  Better signup errors  ');
+  await dialog.getByRole('button',{name:'Save changes'}).click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
   await expect(detail(page).getByRole('heading',{name:'Better signup errors',exact:true})).toBeVisible();
@@ -179,15 +179,15 @@ test('web names support the same Unicode length limit as the API',async({page})=
   await page.getByLabel('What should Herbie work on?').fill('Exercise Unicode goal names');
   await page.getByRole('button',{name:'Start goal',exact:true}).click();
   await expect(detail(page).getByRole('heading',{name:'Exercise Unicode goal names',exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Rename goal'});
-  await dialog.getByLabel('Goal name').fill(name+'🥁');
-  await dialog.getByRole('button',{name:'Save name'}).click();
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  const dialog=page.getByRole('region',{name:'Edit goal',exact:true});
+  await dialog.getByLabel('Goal name',{exact:true}).fill(name+'🥁');
+  await dialog.getByRole('button',{name:'Save changes'}).click();
   await expect(dialog.getByRole('alert')).toContainText('at most 120 characters');
   const renamed='✅'+name.slice(2);
-  await dialog.getByLabel('Goal name').fill(renamed);
-  await expect(dialog.getByLabel('Goal name')).toHaveValue(renamed);
-  await dialog.getByRole('button',{name:'Save name'}).click();
+  await dialog.getByLabel('Goal name',{exact:true}).fill(renamed);
+  await expect(dialog.getByLabel('Goal name',{exact:true})).toHaveValue(renamed);
+  await dialog.getByRole('button',{name:'Save changes'}).click();
   await expect(detail(page).getByRole('heading',{name:renamed,exact:true})).toBeVisible();
 });
 
@@ -261,4 +261,55 @@ for (const outcome of ['merge','close'] as const) test(`a paused demo goal can s
   await expect(detail(page).getByText('Attempt 2 · Max WIP 2')).toBeVisible();
   await expect(cards).toHaveCount(2);
   await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(0);
+});
+
+
+test('edit goal settings in a separate view, cancel changes, and preserve saved edits after reload',async({page})=>{
+  await login(page);
+  await start(page,'Original prompt for editing');
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  const dialog=page.getByRole('region',{name:'Edit goal',exact:true});
+  await expect(page).toHaveURL(/#.+\/edit$/);
+  await page.reload();
+  await expect(dialog.getByLabel('Repository')).toHaveValue('demo/example');
+  await expect(dialog.getByLabel('Repository')).toHaveAttribute('readonly','');
+  await expect(dialog.getByLabel('What should Herbie work on?')).toHaveValue('Original prompt for editing');
+  await dialog.getByLabel('What should Herbie work on?').fill('Discard this change');
+  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(detail(page).locator('.goal-brief')).toHaveText('Original prompt for editing');
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  await dialog.getByLabel('What should Herbie work on?').fill('   ');
+  await expect(dialog.getByRole('button',{name:'Save changes'})).toBeDisabled();
+  await dialog.getByLabel('What should Herbie work on?').fill('  Updated prompt with additional requirements  ');
+  await dialog.getByLabel('Goal name',{exact:true}).fill('Updated goal name');
+  await dialog.getByLabel('Maximum work in progress').fill('2');
+  await page.route('**/api/goals/*',route=>route.request().method() === 'POST' ? route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Could not save prompt'})}) : route.continue());
+  await dialog.getByRole('button',{name:'Save changes'}).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Could not save prompt');
+  await expect(dialog.getByLabel('What should Herbie work on?')).toHaveValue('  Updated prompt with additional requirements  ');
+  await page.unroute('**/api/goals/*');
+  await dialog.getByRole('button',{name:'Save changes'}).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await expect(detail(page).locator('.goal-brief')).toHaveText('Updated prompt with additional requirements');
+  await expect(detail(page).getByRole('heading',{name:'Updated goal name',exact:true})).toBeVisible();
+  await expect(detail(page).getByRole('button',{name:'Simulate merge'})).toHaveCount(2);
+  await expect(detail(page).getByText('Goal settings updated. Future attempts will use the new settings.',{exact:true})).toBeVisible();
+});
+
+
+test('browser navigation discards edits and polling preserves typed settings',async({page})=>{
+  await login(page);
+  await start(page,'Navigation editing test');
+  await detail(page).getByRole('button',{name:'Edit goal',exact:true}).click();
+  const form=page.getByRole('region',{name:'Edit goal',exact:true});
+  await form.getByLabel('Goal name',{exact:true}).fill('Unsaved name');
+  await page.waitForResponse(response=>response.url().endsWith('/api/goals') && response.request().method()==='GET');
+  await expect(form.getByLabel('Goal name',{exact:true})).toHaveValue('Unsaved name');
+  await page.goBack();
+  await expect(detail(page).getByRole('heading',{name:'Navigation editing test',exact:true})).toBeVisible();
+  await page.goForward();
+  await expect(form.getByLabel('Goal name',{exact:true})).toHaveValue('Navigation editing test');
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
 });

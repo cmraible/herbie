@@ -2,12 +2,16 @@ import { z } from 'zod';
 export const goalState = z.enum(['queued', 'running', 'paused', 'awaiting_review', 'completed', 'cancelled', 'failed', 'needs_attention']);
 export const goalName = z.string().trim().min(1).refine(name => Array.from(name).length <= 120, 'Name must be at most 120 characters');
 export const goalRename = z.object({name:goalName}).strict();
+export const goalPrompt = z.string().trim().min(1).max(8000);
+export const goalPromptEdit = z.object({prompt:goalPrompt}).strict();
 export const goalInput = z.object({
   name: z.string().trim().transform(name=>name || undefined).pipe(goalName.optional()).optional(),
   repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-  prompt: z.string().trim().min(1).max(8000),
+  prompt: goalPrompt,
   maxWip: z.number().int().min(1).max(2147483647).default(1),
 }).strict();
+export const goalUpdate = z.object({name:goalName.optional(),prompt:goalPrompt.optional(),maxWip:goalInput.shape.maxWip.removeDefault().optional()}).strict().refine(value => Object.values(value).some(value => value !== undefined), 'Provide at least one goal setting');
+export type GoalUpdate = z.infer<typeof goalUpdate>;
 export const pullRequestSchema = z.object({url:z.string().url(), number:z.number().int(), state:z.enum(['open','merged','closed']), branch:z.string()});
 export const goalSchema = goalInput.extend({
   name: goalName,
