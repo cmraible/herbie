@@ -256,7 +256,11 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
     for (const job of await store.reviewJobs(adapters.mode, true)) {
       try {
         const state = await adapters.readinessState(await executionFor(adapters, job, true));
-        if (state === "closed") await store.cancelReadiness(job.id);
+        if (
+          state === "closed" ||
+          (state === "draft" && ["cancelled", "completed", "failed"].includes(job.goal.state))
+        )
+          await store.cancelReadiness(job.id);
         if (state === "ready") {
           const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
           if (pr) await store.confirmReadiness(job.id, pr.url);

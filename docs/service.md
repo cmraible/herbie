@@ -96,7 +96,7 @@ it cannot undo an external call already in flight.
 - Once current CI passes, the worker marks the tracked draft PR ready for review,
   including PRs that never needed a repair. It rechecks CI, the PR head, owner access,
   and the active goal before the GitHub write. Pending, cancelled, unknown, or absent
-  checks or unfinished check suites leave the PR as draft; a known test-merge commit must also have CI evidence; at least one check/status must succeed, with other
+  checks or unfinished active check suites leave the PR as draft. Required checks from branch protection and rulesets must appear, including their configured app identity. Merge checks take precedence when present; otherwise head checks are used. Empty suites created for unused apps do not block readiness. At least one check/status must succeed, with other
   checks successful, neutral, or skipped. Already-ready PRs are left alone.
   Readiness intent is saved before the mutation; retries reconcile an already-ready
   PR and record the confirmation once if the response or event write was lost.

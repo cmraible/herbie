@@ -72,7 +72,7 @@ export async function runCiRepairOnce(
     const current = await adapters.ciStatus(execution);
     await requireLease();
     if (!current) {
-      await store.waitForCi(id, workerId);
+      await store.waitForCi(id, workerId, job.id);
       return true;
     }
     if (current.state !== "failed" || current.head !== failure.head) {

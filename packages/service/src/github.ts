@@ -103,8 +103,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    const secondaryLimit =
+      response.status === 403 &&
+      /secondary rate limit|abuse detection/i.test(await response.clone().text());
     if (
       response.status === 429 ||
+      secondaryLimit ||
       (response.status === 403 &&
         (response.headers.has("retry-after") ||
           response.headers.get("x-ratelimit-remaining") === "0"))
@@ -285,6 +289,71 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       throw new Error("GitHub installation token expired");
     return value.token;
   }
+  async function requiredChecks(token: string, repository: string, base: string) {
+    const [owner, name] = repository.split("/");
+    const protection = z
+      .object({
+        errors: z.never().optional(),
+        data: z.object({
+          repository: z.object({
+            ref: z.object({
+              branchProtectionRule: z
+                .object({
+                  requiredStatusChecks: z
+                    .array(
+                      z.object({
+                        context: z.string(),
+                        app: z.object({ databaseId: z.number() }).nullable(),
+                      }),
+                    )
+                    .nullable(),
+                })
+                .nullable(),
+            }),
+          }),
+        }),
+      })
+      .parse(
+        await request("/graphql", token, {
+          query:
+            "query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){branchProtectionRule{requiredStatusChecks{context app{databaseId}}}}}}",
+          variables: { owner, name, ref: `refs/heads/${base}` },
+        }),
+      ).data.repository.ref.branchProtectionRule;
+    const required = (protection?.requiredStatusChecks ?? []).map((check) => ({
+      context: check.context,
+      app: check.app?.databaseId ?? null,
+    }));
+    for (let page = 1; ; page++) {
+      if (page > 10) throw new Error("Branch rules exceed supported limit");
+      const rules = z
+        .array(z.object({ type: z.string(), parameters: z.unknown().optional() }))
+        .parse(
+          await request(
+            `/repos/${repository}/rules/branches/${encodeURIComponent(base)}?per_page=100&page=${page}`,
+            token,
+          ),
+        );
+      for (const rule of rules)
+        if (rule.type === "required_status_checks") {
+          const parameters = z
+            .object({
+              required_status_checks: z.array(
+                z.object({ context: z.string(), integration_id: z.number().nullable().optional() }),
+              ),
+            })
+            .parse(rule.parameters);
+          required.push(
+            ...parameters.required_status_checks.map((check) => ({
+              context: check.context,
+              app: check.integration_id ?? null,
+            })),
+          );
+        }
+      if (rules.length < 100) break;
+    }
+    return required;
+  }
   async function ciStatus(
     token: string,
     repository: string,
@@ -297,6 +366,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         html_url: z.string(),
         merge_commit_sha: z.string().nullable(),
         mergeable: z.boolean().nullable(),
+        base: z.object({ ref: z.string() }),
         draft: z.boolean(),
         head: z.object({
           sha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -322,7 +392,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         ...(pr.mergeable && pr.merge_commit_sha ? [pr.merge_commit_sha] : []),
       ]),
     ];
+    let observed: { context: string; app: number | null }[] = [];
     for (const sha of refs) {
+      const contexts: typeof observed = [];
       // A fast check can finish before another suite has created its check runs.
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI suite listing exceeds supported limit");
@@ -332,6 +404,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               z.object({
                 status: z.string(),
                 conclusion: z.string().nullable(),
+                latest_check_runs_count: z.number(),
+                id: z.number(),
+                app: z.object({ slug: z.string() }),
               }),
             ),
           })
@@ -341,16 +416,28 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               token,
             ),
           ).check_suites;
-        if (suites.some((suite) => suite.status !== "completed")) pending = true;
-        if (
-          suites.some(
-            (suite) => !["success", "neutral", "skipped"].includes(suite.conclusion ?? ""),
+        for (const suite of suites) {
+          if (suite.latest_check_runs_count > 0 && suite.status !== "completed") pending = true;
+          if (
+            (suite.latest_check_runs_count > 0 || suite.status === "completed") &&
+            !["success", "neutral", "skipped"].includes(suite.conclusion ?? "")
           )
-        )
-          passing = false;
+            passing = false;
+          if (
+            suite.status === "completed" &&
+            ["failure", "timed_out", "action_required", "startup_failure"].includes(
+              suite.conclusion ?? "",
+            )
+          )
+            details.push({
+              sha,
+              suite: suite.id,
+              app: suite.app.slug,
+              conclusion: suite.conclusion,
+            });
+        }
         if (suites.length < 100) break;
       }
-      let evidence = false;
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI check listing exceeds supported limit");
         const checks = z
@@ -359,6 +446,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               z.object({
                 id: z.number().int(),
                 name: z.string(),
+                app: z.object({ id: z.number() }),
                 status: z.string(),
                 conclusion: z.string().nullable(),
                 details_url: z.string().nullable(),
@@ -376,8 +464,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               token,
             ),
           ).check_runs;
-        if (checks.length) evidence = true;
         for (const check of checks) {
+          contexts.push({ context: check.name, app: check.app.id });
           if (check.status !== "completed") pending = true;
           if (check.conclusion === "success") succeeded = true;
           if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) passing = false;
@@ -436,7 +524,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           ),
         })
         .parse(await request(`/repos/${repository}/commits/${sha}/status?per_page=100`, token));
-      if (sha !== pr.head.sha && !evidence && statuses.total_count === 0) pending = true;
+      contexts.push(...statuses.statuses.map((status) => ({ context: status.context, app: null })));
+      if (contexts.length) observed = contexts; // Prefer merge checks when present; otherwise use the head.
       if (statuses.total_count > 100) throw new Error("CI status listing exceeds supported limit");
       if (statuses.statuses.some((status) => status.state === "pending")) pending = true;
       if (statuses.statuses.some((status) => status.state === "success")) succeeded = true;
@@ -446,15 +535,27 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       );
     }
     if (pending) return null;
-    if (!details.length)
-      return passing && succeeded
-        ? {
-            state: "passed",
-            draft: pr.draft,
-            head: pr.head.sha,
-            pullRequest: { number, url: pr.html_url },
-          }
-        : null;
+    if (!details.length) {
+      if (!passing || !succeeded) return null;
+      const required = await requiredChecks(token, repository, pr.base.ref);
+      if (
+        required.some(
+          (check) =>
+            !observed.some(
+              (current) =>
+                current.context === check.context &&
+                (check.app === null || current.app === check.app),
+            ),
+        )
+      )
+        return null;
+      return {
+        state: "passed",
+        draft: pr.draft,
+        head: pr.head.sha,
+        pullRequest: { number, url: pr.html_url },
+      };
+    }
     return {
       head: pr.head.sha,
       pullRequest: { number, url: pr.html_url },

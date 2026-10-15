@@ -20,10 +20,12 @@ for (const outcome of [
   "audit-closed",
   "audit-pending",
   "audit-abandoned",
+  "audit-cancelled",
   "rerun",
   "rerun-passed",
   "rerun-changed",
   "rerun-closed",
+  "rerun-cancelled",
   "rerun-crash",
   "rerun-publishing-crash",
 ] as const) {
@@ -56,11 +58,17 @@ for (const outcome of [
     const pr = job.goal.pullRequests[0]!;
     if (outcome.startsWith("audit-")) {
       await store.beginReadiness(job.id);
-      if (outcome !== "audit-pending") await store.reconcile(job.id, "closed");
+      if (outcome === "audit-cancelled") await store.control(goal.id, "demo-user", "cancel");
+      else if (outcome !== "audit-pending") await store.reconcile(job.id, "closed");
       const adapters: Adapters = {
         ...demo,
         mode: "live",
-        readinessState: async () => (outcome === "audit-abandoned" ? "closed" : "ready"),
+        readinessState: async () =>
+          outcome === "audit-abandoned"
+            ? "closed"
+            : outcome === "audit-cancelled"
+              ? "draft"
+              : "ready",
         ciStatus: async () => null,
         authorize: async () => {
           throw new Error("User authorization unavailable");
@@ -80,7 +88,7 @@ for (const outcome of [
             [goal.id],
           )
         ).rowCount,
-        outcome === "audit-abandoned" ? 0 : 1,
+        ["audit-abandoned", "audit-cancelled"].includes(outcome) ? 0 : 1,
       );
       return;
     }
@@ -225,7 +233,8 @@ for (const outcome of [
         );
         return;
       }
-      if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
+      if (outcome === "rerun-cancelled") await store.control(goal.id, "demo-user", "cancel");
+      else if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
       else {
         if (outcome === "rerun-passed")
           adapters.ciStatus = async () => ({

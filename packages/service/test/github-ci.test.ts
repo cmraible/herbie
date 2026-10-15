@@ -16,11 +16,21 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   let headChecks = false,
     mergeChecks = true;
   let suitePending = false;
+  let suiteFailure = false;
+  let requiredContext = "verify";
+  let requiredApp = 1;
+  let protectedContext: string | null = null;
   let limited = false;
+  let secondaryLimit = false;
   const paths: string[] = [];
   const server = createServer(async (req, res) => {
     const path = req.url!;
     paths.push(path);
+    if (secondaryLimit) {
+      res.writeHead(403, { "x-ratelimit-remaining": "100" });
+      res.end(JSON.stringify({ message: "You have exceeded a secondary rate limit." }));
+      return;
+    }
     if (limited) {
       res.writeHead(403, {
         "x-ratelimit-remaining": "0",
@@ -37,6 +47,7 @@ test("CI context uses current PR head and merge checks, waits for pending checks
         node_id: "PR_fixture",
         html_url: "https://github.com/owner/repo/pull/1",
         head: { sha: "a".repeat(40), ref: "herbie/fix", repo: { full_name: "owner/repo" } },
+        base: { ref: "main" },
         mergeable,
         merge_commit_sha: "b".repeat(40),
       };
@@ -44,8 +55,11 @@ test("CI context uses current PR head and merge checks, waits for pending checks
       data = {
         check_suites: [
           {
-            status: suitePending ? "queued" : "completed",
-            conclusion: suitePending ? null : "success",
+            id: 10,
+            app: { slug: "unused-or-starting-app" },
+            latest_check_runs_count: suitePending ? 1 : 0,
+            status: suiteFailure ? "completed" : "queued",
+            conclusion: suiteFailure ? "startup_failure" : null,
           },
         ],
       };
@@ -58,6 +72,7 @@ test("CI context uses current PR head and merge checks, waits for pending checks
             ? [
                 {
                   id: 7,
+                  app: { id: 1 },
                   name: "verify",
                   status: path.includes("a".repeat(40))
                     ? "completed"
@@ -71,6 +86,15 @@ test("CI context uses current PR head and merge checks, waits for pending checks
               ]
             : [],
       };
+    else if (path.startsWith("/repos/owner/repo/rules/branches/main"))
+      data = [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: requiredContext, integration_id: requiredApp }],
+          },
+        },
+      ];
     else if (path.includes("/annotations"))
       data = [{ path: "test.ts", start_line: 3, message: "Expected 2, got 1" }];
     else if (path.includes("/actions/jobs/9"))
@@ -86,6 +110,24 @@ test("CI context uses current PR head and merge checks, waits for pending checks
     else if (path === "/graphql") {
       let body = "";
       for await (const chunk of req) body += chunk;
+      if (JSON.parse(body).query.startsWith("query")) {
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            data: {
+              repository: {
+                ref: {
+                  branchProtectionRule:
+                    protectedContext === null
+                      ? null
+                      : { requiredStatusChecks: [{ context: protectedContext, app: null }] },
+                },
+              },
+            },
+          }),
+        );
+        return;
+      }
       assert.deepEqual(JSON.parse(body).variables, { id: "PR_fixture" });
       writes++;
       if (graphError) data = { errors: [{ message: "Rejected" }], data: null };
@@ -140,9 +182,26 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   statusPending = false;
   conclusion = "success";
   suitePending = true;
-  assert.equal(await get(), null, "a pending suite without check runs blocks promotion");
+  assert.equal(
+    await get(),
+    null,
+    "an unfinished active suite blocks promotion before all its jobs appear",
+  );
   suitePending = false;
   assert.equal((await get())?.state, "passed");
+  requiredContext = "not-created-yet";
+  assert.equal(
+    await get(),
+    null,
+    "missing required workflow blocks readiness even with passing visible checks",
+  );
+  requiredContext = "verify";
+  requiredApp = 2;
+  assert.equal(await get(), null, "a check from the wrong integration cannot satisfy the rule");
+  requiredApp = 1;
+  protectedContext = "legacy-required";
+  assert.equal(await get(), null, "classic branch protection is also enforced");
+  protectedContext = null;
   const ready = (head = "a".repeat(40), beforeWrite = async () => {}) =>
     github.markReady("token", "owner/repo", 1, "herbie/fix", head, beforeWrite);
   headChecks = true;
@@ -153,13 +212,21 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   mergeable = true;
   pending = false;
   mergeChecks = false;
-  assert.equal(await get(), null, "successful head cannot substitute for absent merge checks");
-  assert.equal(await ready(), false);
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "head checks satisfy required CI when the synthetic merge ref has no checks",
+  );
   mergeChecks = true;
   headChecks = false;
   noChecks = true;
   assert.equal(await get(), null);
   assert.equal(await ready(), false);
+  suiteFailure = true;
+  const startup = await get();
+  assert.equal(startup?.state, "failed", "suite-only startup failures trigger repair");
+  assert.ok(startup?.state === "failed" && startup.details.includes("startup_failure"));
+  suiteFailure = false;
   noChecks = false;
   conclusion = "cancelled";
   assert.equal(await ready(), false);
@@ -206,6 +273,14 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   limited = false;
   const now = Date.now();
   t.mock.method(Date, "now", () => now + 301_000);
+  assert.equal(await github.readinessState("new-token", "owner/repo", 1), "draft");
+  secondaryLimit = true;
+  await assert.rejects(get());
+  const secondaryCount = paths.length;
+  await assert.rejects(get(), /cooldown/);
+  assert.equal(paths.length, secondaryCount);
+  secondaryLimit = false;
+  t.mock.method(Date, "now", () => now + 362_000);
   assert.equal(await github.readinessState("new-token", "owner/repo", 1), "draft");
 });
 
