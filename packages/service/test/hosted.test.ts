@@ -77,6 +77,35 @@ test('hosted shutdown stops HTTP first and lets the active bounded attempt persi
   }finally{await restarted.close();}
 });
 
+test('overlapping hosted processes keep exactly one coordinator during a rollout',async t=>{
+  const database=process.env.HERBIE_TEST_DATABASE_URL;
+  if(!database)return t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration');
+  const app=await fixture(database);
+  const runtimes=await Promise.all([app.runtime(true),app.runtime(true)]);
+  for(const [index,runtime] of runtimes.entries()){
+    await runtime.store.createGoal('demo-user',{repository:'demo/example',prompt:`Exclusive coordinator ${index}`},'demo',randomUUID());
+  }
+  let active=0;let maximumActive=0;
+  const entered=Promise.withResolvers<void>();
+  const release=Promise.withResolvers<void>();
+  for(const runtime of runtimes){
+    const demo=runtime.adapters;
+    runtime.adapters={...demo,async attempt(execution,report){
+      active++;maximumActive=Math.max(maximumActive,active);entered.resolve();
+      try{await release.promise;return await demo.attempt(execution,report);}
+      finally{active--;}
+    }};
+  }
+  const services=await Promise.all(runtimes.map(runtime=>startHostedService(runtime)));
+  t.after(async()=>{release.resolve();await Promise.allSettled(services.map(service=>service.close()));await app.close();});
+  await entered.promise;
+  await delay(1200);
+  assert.equal(maximumActive,1);
+  assert.equal(active,1);
+  release.resolve();
+  await Promise.all(services.map(service=>service.close()));
+});
+
 
 test('hosted process sanitizes startup failure output before exiting',async()=>{
   const child=spawn(process.execPath,['--import','tsx',fileURLToPath(new URL('../src/hosted.ts',import.meta.url))],{

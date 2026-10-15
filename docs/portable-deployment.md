@@ -85,9 +85,12 @@ release check, not a claim that a generic secret scan can prove absence of secre
   for the roughly 15-minute attempt lifecycle plus publication/database overhead.
   This is an operating allowance, not a new global deadline. Never force-delete
   an active coordinator or assume a terminated process proves sandbox cleanup.
-- One steady replica, `Recreate` strategy, no autoscaler. Budget bounded writable
-  `/tmp` and ephemeral storage for native Git publication. Run as UID/GID 1000
-  with a read-only root filesystem and no Linux capabilities.
+- One steady replica with a rolling strategy using `maxUnavailable: 0` and
+  `maxSurge: 1`, and no autoscaler. During a rollout, both pods may serve HTTP,
+  but a PostgreSQL session advisory lock permits only one background coordinator.
+  The old coordinator drains before releasing ownership to the replacement.
+  Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
+  Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
 - Starting the process runs migrations even when `HERBIE_EXECUTION_ENABLED=false`.
   Smoke and staging tests must use an isolated database. A disabled worker alone
   is not isolation from production state.

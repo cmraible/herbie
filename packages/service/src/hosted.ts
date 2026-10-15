@@ -5,7 +5,7 @@ import type {Server} from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {createRuntime} from './runtime.js';
 import {createApiServer} from './http.js';
-import {runWorker} from './worker.js';
+import {runExclusiveWorker} from './worker.js';
 
 type Runtime = Awaited<ReturnType<typeof createRuntime>>;
 export type HostedRuntime = Pick<Runtime,'store'|'auth'|'adapters'|'github'> & {
@@ -29,7 +29,7 @@ export async function startHostedService(injected?:HostedRuntime,startup?:Startu
     throw error;
   }
   const controller=new AbortController();
-  const worker=config.executionEnabled?runWorker(store,adapters,randomUUID(),controller.signal):Promise.resolve();
+  const worker=config.executionEnabled?runExclusiveWorker(store,adapters,randomUUID(),controller.signal):Promise.resolve();
   let closing:Promise<void>|undefined;
   function close():Promise<void>{
     if(closing)return closing;
