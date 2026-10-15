@@ -139,6 +139,12 @@ run_unit() {
   run_step build pnpm build
   run_unit_tests
 }
+start_web_preview() {
+  export HERBIE_E2E_URL="http://127.0.0.1:$HERBIE_CI_PORT"
+  start_server web-preview pnpm --filter @herbie/web exec vite preview \
+    --host 127.0.0.1 --port "$HERBIE_CI_PORT" --strictPort
+  wait_http "$server_pid" "$HERBIE_E2E_URL/" web-preview
+}
 run_browser() {
   run_step browser-e2e pnpm --filter @herbie/web test:e2e
 }
@@ -162,6 +168,7 @@ case "$stage" in
     start_browser_install
     run_step build pnpm build
     wait_browser_install
+    start_web_preview
     run_browser
     ;;
   all)
@@ -169,6 +176,7 @@ case "$stage" in
     run_build
     run_unit_tests
     wait_browser_install
+    start_web_preview
     run_browser
     ;;
 esac
