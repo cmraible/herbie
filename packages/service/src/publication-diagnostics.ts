@@ -23,24 +23,28 @@ export interface PublicationDiagnostic {
   cause: PublicationCause;
 }
 
+const publicationStages = {
+  preparing: { phase: "git_preparation", cause: "git_preparation_failed" },
+  pushing: { phase: "branch_push", cause: "git_push_uncertain" },
+  "opening-pr": { phase: "pull_request_creation", cause: "pull_request_uncertain" },
+  published: { phase: "publication_confirmation", cause: "cleanup_failed" },
+} satisfies Record<string, PublicationDiagnostic>;
+
+const githubStatuses: Record<number, PublicationCause> = {
+  401: "github_unauthorized",
+  403: "github_forbidden",
+  404: "github_not_found",
+};
+
 export function publicationDiagnostic(
   error: unknown,
   phase: PublicationPhase,
 ): PublicationDiagnostic {
   if (error instanceof PatchPublicationError) {
-    if (error.publication.stage === "preparing")
-      return { phase: "git_preparation", cause: "git_preparation_failed" };
-    if (error.publication.stage === "pushing")
-      return { phase: "branch_push", cause: "git_push_uncertain" };
-    if (error.publication.stage === "opening-pr")
-      return { phase: "pull_request_creation", cause: "pull_request_uncertain" };
-    return { phase: "publication_confirmation", cause: "cleanup_failed" };
+    return publicationStages[error.publication.stage];
   }
   if (error instanceof GithubError) {
-    if (error.status === 401) return { phase, cause: "github_unauthorized" };
-    if (error.status === 403) return { phase, cause: "github_forbidden" };
-    if (error.status === 404) return { phase, cause: "github_not_found" };
-    return { phase, cause: "github_unavailable" };
+    return { phase, cause: githubStatuses[error.status] ?? "github_unavailable" };
   }
   if (error instanceof StoreError)
     return { phase, cause: error.status === 409 ? "lease_conflict" : "database_failure" };
