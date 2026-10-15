@@ -8,7 +8,7 @@ import { Store, StoreError } from './store.js';
 import {publicationDiagnostic,publicationDiagnosticMessage} from './publication-diagnostics.js';
 import type {PublicationPhase} from './adapters.js';
 
-async function executionFor(adapters: Adapters, job: Job, readOnly = false): Promise<Execution> {
+async function executionFor(adapters: Adapters, job: Job, readOnly: boolean): Promise<Execution> {
   const repository = readOnly ? await adapters.reconciliationRepository(job.goal.repository) : await adapters.authorize(job.goal.ownerId, job.goal.repository);
   return {goal:job.goal, repository, attemptId:job.attemptId, branch:job.branch};
 }
