@@ -15,13 +15,12 @@ import {
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { Store, StoreError } from "./store.js";
-import { AuthError, type createAuth } from "./auth.js";
+import { AuthError, type Auth, type createAuth } from "./auth.js";
 import { GithubError } from "./github.js";
 import type { Adapters } from "./adapters.js";
 import { reconcileReviews } from "./worker.js";
 import { cliConsentPage, cliConsentResult, consentCsp } from "./cli-consent-page.js";
 
-type Auth = ReturnType<typeof createAuth>;
 interface ApiOptions {
   store: Store;
   auth: Auth;
@@ -81,6 +80,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 }
 export function createApiServer(options: ApiOptions) {
   const { store, auth, adapters } = options;
+  const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
   function requireExecution() {
     if (!executionEnabled) throw new HttpError(503, "Live execution is disabled by the operator");
@@ -121,6 +121,37 @@ export function createApiServer(options: ApiOptions) {
       if (request.headers.origin !== origin)
         throw new HttpError(403, "Request origin is not allowed");
     }
+    if (
+      auth.handleRequest &&
+      (url.pathname.startsWith("/api/identity/") ||
+        ["/api/auth/start", "/api/auth/poll", "/api/auth/cli", "/api/auth/callback"].includes(
+          url.pathname,
+        ))
+    ) {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
+        else if (value !== undefined) headers.set(name, value);
+      }
+      const result = await auth.handleRequest(
+        new Request(url, {
+          method,
+          headers,
+          ...(method === "GET" || method === "HEAD"
+            ? {}
+            : { body: new Uint8Array(await body(request)) }),
+        }),
+      );
+      result.headers.forEach((value, name) => {
+        if (name !== "set-cookie") response.setHeader(name, value);
+      });
+      const cookies = result.headers.getSetCookie();
+      if (cookies.length) response.setHeader("set-cookie", cookies);
+      response.setHeader("cache-control", "no-store");
+      response.writeHead(result.status);
+      response.end(Buffer.from(await result.arrayBuffer()));
+      return;
+    }
     // Process liveness must not restart healthy workers during a database outage.
     if (method === "GET" && url.pathname === "/api/live") {
       json(response, 200, { alive: true });
@@ -142,9 +173,9 @@ export function createApiServer(options: ApiOptions) {
       });
       return;
     }
-    if (method === "POST" && url.pathname === "/api/auth/start") {
+    if (legacy && method === "POST" && url.pathname === "/api/auth/start") {
       const { client } = clientInput.parse(await readJson(request));
-      const flow = await auth.start(client);
+      const flow = await legacy.start(client);
       if (client === "web")
         response.setHeader(
           "set-cookie",
@@ -156,8 +187,8 @@ export function createApiServer(options: ApiOptions) {
       });
       return;
     }
-    if (method === "GET" && url.pathname === "/api/auth/callback") {
-      const result = await auth.callback(
+    if (legacy && method === "GET" && url.pathname === "/api/auth/callback") {
+      const result = await legacy.callback(
         z.string().min(1).parse(url.searchParams.get("code")),
         z.string().min(1).parse(url.searchParams.get("state")),
         cookie(request, "herbie_auth"),
@@ -218,11 +249,11 @@ export function createApiServer(options: ApiOptions) {
       response.end();
       return;
     }
-    if (url.pathname === "/api/auth/cli" && (method === "GET" || method === "POST")) {
+    if (legacy && url.pathname === "/api/auth/cli" && (method === "GET" || method === "POST")) {
       const approvalToken = cookie(request, "herbie_cli_approval") ?? "";
       let html: string;
       if (method === "GET")
-        html = cliConsentPage({ ...(await auth.pendingCli(approvalToken)), origin });
+        html = cliConsentPage({ ...(await legacy.pendingCli(approvalToken)), origin });
       else {
         if (!request.headers["content-type"]?.startsWith("application/x-www-form-urlencoded"))
           throw new HttpError(415, "Use form submission");
@@ -237,7 +268,7 @@ export function createApiServer(options: ApiOptions) {
           .max(20)
           .optional()
           .parse(fields.get("userCode") ?? undefined);
-        const result = await auth.decideCli(approvalToken, csrfToken, decision, userCode);
+        const result = await legacy.decideCli(approvalToken, csrfToken, decision, userCode);
         response.setHeader("set-cookie", approvalCookie("", 0));
         html = cliConsentResult(result.status === "approved");
       }
@@ -251,18 +282,18 @@ export function createApiServer(options: ApiOptions) {
       response.end(html);
       return;
     }
-    if (method === "GET" && url.pathname === "/api/auth/poll") {
+    if (legacy && method === "GET" && url.pathname === "/api/auth/poll") {
       json(
         response,
         200,
-        await auth.poll(z.string().min(20).max(200).parse(url.searchParams.get("token"))),
+        await legacy.poll(z.string().min(20).max(200).parse(url.searchParams.get("token"))),
       );
       return;
     }
     if (method === "POST" && url.pathname === "/api/demo/login") {
-      if (adapters.mode !== "demo") throw new HttpError(404, "Not found");
+      if (!legacy || adapters.mode !== "demo") throw new HttpError(404, "Not found");
       const { client } = clientInput.parse(await readJson(request));
-      const result = await auth.demoLogin();
+      const result = await legacy.demoLogin();
       if (client === "web") {
         response.setHeader("set-cookie", sessionCookie(result.token));
         json(response, 200, result.session);

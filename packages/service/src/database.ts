@@ -149,6 +149,7 @@ export async function prepareDatabase(
   pool: Pool,
   mode: "demo" | "live",
   phase?: (phase: StartupPhase) => void,
+  migrateIdentity?: () => Promise<void>,
 ): Promise<void> {
   // Revoke namespace access before migrations, so even legacy default grants cannot
   // expose a newly created table while migrations are running.
@@ -160,6 +161,7 @@ export async function prepareDatabase(
   await new Store(pool).migrate();
   phase?.("auth-migrations");
   await migrateAuth(pool);
+  await migrateIdentity?.();
   if (mode === "live") {
     phase?.("schema-verification");
     await protectPrivateSchema(pool);

@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Session } from "@herbie/contracts";
 import type { Github } from "./github.js";
+import { createInstallationAuth, type InstallationIdentity } from "./installation-auth.js";
 
 export interface AuthFlow {
   stateHash: string;
@@ -140,7 +141,8 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
     });
     return { token, session: { user, mode: config.mode } };
   }
-  return {
+  const auth = {
+    ...createInstallationAuth(config, store, github, (): InstallationIdentity => auth),
     async start(client: "web" | "cli") {
       if (!github || config.mode !== "live")
         throw new AuthError(400, "GitHub login is available only in live mode");
@@ -166,58 +168,6 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
         pollToken,
         browserState,
         ...(code ? { userCode: code } : {}),
-      };
-    },
-    async startInstallation(sessionToken: string) {
-      if (!github || config.mode !== "live")
-        throw new AuthError(400, "GitHub App installation is available only in live mode");
-      const current = await this.session(sessionToken);
-      if (!current) throw new AuthError(401, "Login required");
-      await this.userToken(current.user.id);
-      const state = secret();
-      const url = await github.installationUrl(state);
-      await store.putInstallationFlow(
-        hash(state),
-        hash(sessionToken),
-        new Date(Date.now() + 600_000),
-      );
-      return { url };
-    },
-    async finishInstallation(
-      state: string,
-      installationId: string | null,
-      setupAction: string | null,
-      sessionToken: string,
-    ) {
-      if (!github || config.mode !== "live" || !/^[A-Za-z0-9_-]{43}$/.test(state))
-        throw new AuthError(400, "Installation flow is expired or invalid; try again");
-      const flow = await store.takeInstallationFlow(hash(state));
-      if (
-        !flow ||
-        flow.expiresAt.getTime() <= Date.now() ||
-        flow.sessionHash !== hash(sessionToken)
-      )
-        throw new AuthError(400, "Installation flow is expired or invalid; try again");
-      const current = await this.session(sessionToken);
-      if (!current) throw new AuthError(401, "Login required");
-      const token = await this.userToken(current.user.id);
-      if (setupAction === "cancel") return { status: "cancelled" as const };
-      if (setupAction !== "install" && setupAction !== "update")
-        throw new AuthError(400, "GitHub did not complete the installation; try again");
-      if (
-        !installationId ||
-        !/^[1-9][0-9]*$/.test(installationId) ||
-        !Number.isSafeInteger(Number(installationId))
-      )
-        throw new AuthError(400, "GitHub did not return a valid installation; try again");
-      const verified = await github.verifyUserInstallation(token, Number(installationId));
-      return {
-        status:
-          verified === "ready"
-            ? ("connected" as const)
-            : verified === "permissions"
-              ? ("permissions" as const)
-              : ("failed" as const),
       };
     },
     async callback(
@@ -342,5 +292,9 @@ export function createAuth(config: AuthConfig, store: AuthStore, github?: Github
       return decrypt(credential.encryptedToken);
     },
   };
+  return auth;
 }
-export type Auth = ReturnType<typeof createAuth>;
+export type Auth = Pick<
+  ReturnType<typeof createAuth>,
+  "session" | "logout" | "userToken" | "startInstallation" | "finishInstallation"
+> & { handleRequest?: (request: Request) => Promise<Response> };

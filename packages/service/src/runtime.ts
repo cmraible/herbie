@@ -6,6 +6,7 @@ import { readConfig } from "./config.js";
 import { Store } from "./store.js";
 import { createGoalNamer } from "./goal-name.js";
 import { PgAuthStore } from "./auth-store.js";
+import { createBetterAuth } from "./better-auth.js";
 import { createAuth } from "./auth.js";
 import { createGithub } from "./github.js";
 import { createDemoAdapters } from "./demo.js";
@@ -47,9 +48,13 @@ export async function createRuntime(startup?: StartupProgress) {
     startup?.begin("database-connect");
     const connection = await pool.connect();
     connection.release();
-    await prepareDatabase(pool, config.mode, (phase) => startup?.begin(phase));
+    const identity =
+      config.mode === "live" && config.github && github
+        ? createBetterAuth({ ...config, github: config.github }, pool, github)
+        : undefined;
+    await prepareDatabase(pool, config.mode, (phase) => startup?.begin(phase), identity?.migrate);
     startup?.begin("auth-setup");
-    const auth = createAuth(config, new PgAuthStore(pool), github);
+    const auth = identity?.auth ?? createAuth(config, new PgAuthStore(pool), github);
     startup?.begin("adapter-setup");
     const adapters =
       config.mode === "live" && github
