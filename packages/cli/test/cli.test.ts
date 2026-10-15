@@ -7,9 +7,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli.js";
 
-async function fixture(handler: (request: IncomingMessage, response: ServerResponse) => void) {
+async function fixture(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+  defaultAuth = true,
+) {
   const server = createServer((request, response) => {
-    if (request.url === "/api/auth/start" && request.method === "POST") {
+    if (defaultAuth && request.url === "/api/auth/start" && request.method === "POST") {
       json(response, {
         url: "https://github.com/login/oauth/authorize",
         pollToken: "test-poll-token",
@@ -17,11 +20,11 @@ async function fixture(handler: (request: IncomingMessage, response: ServerRespo
       });
       return;
     }
-    if (request.url?.startsWith("/api/auth/poll?")) {
+    if (defaultAuth && request.url?.startsWith("/api/auth/poll?")) {
       json(response, { status: "complete", token: "private-session" });
       return;
     }
-    if (request.url === "/api/session") {
+    if (defaultAuth && request.url === "/api/session") {
       json(response, session);
       return;
     }
@@ -341,7 +344,7 @@ test("CLI login shows its service and approval code, saving no session until bro
       return;
     }
     json(response, { error: "Not found" }, 404);
-  });
+  }, false);
   const login = app.invoke(["login", "--url", app.baseUrl]);
   try {
     await pending.promise;
@@ -385,7 +388,7 @@ test("rejecting pending CLI authorization stops polling without saving a session
       return;
     }
     json(response, { error: "No session should be issued" }, 401);
-  });
+  }, false);
   const login = app.invoke(["login", "--url", app.baseUrl]);
   try {
     await pending.promise;
@@ -414,7 +417,7 @@ test("CLI authorization without a user approval code is refused before polling",
     }
     polls++;
     json(response, { status: "complete", token: "unapproved-session" });
-  });
+  }, false);
   try {
     assert.equal(await app.invoke(["login", "--url", app.baseUrl]), 1);
     assert.match(app.errors.at(-1) ?? "", /did not provide a CLI approval code; no session saved/);

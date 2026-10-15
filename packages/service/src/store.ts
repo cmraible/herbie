@@ -1071,7 +1071,7 @@ export class Store {
       );
       if (waiting.rows.some((repair) => repair.head !== head)) {
         await client.query(
-          "UPDATE ci_repairs SET state='completed',lease_owner=NULL,lease_expires_at=NULL WHERE job_id=$1 AND state='waiting'",
+          "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state='waiting'",
           [jobId],
         );
         await client.query(
@@ -1124,7 +1124,7 @@ export class Store {
     await this.transaction(async (client) => {
       const { goal } = await lockJob(client, jobId);
       await client.query(
-        "UPDATE ci_repairs SET state='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1 AND job_id=$2 AND state='running'",
+        "UPDATE ci_repairs SET state='completed' WHERE id=$1 AND job_id=$2 AND state='running'",
         [id, jobId],
       );
       await client.query(

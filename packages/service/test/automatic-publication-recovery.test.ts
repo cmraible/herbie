@@ -408,7 +408,7 @@ for (const recovering of [false, true])
   });
 
 for (const recovering of [false, true])
-  test(`missing descriptions block before credential-dependent publication checks (recovering: ${recovering})`, async (t) => {
+  test(`missing descriptions do not block publication (recovering: ${recovering})`, async (t) => {
     const f = await fixture(t);
     if (!f) return;
     // Simulate a pre-upgrade artifact by removing the optional field from storage.
@@ -424,18 +424,9 @@ for (const recovering of [false, true])
       await f.pool.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [
         job.id,
       ]);
-    let credentialChecks = 0;
-    f.adapters.checkPublicationRetry = async () => {
-      credentialChecks++;
-      throw new Error("Expired GitHub credential");
-    };
-    f.adapters.publish = async () => {
-      credentialChecks++;
-      throw new Error("Expired GitHub credential");
-    };
     await runWorkerOnce(f.store, f.adapters, "recovery");
-    assert.equal(credentialChecks, 0);
-    assert.equal((await f.row()).publication_blocked, true);
-    await f.due();
-    assert.equal(await runWorkerOnce(f.store, f.adapters, "later"), false);
+    assert.equal(f.publishes, 1);
+    assert.equal(f.attempts, 0, "saved patches do not launch another run");
+    assert.equal((await f.row()).publication_blocked, false);
+    assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
   });

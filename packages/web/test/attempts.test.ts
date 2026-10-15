@@ -55,11 +55,11 @@ test("explicit attribution keeps late events with the older attempt and retains 
     [4],
   );
 });
-test("legacy execution events follow numbered starts; ambiguous PR events stay in history", () => {
+test("execution events follow numbered run starts; ambiguous PR events stay in history", () => {
   const events = [
-    event(1, "attempt_started", "Attempt 1 started"),
+    event(1, "attempt_started", "Run #1 started"),
     event(2, "attempt", "First"),
-    event(3, "attempt_started", "Attempt 2 started"),
+    event(3, "attempt_started", "Run #2 started"),
     event(4, "attempt", "Second"),
     event(5, "pull_request_merged", "Pull request merged"),
   ];
