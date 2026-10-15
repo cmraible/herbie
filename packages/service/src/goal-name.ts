@@ -13,7 +13,7 @@ const responseSchema=z.object({
   })),
 });
 
-export function createGoalNamer(apiKey?:string,model='gpt-5.4-nano',request:typeof fetch=fetch){
+export function createGoalNamer(apiKey?:string,model='gpt-6-luna',request:typeof fetch=fetch){
   return async(prompt:string):Promise<string>=>{
     if(!apiKey)return fallbackGoalName(prompt);
     try{

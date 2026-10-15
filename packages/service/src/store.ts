@@ -87,7 +87,7 @@ export class Store {
     const request = goalInput.parse(input);
     z.string().uuid().parse(key);
     const fingerprint = requestFingerprint(request,mode);
-    return this.transaction(async client => {
+    const result=await this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`request:${ownerId}:${key}`]);
       const existing = await client.query<Record<string, unknown>>('SELECT r.fingerprint,r.goal_id,(g.test_command IS NOT NULL) AS legacy FROM goal_requests r JOIN goals g ON g.id=r.goal_id WHERE r.owner_id=$1 AND r.request_key=$2', [ownerId, key]);
       if (existing.rows[0]) {
@@ -100,7 +100,7 @@ export class Store {
         return { goal, created: false };
       }
       const id = randomUUID();
-      const name=request.name??goalName.parse(await this.nameGoal(request.prompt));
+      const name=request.name??fallbackGoalName(request.prompt);
       await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode, name]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
@@ -109,14 +109,30 @@ export class Store {
       if (!goal) throw new Error('Missing created goal');
       return { goal, created: true };
     });
+    if(!result.created||request.name!==undefined)return result;
+    // The saved request reserves naming for its creator without holding a database
+    // connection during model I/O. Interrupted naming leaves the fallback intact.
+    const name=goalName.parse(await this.nameGoal(request.prompt));
+    result.goal=await this.transaction(async client=>{
+      const current=await goalFrom(client,result.goal.id,true);
+      if(!current)throw new Error('Missing created goal');
+      const renamed=await client.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='renamed' LIMIT 1",[current.id]);
+      if(renamed.rowCount||current.name===name)return current;
+      const updated=await client.query<Record<string,unknown>>(`UPDATE goals SET name=$2,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${goalColumns}`,[current.id,name]);
+      return databaseGoal.parse(updated.rows[0]);
+    });
+    return result;
   }
   async renameGoal(id: string, ownerId: string, name: string): Promise<Goal> {
     const parsed = goalName.parse(name);
-    const result = await this.pool.query<Record<string, unknown>>(
-      `UPDATE goals SET name=$3,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$2 RETURNING ${goalColumns}`,
-      [id,ownerId,parsed]);
-    if (!result.rows[0]) throw new StoreError(404, 'Goal not found');
-    return databaseGoal.parse(result.rows[0]);
+    return this.transaction(async client=>{
+      const result = await client.query<Record<string, unknown>>(
+        `UPDATE goals SET name=$3,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$2 RETURNING ${goalColumns}`,
+        [id,ownerId,parsed]);
+      if (!result.rows[0]) throw new StoreError(404, 'Goal not found');
+      await addEvent(client,id,'renamed','Goal renamed');
+      return databaseGoal.parse(result.rows[0]);
+    });
   }
   async getGoal(id: string, ownerId?: string): Promise<Goal | null> {
     const goal = await goalFrom(this.pool, id);

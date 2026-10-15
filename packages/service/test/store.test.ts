@@ -323,7 +323,8 @@ integration('blank names are summarized once across concurrent requests and repl
   const owner=randomUUID(),key=randomUUID(),request={...input(),name:'   '};
   const results=await Promise.all(Array.from({length:3},()=>namedStore.createGoal(owner,request,'live',key)));
   assert.equal(results.filter(result=>result.created).length,1);
-  assert.ok(results.every(result=>result.goal.name==='Arithmetic cleanup'&&result.goal.prompt===request.prompt));
+  assert.equal(results.find(result=>result.created)?.goal.name,'Arithmetic cleanup');
+  assert.ok(results.every(result=>result.goal.prompt===request.prompt));
   assert.deepEqual(prompts,[request.prompt]);
   const goal=results[0]!.goal;
   await namedStore.renameGoal(goal.id,owner,'My new name');
@@ -332,4 +333,31 @@ integration('blank names are summarized once across concurrent requests and repl
   const explicit=await namedStore.createGoal(owner,{...request,name:' My own name '},'live',randomUUID());
   assert.equal(explicit.goal.name,'My own name');
   assert.deepEqual(prompts,[request.prompt]);
+});
+
+integration('slow naming releases the only database connection and preserves intervening edits',async()=>{
+  const pool=new Pool({connectionString:databaseUrl,options:`-c search_path=${schema}`,max:1,connectionTimeoutMillis:500});
+  try{
+    for(const rename of [undefined,'User chosen name','Fix arithmetic']){
+      const started=Promise.withResolvers<void>(),release=Promise.withResolvers<string>();
+      let calls=0;
+      const namedStore=new Store(pool,Math.random,async()=>{calls++;started.resolve();return release.promise;});
+      const owner=randomUUID(),key=randomUUID(),request=input();
+      const pending=namedStore.createGoal(owner,request,'live',key);
+      try{
+        await started.promise;
+        const [goal]=await namedStore.listGoals(owner);
+        assert.ok(goal);
+        assert.equal(goal.name,'Fix arithmetic');
+        assert.equal((await namedStore.createGoal(owner,request,'live',key)).created,false);
+        if(rename!==undefined)await namedStore.renameGoal(goal.id,owner,rename);
+        await namedStore.control(goal.id,owner,'pause');
+        release.resolve('Arithmetic cleanup');
+        const result=await pending;
+        assert.equal(result.goal.name,rename??'Arithmetic cleanup');
+        assert.equal(result.goal.state,'paused');
+        assert.equal(calls,1);
+      }finally{release.resolve('Arithmetic cleanup');await pending;}
+    }
+  }finally{await pool.end();}
 });

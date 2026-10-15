@@ -27,6 +27,13 @@ test('missing credentials use the Unicode-safe fallback without calling a model'
   assert.equal(await nameGoal('[demo:fail]'),'Untitled goal');
 });
 
+test('the default naming model uses the supported Luna model',async()=>{
+  assert.equal(await createGoalNamer('fixture-key',undefined,async(_url,options)=>{
+    assert.equal(JSON.parse(String(options?.body)).model,'gpt-6-luna');
+    return Response.json(completion('Improve signup validation'));
+  })('Improve the signup form'),'Improve signup validation');
+});
+
 test('failed, incomplete, empty, and invalid model responses preserve goal creation',async()=>{
   const responses=[
     new Response('private provider diagnostics',{status:429}),
