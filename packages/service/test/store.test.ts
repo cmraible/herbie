@@ -508,6 +508,7 @@ integration('merges still reconcile during failure or publication recovery witho
     assert.equal(after.state,before?.state);
     assert.equal(after.error,before?.error);
     assert.equal(after.pullRequests[0]?.state,'merged');
+    assert.equal((await store.events(goal.id)).at(-1)?.message,'Pull request merged');
     assert.equal(await store.claim('extra'),null);
   }
 });

@@ -430,7 +430,7 @@ export class Store {
     else await advanceGoal(client,goal);
     const updated = await goalFrom(client, goal.id);
     if (!updated) throw new Error('Missing reconciled goal');
-    await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : goal.state === 'cancelled' ? 'Pull request merged; goal remains cancelled' : 'Pull request merged; work continues within the WIP limit');
+    await addEvent(client, goal.id, cancelled ? 'pull_request_closed' : 'pull_request_merged', cancelled ? 'Pull request closed without merging; goal stopped' : 'Pull request merged');
     return updated;
   }
 
