@@ -139,3 +139,28 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
   await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
 });
+
+test('a custom name can be edited without changing the brief and survives reload',async({page})=>{
+  await login(page);
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await page.getByLabel('Goal name',{exact:true}).fill('Signup validation');
+  await page.getByLabel('What should Herbie work on?').fill('Validate email addresses and show helpful errors.');
+  await page.getByRole('button',{name:'Start goal',exact:true}).click();
+  await expect(detail(page).getByRole('heading',{name:'Signup validation',exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Rename goal'});
+  await dialog.getByLabel('Goal name').fill('   ');
+  await expect(dialog.getByRole('button',{name:'Save name'})).toBeDisabled();
+  await dialog.getByLabel('Goal name').fill('Discard this name');
+  await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(detail(page).getByRole('heading',{name:'Signup validation',exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'Rename',exact:true}).click();
+  await dialog.getByLabel('Goal name').fill('  Better signup errors  ');
+  await dialog.getByRole('button',{name:'Save name'}).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await expect(detail(page).getByRole('heading',{name:'Better signup errors',exact:true})).toBeVisible();
+  await expect(detail(page).getByText('Validate email addresses and show helpful errors.',{exact:true})).toBeVisible();
+  await detail(page).getByRole('button',{name:'All goals'}).click();
+  await expect(page.getByRole('button',{name:/Better signup errors/})).toBeVisible();
+});

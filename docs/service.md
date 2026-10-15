@@ -8,6 +8,12 @@ never a checkout, and never runs generated code or repository hooks.
 
 ## Behavior and recovery
 
+Goals have a user-editable name (1–120 characters), separate from the execution
+prompt. Set it when creating a goal or rename any goal in the web UI or with
+`rename GOAL_ID --name TEXT` in the CLI. Omitted names and existing goals default
+to the first 120 characters of the brief. Renaming preserves the original create
+request for safe retries and does not change the prompt or start work.
+
 Multiple active goals may target the same repository.
 Goals execute independently and may have multiple PRs open at once. Publication
 preserves each artifact's captured tree and original base commit when the default

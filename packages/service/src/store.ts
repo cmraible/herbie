@@ -4,12 +4,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
-import { goalInput, goalSchema, eventSchema, type Goal, type GoalInput, type GoalAction, type GoalEvent } from '@herbie/contracts';
+import { goalName, goalInput, goalSchema, eventSchema, type Goal, type GoalInput, type GoalAction, type GoalEvent } from '@herbie/contracts';
 import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import type { PublicationPhase } from './adapters.js';
 import type { DaytonaAttemptChanges } from '@herbie/loop/daytona-attempt';
 
-const goalColumns = `id, owner_id AS "ownerId", repository, prompt,
+const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
   max_attempts AS "maxAttempts", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest", cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({ createdAt: z.date().transform(d => d.toISOString()), updatedAt: z.date().transform(d => d.toISOString()) });
@@ -34,8 +34,8 @@ export class StoreError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'StoreError'; }
 }
 const conflict = (message: string) => new StoreError(409, message);
-function requestFingerprint({repository,prompt,maxAttempts}:GoalInput, mode:Goal['mode']):string {
-  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,maxAttempts,mode})).digest('hex');
+function requestFingerprint({repository,prompt,maxAttempts,name}:GoalInput, mode:Goal['mode']):string {
+  return createHash('sha256').update(JSON.stringify({repository:repository.toLowerCase(),prompt,maxAttempts,mode,...(name === undefined ? {} : {name})})).digest('hex');
 }
 function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
   const encoded = row.artifact;
@@ -88,18 +88,18 @@ export class Store {
     const fingerprint = requestFingerprint(request,mode);
     return this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`request:${ownerId}:${key}`]);
-      const existing = await client.query<Record<string, unknown>>('SELECT fingerprint,goal_id FROM goal_requests WHERE owner_id=$1 AND request_key=$2', [ownerId, key]);
+      const existing = await client.query<Record<string, unknown>>('SELECT r.fingerprint,r.goal_id,(g.test_command IS NOT NULL) AS legacy FROM goal_requests r JOIN goals g ON g.id=r.goal_id WHERE r.owner_id=$1 AND r.request_key=$2', [ownerId, key]);
       if (existing.rows[0]) {
-        const previous = z.object({ fingerprint: z.string(), goal_id: z.string().uuid() }).parse(existing.rows[0]);
+        const previous = z.object({ fingerprint: z.string(), goal_id: z.string().uuid(), legacy: z.boolean() }).parse(existing.rows[0]);
         const goal = await goalFrom(client, previous.goal_id);
         if (!goal) throw new Error('Missing idempotent goal');
         // Pre-upgrade fingerprints included testCommand. Compare the immutable
-        // goal input in the current shape so interrupted requests still replay.
-        if (previous.fingerprint !== fingerprint && requestFingerprint(goal,goal.mode) !== fingerprint) throw conflict('Idempotency key was already used for a different request');
+        // goal input without the mutable name so interrupted legacy requests still replay.
+        if (previous.fingerprint !== fingerprint && (!previous.legacy || request.name !== undefined || requestFingerprint({...goal,name:undefined},goal.mode) !== fingerprint)) throw conflict('Idempotency key was already used for a different request');
         return { goal, created: false };
       }
       const id = randomUUID();
-      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,state) VALUES($1,$2,$3,$4,$5,$6,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode]);
+      await client.query("INSERT INTO goals(id,owner_id,repository,prompt,max_attempts,mode,name,state) VALUES($1,$2,$3,$4,$5,$6,$7,'queued')", [id, ownerId, request.repository, request.prompt, request.maxAttempts, mode, request.name ?? (Array.from(request.prompt.replaceAll('[demo:fail]', '').trim()).slice(0,120).join('').trim() || 'Untitled goal')]);
       await client.query('INSERT INTO goal_requests(owner_id,request_key,fingerprint,goal_id) VALUES($1,$2,$3,$4)', [ownerId, key, fingerprint, id]);
       await insertJob(client, id, 1);
       await addEvent(client, id, 'queued', 'Goal queued for a durable worker');
@@ -107,6 +107,14 @@ export class Store {
       if (!goal) throw new Error('Missing created goal');
       return { goal, created: true };
     });
+  }
+  async renameGoal(id: string, ownerId: string, name: string): Promise<Goal> {
+    const parsed = goalName.parse(name);
+    const result = await this.pool.query<Record<string, unknown>>(
+      `UPDATE goals SET name=$3,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$2 RETURNING ${goalColumns}`,
+      [id,ownerId,parsed]);
+    if (!result.rows[0]) throw new StoreError(404, 'Goal not found');
+    return databaseGoal.parse(result.rows[0]);
   }
   async getGoal(id: string, ownerId?: string): Promise<Goal | null> {
     const goal = await goalFrom(this.pool, id);

@@ -152,7 +152,7 @@ test('review reconciliation uses only repository-scoped read permission after us
 test('publication recovery permits main to advance while retaining the original base in its history',async t=>{
   const {github,fixture,requests}=await githubFixture(t);
   const live=createLiveAdapters({apiKey:'fixture-never-used',openaiSecretName:'existing-secret'},github,{userToken:async()=> 'ghu_fixture'});
-  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
   const execution={goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/synthetic-goal/synthetic-job'};
   const changes={baseCommit:'0'.repeat(40),patch:Buffer.from('fixture')};
   assert.equal(await live.checkPublicationRetry?.(execution,changes),'ready');
@@ -174,7 +174,7 @@ test('cancellation absence checks use read-only reconciliation access after arch
   const {github,fixture,requests}=await githubFixture(t);
   fixture.archived=true;
   const live=createLiveAdapters(undefined,github,{userToken:async()=>{throw new Error('Read-only cancellation must not require write authorization');}});
-  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'needs_attention',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:'uncertain'});
   const execution={goal,repository:await live.reconciliationRepository(goal.repository),attemptId:randomUUID(),branch:'herbie/attempt-1'};
   assert.equal(await live.checkUnpublished?.(execution),'absent');
   fixture.branchHeads.set(execution.branch,'1'.repeat(40));
@@ -199,7 +199,7 @@ test('live publication recovers an existing attempt PR without running Git or cr
   const {github,fixture,requests} = await githubFixture(t);
   fixture.pr=true;
   const live = createLiveAdapters({apiKey:'daytona-fixture-never-used',openaiSecretName:'existing-secret-name'},github,{userToken:async()=> 'ghu_fixture'});
-  const goal = goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
+  const goal = goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
   const execution = {goal,repository:{repository:'alice/project',defaultBranch:'main',installationId:11},attemptId:randomUUID(),branch:'herbie/attempt-1'};
   const pr = await live.publish(execution,{baseCommit:'0'.repeat(40),patch:Buffer.alloc(0)},async()=>{});
   assert.deepEqual(pr,{url:'https://github.com/alice/project/pull/8',number:8,branch:'herbie/attempt-1'});
@@ -356,7 +356,7 @@ test('reconciliation accepts stateless installation tokens before looking up the
   fixture.installationToken=`ghs_123_eyJhbGciOiJSUzI1NiJ9.${'cGF5bG9hZA'.repeat(40)}.signature-with_hyphen`;
   const live=createLiveAdapters(undefined,github,{userToken:async()=>{throw new Error('Reconciliation must not need a user token');}});
   const repository=await live.reconciliationRepository('alice/project');
-  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
+  const goal=goalSchema.parse({id:randomUUID(),ownerId:'7',repository:'alice/project',name:'Fix bug',prompt:'Fix bug',maxAttempts:1,attemptCount:1,state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),mode:'live',stopRequested:null,pullRequest:null,error:null});
   const execution={goal,repository,attemptId:randomUUID(),branch:'herbie/attempt-1'};
   assert.equal(await live.reconcile(execution),null);
   fixture.pr=true;

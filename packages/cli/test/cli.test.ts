@@ -44,9 +44,9 @@ test('explicit demo login persists a private bearer session and authenticates su
 
 const goalId = '271de1c7-b32c-43b7-a61f-f0a2a1d53c0d';
 const requestId = '8e5e189f-b9cf-4f65-9c94-5d8d25b43b70';
-const goal = {id:goalId, ownerId:'user-1', repository:'octocat/demo', prompt:'Add a regression test', maxAttempts:2, attemptCount:0, state:'queued', createdAt:'2026-10-08T00:00:00Z', updatedAt:'2026-10-08T00:00:00Z', mode:'demo', stopRequested:null, pullRequest:null, error:null};
+const goal = {id:goalId, ownerId:'user-1', repository:'octocat/demo', name:'Regression coverage',prompt:'Add a regression test', maxAttempts:2, attemptCount:0, state:'queued', createdAt:'2026-10-08T00:00:00Z', updatedAt:'2026-10-08T00:00:00Z', mode:'demo', stopRequested:null, pullRequest:null, error:null};
 
-test('start needs only a repository and prompt and preserves the request ID on retry', async () => {
+test('start sends a custom name and preserves the request ID on retry', async () => {
   const requests: {key: string | string[] | undefined; body: unknown}[] = [];
   const app = await fixture((request, response) => {
     if (request.url === '/api/demo/login') { json(response, {token:'private-session',session}); return; }
@@ -59,10 +59,10 @@ test('start needs only a repository and prompt and preserves the request ID on r
   });
   try {
     await app.invoke(['login','--demo','--url',app.baseUrl]);
-    const args = ['start','--repo','octocat/demo','--prompt','Add a regression test','--max-attempts','2','--request-id',requestId];
+    const args = ['start','--name','Regression coverage','--repo','octocat/demo','--prompt','Add a regression test','--max-attempts','2','--request-id',requestId];
     assert.equal(await app.invoke(args), 0);
     assert.equal(await app.invoke(args), 0);
-    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',prompt:'Add a regression test',maxAttempts:2}})));
+    assert.deepEqual(requests, [0,1].map(() => ({key:requestId,body:{repository:'octocat/demo',name:'Regression coverage',prompt:'Add a regression test',maxAttempts:2}})));
     assert.equal(JSON.parse(app.output.at(-1) ?? '').id, goalId);
   } finally { await app.close(); }
 });
@@ -238,4 +238,23 @@ test('CLI authorization without a user approval code is refused before polling',
     assert.equal(polls, 0);
     await assert.rejects(stat(app.configPath), {code:'ENOENT'});
   } finally { await app.close(); }
+});
+
+test('rename sends a validated name for the selected goal', async () => {
+  const names:unknown[]=[];
+  const app=await fixture((request,response)=>{
+    if(request.url==='/api/demo/login'){json(response,{token:'private-session',session});return;}
+    if(request.url===`/api/goals/${goalId}/name`&&request.method==='POST'){
+      let body='';request.setEncoding('utf8');request.on('data',(chunk:string)=>{body+=chunk;});
+      request.on('end',()=>{const input=JSON.parse(body);names.push(input);json(response,{...goal,...input});});return;
+    }
+    json(response,{error:'Not found'},404);
+  });
+  try {
+    await app.invoke(['login','--demo','--url',app.baseUrl]);
+    assert.equal(await app.invoke(['rename',goalId,'--name','   ']),1);
+    assert.equal(await app.invoke(['rename',goalId,'--name','  Better coverage  ']),0);
+    assert.deepEqual(names,[{name:'Better coverage'}]);
+    assert.equal(JSON.parse(app.output.at(-1)??'').name,'Better coverage');
+  } finally {await app.close();}
 });

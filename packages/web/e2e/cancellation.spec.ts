@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {randomUUID} from 'node:crypto';
 for(const state of ['queued','running','paused','awaiting_review','needs_attention'])test(`Cancel is available for ${state} with unresolved cleanup`,async({page})=>{
-  let goal={id:randomUUID(),ownerId:'fixture',repository:'fixture/project',prompt:'Synthetic cancellation fixture',maxAttempts:1,attemptCount:1,state,createdAt:'2026-10-14T00:00:00Z',updatedAt:'2026-10-14T00:00:00Z',mode:'live',stopRequested:null,pullRequest:null,error:state==='needs_attention'?'Publication remains unconfirmed':null,cleanupStatus:'not_required'};
+  let goal={id:randomUUID(),ownerId:'fixture',repository:'fixture/project',name:'Synthetic cancellation fixture',prompt:'Synthetic cancellation fixture',maxAttempts:1,attemptCount:1,state,createdAt:'2026-10-14T00:00:00Z',updatedAt:'2026-10-14T00:00:00Z',mode:'live',stopRequested:null,pullRequest:null,error:state==='needs_attention'?'Publication remains unconfirmed':null,cleanupStatus:'not_required'};
   let cancels=0;
   const json=(body:unknown)=>({contentType:'application/json',body:JSON.stringify(body)});
   await page.route('**/api/health',r=>r.fulfill(json({mode:'live',executionEnabled:true})));
