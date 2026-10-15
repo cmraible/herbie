@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { after, afterEach, beforeEach, test } from 'node:test';
 import { Pool } from 'pg';
+import {demoGoalName} from '../src/demo.js';
 import { Store } from '../src/store.js';
 import { hasValidPublicationEvidence } from '@herbie/loop/publish-patch';
 
@@ -13,7 +14,7 @@ beforeEach(async () => {
   if (!databaseUrl) return;
   schema = `store_test_${randomUUID().replaceAll('-', '')}`;
   await admin.query(`CREATE SCHEMA ${schema}`);
-  store = new Store(new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` }));
+  store = new Store(new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` }),Math.random,demoGoalName);
   await store.migrate();
 });
 afterEach(async () => {
@@ -342,52 +343,35 @@ integration('blank names are summarized once across concurrent requests and repl
   assert.deepEqual(prompts,[request.prompt]);
 });
 
-integration('slow naming releases the only database connection and preserves intervening edits',async()=>{
-  const pool=new Pool({connectionString:databaseUrl,options:`-c search_path=${schema}`,max:1,connectionTimeoutMillis:500});
+integration('goals and jobs remain invisible until naming succeeds',async()=>{
+  const started=Promise.withResolvers<void>(),release=Promise.withResolvers<string>();
+  const namedStore=new Store(store.pool,Math.random,async()=>{started.resolve();return release.promise;});
+  const owner=randomUUID(),key=randomUUID();
+  const pending=namedStore.createGoal(owner,input(),'live',key);
   try{
-    for(const rename of [undefined,'User chosen name','Fix arithmetic']){
-      const started=Promise.withResolvers<void>(),release=Promise.withResolvers<string>();
-      let calls=0;
-      const namedStore=new Store(pool,Math.random,async()=>{calls++;started.resolve();return release.promise;});
-      const owner=randomUUID(),key=randomUUID(),request=input();
-      const pending=namedStore.createGoal(owner,request,'live',key);
-      try{
-        await started.promise;
-        const [goal]=await namedStore.listGoals(owner);
-        assert.ok(goal);
-        assert.equal(goal.name,'Fix arithmetic');
-        assert.equal((await namedStore.createGoal(owner,request,'live',key)).created,false);
-        if(rename!==undefined)await namedStore.renameGoal(goal.id,owner,rename);
-        await namedStore.control(goal.id,owner,'pause');
-        release.resolve('Arithmetic cleanup');
-        const result=await pending;
-        assert.equal(result.goal.name,rename??'Arithmetic cleanup');
-        assert.equal(result.goal.state,'paused');
-        assert.equal(calls,1);
-      }finally{release.resolve('Arithmetic cleanup');await pending;}
-    }
-  }finally{await pool.end();}
+    await started.promise;
+    assert.deepEqual(await store.listGoals(owner),[]);
+    assert.equal((await store.pool.query('SELECT goal_id FROM goal_requests WHERE owner_id=$1',[owner])).rowCount,0);
+    release.resolve('Arithmetic cleanup');
+    const result=await pending;
+    assert.equal(result.goal.name,'Arithmetic cleanup');
+    assert.equal((await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[result.goal.id])).rowCount,1);
+  }finally{release.resolve('Arithmetic cleanup');await pending;}
 });
 
-integration('post-commit naming failures return the saved goal without duplicating work',async()=>{
-  for(const failure of ['model','database']){
-    const pool=new Pool({connectionString:databaseUrl,options:`-c search_path=${schema}`});
-    const namedStore=new Store(pool,Math.random,async()=>{
-      if(failure==='model')throw new Error('Naming unavailable');
-      await pool.end();
-      return 'Arithmetic cleanup';
-    });
-    try{
-      const owner=randomUUID(),key=randomUUID(),request=input();
-      const result=await namedStore.createGoal(owner,request,'live',key);
-      assert.equal(result.created,true);
-      assert.equal(result.goal.name,'Fix arithmetic');
-      const replay=await store.createGoal(owner,request,'live',key);
-      assert.equal(replay.created,false);
-      assert.equal(replay.goal.id,result.goal.id);
-      assert.equal((await store.listGoals(owner)).length,1);
-      assert.equal((await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[result.goal.id])).rowCount,1);
-    }finally{if(failure==='model')await pool.end();}
+integration('naming failures leave no goal or request and allow a clean retry',async()=>{
+  for(const nameGoal of [async()=>{throw new Error('Naming unavailable');},async()=>'',undefined]){
+    const owner=randomUUID(),key=randomUUID(),request=input();
+    const namedStore=new Store(store.pool,Math.random,nameGoal);
+    await assert.rejects(namedStore.createGoal(owner,request,'live',key));
+    assert.deepEqual(await store.listGoals(owner),[]);
+    assert.equal((await store.pool.query('SELECT goal_id FROM goal_requests WHERE owner_id=$1',[owner])).rowCount,0);
+    const retry=new Store(store.pool,Math.random,async()=> 'Arithmetic cleanup');
+    const result=await retry.createGoal(owner,request,'live',key);
+    assert.equal(result.created,true);
+    assert.equal(result.goal.name,'Arithmetic cleanup');
+    assert.equal((await retry.createGoal(owner,request,'live',key)).created,false);
+    assert.equal((await store.pool.query('SELECT id FROM jobs WHERE goal_id=$1',[result.goal.id])).rowCount,1);
   }
 });
 

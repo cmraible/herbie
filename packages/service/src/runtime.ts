@@ -24,7 +24,7 @@ export async function createRuntime(startup?:StartupProgress){
   })();
   const pool=new pg.Pool(poolConfig);
   pool.on('error',error=>{logFailure(error,{component:'database-pool'});console.error(`Herbie database pool error: ${startupDiagnostic(error)} causes=${safeStartupCauses(error)}.`);});
-  const store=new Store(pool,Math.random,createGoalNamer(config.openaiApiKey,config.goalNameModel));
+  const store=new Store(pool,Math.random,config.mode==='live'?createGoalNamer(config.openaiApiKey!,config.goalNameModel):undefined);
   try {
     startup?.begin('database-connect');
     const connection=await pool.connect();connection.release();

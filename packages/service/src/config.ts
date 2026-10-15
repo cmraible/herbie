@@ -38,7 +38,7 @@ export const environmentSchema=z.object({
     if(origin&&!['localhost','127.0.0.1','[::1]'].includes(origin.hostname))issue('HERBIE_PUBLIC_URL','Demo mode requires a loopback origin');
   }else{
     if(origin?.protocol!=='https:')issue('HERBIE_PUBLIC_URL','Live mode requires an HTTPS origin');
-    for(const name of ['HERBIE_ALLOWED_GITHUB_USER_ID','HERBIE_CREDENTIAL_KEY','GITHUB_APP_ID','GITHUB_CLIENT_ID','GITHUB_CLIENT_SECRET','GITHUB_WEBHOOK_SECRET'] as const){
+    for(const name of ['HERBIE_ALLOWED_GITHUB_USER_ID','HERBIE_CREDENTIAL_KEY','GITHUB_APP_ID','GITHUB_CLIENT_ID','GITHUB_CLIENT_SECRET','GITHUB_WEBHOOK_SECRET','OPENAI_API_KEY'] as const){
       if(!env[name])issue(name,'Required in live mode');
     }
     if(!env.GITHUB_PRIVATE_KEY&&!env.GITHUB_PRIVATE_KEY_FILE)issue('GITHUB_PRIVATE_KEY','Set GITHUB_PRIVATE_KEY or GITHUB_PRIVATE_KEY_FILE in live mode');

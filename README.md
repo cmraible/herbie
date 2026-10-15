@@ -49,7 +49,11 @@ No live execution or public deployment is enabled by the demo configuration.
 
 Environment configuration is validated together by the Zod schema in
 `packages/service/src/config.ts` before connecting to PostgreSQL. Errors name the
-variables that need fixing without displaying their values. Live execution also
+variables that need fixing without displaying their values. Live mode requires
+`OPENAI_API_KEY`, including when execution is disabled. Automatic naming must succeed
+before a goal is queued; provider errors and invalid responses fail the request
+without saving a goal or job. Demo naming is deterministic and makes no model calls.
+Live execution also
 requires `DAYTONA_API_KEY` and `HERBIE_DAYTONA_OPENAI_SECRET` at this stage.
 
 With `pnpm service`, `NODE_ENV` defaults to `development`. Invalid configuration

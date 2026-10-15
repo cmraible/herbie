@@ -51,7 +51,7 @@ async function fixture(t:TestContext,options:{cancelCheck?:()=>Promise<'absent'|
     return {cookie:'herbie_session='+token,origin,'content-type':'application/json'};
   }
   async function retryableGoal(ownerId='7',goalRepository=repository,prewrite=false){
-    const {goal}=await store.createGoal(ownerId,{repository:goalRepository,prompt:'Synthetic retry fixture'},'live',randomUUID());
+    const {goal}=await store.createGoal(ownerId,{repository:goalRepository,name:'Synthetic retry fixture',prompt:'Synthetic retry fixture'},'live',randomUUID());
     const worker='fixture-worker';
     const job=await store.claim(worker,30_000,'live');assert.ok(job);assert.equal(job.goal.id,goal.id);
     const patch=Buffer.from('synthetic tested patch\n');
@@ -159,7 +159,7 @@ test('cancel confirmed unpublished work checks ownership and CSRF, preserves evi
   const after=await store.pool.query('SELECT stage,artifact FROM jobs WHERE id=$1',[jobId]);
   assert.equal(after.rows[0].stage,'cancelled');assert.deepEqual(after.rows[0].artifact,before.rows[0].artifact);
   assert.ok((await store.events(goal.id)).some(e=>e.type==='cancel'&&e.message.includes('retained')));
-  assert.ok((await store.createGoal('7',{repository,prompt:'Next fixture'},'live',randomUUID())).created);
+  assert.ok((await store.createGoal('7',{repository,name:'Next fixture',prompt:'Next fixture'},'live',randomUUID())).created);
   assert.equal(setup.attempts,0);assert.equal(setup.publishes,0);
 });
 

@@ -21,10 +21,8 @@ test('names summarize the prompt with a bounded server-side model request',async
   assert.equal(name,'Signup validation tests');
 });
 
-test('missing credentials use the Unicode-safe fallback without calling a model',async()=>{
-  const nameGoal=createGoalNamer(undefined,undefined,async()=>{throw new Error('Must not call fetch');});
-  assert.equal(await nameGoal('[demo:fail] '+ '🥁'.repeat(150)),'🥁'.repeat(120));
-  assert.equal(await nameGoal('[demo:fail]'),'Untitled goal');
+test('empty credentials fail when constructing the namer',()=>{
+  for(const key of ['', '   '])assert.throws(()=>createGoalNamer(key),/OPENAI_API_KEY is required/);
 });
 
 test('the default naming model uses the supported Luna model',async()=>{
@@ -34,7 +32,7 @@ test('the default naming model uses the supported Luna model',async()=>{
   })('Improve the signup form'),'Improve signup validation');
 });
 
-test('failed, incomplete, empty, and invalid model responses preserve goal creation',async()=>{
+test('failed, incomplete, empty, and invalid model responses reject naming',async()=>{
   const responses=[
     new Response('private provider diagnostics',{status:429}),
     new Response('not JSON'),
@@ -47,9 +45,9 @@ test('failed, incomplete, empty, and invalid model responses preserve goal creat
     Response.json({status:'completed',output:[{type:'message',content:[{type:'refusal',refusal:'No'}]}]}),
   ];
   for(const response of responses){
-    assert.equal(await createGoalNamer('fixture-key',undefined,async()=>response)('Fix arithmetic'),'Fix arithmetic');
+    await assert.rejects(createGoalNamer('fixture-key',undefined,async()=>response)('Fix arithmetic'));
   }
   for(const error of [new Error('Network failure'),new DOMException('Timed out','TimeoutError')]){
-    assert.equal(await createGoalNamer('fixture-key',undefined,async()=>{throw error;})('Fix arithmetic'),'Fix arithmetic');
+    await assert.rejects(createGoalNamer('fixture-key',undefined,async()=>{throw error;})('Fix arithmetic'),error);
   }
 });
