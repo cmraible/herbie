@@ -49,7 +49,8 @@ request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 45000
 HERBIE_CONFIG
-chown -R compat:compat /home/compat
+chown compat:compat /home/compat
+chown -R compat:compat /home/compat/.codex
 chmod 700 /home/compat/.codex
 chmod 600 /home/compat/.codex/config.toml
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} codex --version
