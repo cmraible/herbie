@@ -7,6 +7,8 @@ description: Ship current local changes through local review, a pull request, an
 
 Carry the current work through to a verified merge. A user request to run `$shipit` authorizes committing, pushing, creating or updating the PR, replying to review feedback, making scoped fixes, and merging once the gates below pass. Preserve any narrower user constraints. Automatic skill selection alone does not grant that authorization.
 
+Before starting work, record `ship_started_at` in UTC from the triggering user message's receipt timestamp. If unavailable, capture the current time immediately and label the eventual duration approximate. Preserve this timestamp across retries, waits, and resumed turns for the same shipping run, in both normal and YOLO modes.
+
 ## Select the mode
 
 Use normal mode by default. An explicit shipping instruction containing "yolo" (case-insensitive, including variations such as "YOLO ship it" or standalone "yolo") authorizes this workflow in YOLO mode. Mentions in quoted text, documentation, or requests to edit this skill are not invocations.
@@ -35,3 +37,5 @@ Poll in bounded intervals, keeping the user informed of meaningful progress. Ins
 Stop and report the blocker if credentials or permissions are missing, feedback requires a product decision or scope expansion, or the same failure persists after three repair attempts. By default, after 30 minutes with no CI or merge progress, leave the PR open and report what is pending and whether auto-merge remains enabled; honor a user-specified waiting window. Never turn a timeout or missing result into approval.
 
 Verify the PR actually merged before claiming success; enabling auto-merge or entering a merge queue is not completion. Report its URL, merge commit, and a brief summary of local review and validation. If blocked, report the PR URL, completed work, and the specific next action needed. Leave branch deletion and other cleanup to repository policy or an explicit user request.
+
+After verifying the merge, calculate total wall-clock time as the PR's actual merge timestamp (`mergedAt`) minus `ship_started_at`, including review, fixes, CI, and queue waits. Use the merge timestamp rather than the time polling detected it. Include the duration in the final output, for example: `Time from ship-it request to merge into main: 8m 42s` (use the actual base branch name). If either timestamp is unavailable, report timing as unavailable rather than inventing a duration.
