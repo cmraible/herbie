@@ -208,6 +208,7 @@ integration(
     const pausing = await store.control(goal.id, owner, "pause");
     assert.equal(pausing.stopRequested, "pause");
     const changes = {
+      pullRequestTitle: "Fix addition totals",
       pullRequestBody: "Fixed addition so totals include both operands. Arithmetic tests passed.",
       baseCommit: "abc",
       patch: Buffer.from("tested patch"),

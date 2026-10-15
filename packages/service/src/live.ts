@@ -95,7 +95,8 @@ Inspect these branches before choosing your change. Make one small, independentl
         throw new PublicationBlockedError(
           "Saved artifact has no agent-authored pull request description",
         );
-      const title = `Herbie: ${execution.goal.prompt.split("\n")[0].slice(0, 180)}`;
+      const title =
+        changes.pullRequestTitle ?? `Herbie: ${execution.goal.prompt.split("\n")[0].slice(0, 180)}`;
       const published = await publishPatch(
         (request) => github.openPullRequest(token, request, requireLease),
         {

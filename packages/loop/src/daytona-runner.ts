@@ -24,10 +24,12 @@ try {
   const git = async (...args: string[]) =>
     (await promisify(execFile)("git", args, { cwd, timeout: 30_000 })).stdout;
   const baseCommit = (await git("rev-parse", "HEAD")).trim();
+  const titleFile = new URL("./pr-title.txt", import.meta.url);
   const descriptionFile = new URL("./pr-description.md", import.meta.url);
   const goal = `${input.goal}
 
 After implementing and verifying your change, write the pull request description as Markdown to ${fileURLToPath(descriptionFile)} (outside the repository).
+Write a concise, single-line pull request title (at most 256 characters) to ${fileURLToPath(titleFile)}. Name the specific change made in this attempt, rather than repeating the overall goal.
 Explain the specific change you actually made, why you chose it, and how it helps the goal. Include the verification performed and any relevant limitations. Write for the user reviewing this PR; do not just repeat the goal or describe other attempts. Keep it concise.`;
   await runCodexAttempt("codex", ["app-server"], {
     cwd,
@@ -35,6 +37,9 @@ Explain the specific change you actually made, why you chose it, and how it help
     turnTimeoutMs: 20 * 60_000,
     disposableDaytona: true,
   });
+  const pullRequestTitle = (await readFile(titleFile, "utf8")).trim();
+  if (!pullRequestTitle || pullRequestTitle.length > 256 || /[\r\n]/.test(pullRequestTitle))
+    throw new Error("Invalid pull request title");
   const pullRequestBody = (await readFile(descriptionFile, "utf8")).trim();
   if (!pullRequestBody || pullRequestBody.length > 60_000)
     throw new Error("Invalid pull request description");
@@ -58,6 +63,7 @@ Explain the specific change you actually made, why you chose it, and how it help
     JSON.stringify({
       baseCommit,
       pullRequestBody,
+      pullRequestTitle,
       patchBase64: (await readFile(patchFile)).toString("base64"),
     }),
   );

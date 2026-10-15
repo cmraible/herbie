@@ -33,6 +33,13 @@ const databaseGoal = goalSchema.extend({
 const artifactSchema = z.object({
   baseCommit: z.string(),
   patchBase64: z.string(),
+  pullRequestTitle: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .regex(/^[^\r\n]+$/)
+    .optional(),
   pullRequestBody: z.string().trim().min(1).max(60_000).optional(),
   verification: z
     .object({
@@ -114,6 +121,7 @@ function decodeJob(row: z.infer<typeof jobRow>, goal: Goal): Job {
     ? {
         baseCommit: encoded.baseCommit,
         patch: Buffer.from(encoded.patchBase64, "base64"),
+        ...(encoded.pullRequestTitle ? { pullRequestTitle: encoded.pullRequestTitle } : {}),
         ...(encoded.pullRequestBody ? { pullRequestBody: encoded.pullRequestBody } : {}),
         ...(encoded.verification ? { verification: encoded.verification } : {}),
       }

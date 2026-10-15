@@ -32,9 +32,11 @@ const runtimeNames = [
   "daytona-runner",
   "diagnostic-log",
 ];
+const pullRequestTitle = "Fix addition totals";
 const pullRequestBody =
   "Fixed addition to sum both operands so totals are correct. Verified with arithmetic tests.";
 const changes = {
+  pullRequestTitle,
   pullRequestBody,
   baseCommit: "a".repeat(40),
   patch: Buffer.from("diff --git a/file.txt b/file.txt\n"),
@@ -52,6 +54,7 @@ const completedChanges = {
 };
 const artifact = Buffer.from(
   JSON.stringify({
+    pullRequestTitle,
     pullRequestBody,
     baseCommit: changes.baseCommit,
     patchBase64: changes.patch.toString("base64"),
@@ -285,7 +288,7 @@ async function localFixture(t: TestContext, edits = "") {
   const protocolFixture = fileURLToPath(new URL("./fixtures/goal-attempt.ts", import.meta.url));
   await writeFile(
     join(bin, "codex"),
-    `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
+    `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-title.txt', ${JSON.stringify(pullRequestTitle)});\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
     { mode: 0o700 },
   );
   sandbox.fs.createFolder.mock.mockImplementation(async (path) => {
@@ -330,6 +333,7 @@ test(
     const { sandbox, run, record, baseCommit } = await localFixture(t);
     const result = await run();
     assert.equal(result.pullRequestBody, pullRequestBody);
+    assert.equal(result.pullRequestTitle, pullRequestTitle);
     assert.equal(result.baseCommit, baseCommit);
     assert.deepEqual(result.patch, Buffer.alloc(0));
     assert.equal(result.verification?.version, 3);
@@ -525,6 +529,7 @@ test("accepts the patch byte limit and rejects decoded overflow within the same 
     const patch = Buffer.alloc(size, "a");
     const encoded = Buffer.from(
       JSON.stringify({
+        pullRequestTitle,
         pullRequestBody,
         baseCommit: changes.baseCommit,
         patchBase64: patch.toString("base64"),
@@ -766,6 +771,7 @@ for (const body of [undefined, "", "   ", 123, "x".repeat(60_001)]) {
           JSON.stringify({
             baseCommit: changes.baseCommit,
             patchBase64: changes.patch.toString("base64"),
+            pullRequestTitle,
             pullRequestBody: body,
           }),
         ),
@@ -776,7 +782,7 @@ for (const body of [undefined, "", "   ", 123, "x".repeat(60_001)]) {
   });
 }
 
-test("attempts for the same goal retain their own agent-authored descriptions", async (t) => {
+test("attempts for the same goal retain their own agent-authored titles and descriptions", async (t) => {
   const { sandbox, run } = await fixture(t);
   for (const body of [
     "Fixed addition so totals are accurate.",
@@ -788,11 +794,32 @@ test("attempts for the same goal retain their own agent-authored descriptions", 
           JSON.stringify({
             baseCommit: changes.baseCommit,
             patchBase64: changes.patch.toString("base64"),
+            pullRequestTitle: body,
             pullRequestBody: body,
           }),
         ),
       ]),
     );
-    assert.equal((await run()).pullRequestBody, body);
+    const result = await run();
+    assert.equal(result.pullRequestBody, body);
+    assert.equal(result.pullRequestTitle, body);
   }
 });
+
+for (const title of [undefined, "", "   ", 123, "x".repeat(257), "First\nSecond"]) {
+  test(`rejects invalid agent title (${JSON.stringify(title)}) and deletes sandbox`, async (t) => {
+    const { sandbox, run } = await fixture(t);
+    sandbox.fs.downloadFileStream.mock.mockImplementation(async () =>
+      Readable.from([
+        Buffer.from(
+          JSON.stringify({
+            ...JSON.parse(artifact.toString()),
+            pullRequestTitle: title,
+          }),
+        ),
+      ]),
+    );
+    await assert.rejects(run(), DaytonaAttemptError);
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}
