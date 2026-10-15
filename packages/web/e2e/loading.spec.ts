@@ -46,6 +46,7 @@ test("the deployed commit stays accessible across views", async ({ page }) => {
   await expect(link).toHaveAttribute("title", revision);
   await page.getByRole("button", { name: /Keep loaded work visible/ }).click();
   await expect(link).toBeVisible();
+  await page.getByRole("button", { name: "All goals" }).click();
   await page.getByRole("button", { name: "New goal", exact: true }).click();
   await expect(link).toBeVisible();
 });
@@ -67,7 +68,7 @@ test("missing revision metadata does not produce a broken commit link", async ({
   await page.route("**/api/health", (route) => json(route, { ...health, imageRevision: "1" }));
   await page.route("**/api/session", (route) => json(route, null, 401));
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Enter demo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
   await expect(page.getByRole("contentinfo")).toHaveText("Version unavailable");
   await expect(page.getByRole("contentinfo").getByRole("link")).toHaveCount(0);
 });
@@ -90,11 +91,11 @@ test("the welcome copy renders immediately while health and session are pending"
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Herbie/ })).toBeVisible();
   await expect(page.getByText("Checking your workspace…")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Enter demo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open workspace" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Continue with GitHub" })).toHaveCount(0);
   await page.screenshot({ path: "test-results/loading-welcome-pending.png", fullPage: true });
   release();
-  await expect(page.getByRole("button", { name: "Enter demo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
 });
 
 test("goals and repository actions stay pending until their responses arrive", async ({ page }) => {
@@ -157,7 +158,7 @@ test("failed startup checks never masquerade as a signed-out session and can be 
   await expect(page.getByRole("alert")).toContainText("session unavailable");
   await expect(page.getByRole("button", { name: "Continue with GitHub" })).toHaveCount(0);
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("button", { name: "Enter demo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open workspace" })).toBeVisible();
 });
 
 test("an initial goal failure has a retry state instead of looking like an empty workspace", async ({
@@ -211,16 +212,10 @@ test("repository discovery errors do not suggest connecting repositories", async
   await expect(screen.getByRole("button", { name: "Connect" })).toHaveCount(0);
 });
 
-test("signed-out, sign-in, and sign-out states only appear after their responses", async ({
-  page,
-}) => {
+test("signed-out and sign-in states only appear after their responses", async ({ page }) => {
   let releaseLogin!: () => void;
-  let releaseLogout!: () => void;
   const loginGate = new Promise<void>((resolve) => {
     releaseLogin = resolve;
-  });
-  const logoutGate = new Promise<void>((resolve) => {
-    releaseLogout = resolve;
   });
   await page.route("**/api/health", (route) => json(route, health));
   await page.route("**/api/session", (route) => json(route, null, 401));
@@ -228,25 +223,15 @@ test("signed-out, sign-in, and sign-out states only appear after their responses
     await loginGate;
     await json(route, demoSession);
   });
-  await page.route("**/api/auth/logout", async (route) => {
-    await logoutGate;
-    await json(route, { ok: true });
-  });
   await page.route("**/api/goals", (route) => json(route, []));
   await page.route("**/api/repositories", (route) => json(route, []));
   await page.goto("/");
-  const login = page.getByRole("button", { name: "Enter demo" });
+  const login = page.getByRole("button", { name: "Open workspace" });
   await login.click();
   await expect(login).toBeDisabled();
   await expect(page.getByRole("heading", { name: /Herbie/ })).toBeVisible();
   releaseLogin();
   await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
-  const logout = page.getByRole("button", { name: "Sign out" }).first();
-  await logout.click();
-  await expect(logout).toBeDisabled();
-  await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
-  releaseLogout();
-  await expect(page.getByRole("button", { name: "Enter demo" })).toBeVisible();
 });
 
 test("poll failures keep the last goal and details on screen", async ({ page }) => {
@@ -443,7 +428,7 @@ test("a pending creation respects browser Back navigation", async ({ page }) => 
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
   release();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "New goal", exact: true })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible({
     timeout: 1000,
   });

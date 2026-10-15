@@ -11,6 +11,13 @@ browser, CLI and production container checks. Docker provisions the test tools
 and disposable databases. After the initial tool/image downloads, runs target
 under two minutes. See [local CI requirements and logs](docs/github-actions.md).
 
+For UI design work, run `pnpm --filter @herbie/web preview:ui` and open
+http://127.0.0.1:5173. This uses realistic local data fixtures with the production
+UI, without a database, worker, GitHub authentication, or model calls. Fixture
+edits last until the dev server restarts. PR links are illustrative fixture URLs;
+they do not refer to PRs created by Herbie. Fixture middleware runs only in Vite's
+`fixtures` development mode and is not included in production builds.
+
 Requires Node.js 24+, pnpm 10, and Postgres 17 (Docker is convenient locally).
 
 ```sh

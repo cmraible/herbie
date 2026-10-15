@@ -39,14 +39,16 @@ for (const state of ["queued", "running", "paused", "awaiting_review", "needs_at
     await page.goto("/");
     await page.getByRole("button", { name: /Synthetic cancellation fixture/ }).click();
     const details = page.getByRole("region", { name: "Selected goal" });
-    await expect(details.getByRole("button", { name: "Cancel goal" })).toBeEnabled();
-    await details.getByRole("button", { name: "Cancel goal" }).click();
+    await details.getByRole("button", { name: "Goal actions" }).click();
+    await expect(details.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    await details.getByRole("button", { name: "Cancel" }).click();
     await expect(details.getByText("Cancelled", { exact: true })).toBeVisible();
-    await expect(
-      details.getByRole("status").filter({ hasText: "Cleanup needs attention" }),
-    ).toContainText("Remote work may remain. Cleanup needs attention; your goal stays cancelled.");
-    await expect(details.getByRole("button", { name: "Cancel goal" })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Goal actions" })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Cancel" })).toHaveCount(0);
     await page.reload();
     await expect(details.getByText("Cancelled", { exact: true })).toBeVisible();
+    await page.goto(`/#${goal.id}/edit`);
+    await expect(page).toHaveURL(new RegExp(`#${goal.id}$`));
+    await expect(page.getByRole("region", { name: "Edit goal" })).toHaveCount(0);
     expect(cancels).toBe(1);
   });

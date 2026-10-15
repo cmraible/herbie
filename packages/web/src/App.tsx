@@ -10,6 +10,7 @@ import {
 import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
+import { AttemptHistory } from "./AttemptHistory.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 
 const api = createClient();
@@ -44,7 +45,7 @@ function initialDraft() {
   }
 }
 function Badge({ goal }: { goal: Goal }) {
-  return <span className="badge">{labels[goal.state]}</span>;
+  return <span className={`badge status-${goal.state}`}>{labels[goal.state]}</span>;
 }
 
 export function App() {
@@ -87,6 +88,10 @@ export function App() {
     if (!editing) setGoalEdit(null);
   }, [screen]);
   useEffect(() => {
+    if (editing && goal?.state === "cancelled") {
+      navigateToScreen(goal.id, true);
+      return;
+    }
     if (editing && goal)
       setGoalEdit((current) =>
         current?.id === goal.id
@@ -342,24 +347,6 @@ export function App() {
       setBusy(false);
     }
   }
-  async function logout() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.logout();
-      sessionStorage.removeItem(onboardingInstallKey);
-      history.replaceState(null, "", location.pathname + location.search);
-      setSession(null);
-      setSessionState("signed-out");
-      setGoals([]);
-      setGoalsLoaded(false);
-      setScreen(null);
-    } catch (failure) {
-      setError(message(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function connectRepositories() {
     setBusy(true);
     setError(null);
@@ -410,7 +397,7 @@ export function App() {
   }
   async function saveGoalEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!goalEdit) return;
+    if (!goalEdit || goal?.state === "cancelled") return;
     setBusy(true);
     setFormError(null);
     try {
@@ -433,17 +420,13 @@ export function App() {
       setFormError(null);
     } else edit(change);
   }
-  async function control(action: GoalAction | "merge" | "close" | "retry", branch?: string) {
+  async function control(action: GoalAction | "retry") {
     if (!goal) return;
     setBusy(true);
     setError(null);
     try {
       const result =
-        action === "retry"
-          ? await api.retry(goal.id)
-          : action === "merge" || action === "close"
-            ? await api.demoAction(goal.id, action, branch)
-            : await api.action(goal.id, action);
+        action === "retry" ? await api.retry(goal.id) : await api.action(goal.id, action);
       setGoals((current) => current.map((item) => (item.id === result.id ? result : item)));
     } catch (failure) {
       setError(message(failure));
@@ -454,31 +437,6 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <a className="brand" href="/">
-          herbie 🥁
-        </a>
-        <div className="topbar-actions">
-          {mode !== "live" && (
-            <span className="mode-pill" role={healthState === "pending" ? "status" : undefined}>
-              {mode === "demo" ? "Demo" : healthState === "error" ? "Offline" : "Connecting"}
-            </span>
-          )}
-          {sessionState === "signed-in" && session && (
-            <>
-              <span className="user-name">{session.user.login}</span>
-              <button
-                onClick={() => {
-                  void logout();
-                }}
-                disabled={busy}
-              >
-                Sign out
-              </button>
-            </>
-          )}
-        </div>
-      </header>
       {error && (
         <div className="error-banner" role="alert">
           {error}
@@ -511,12 +469,10 @@ export function App() {
                   }}
                   disabled={busy}
                 >
-                  {mode === "demo" ? "Enter demo" : "Continue with GitHub"}
+                  {mode === "demo" ? "Open workspace" : "Continue with GitHub"}
                 </button>
                 <p className="fineprint">
-                  {mode === "demo"
-                    ? "Demo jobs and pull requests are simulated."
-                    : "GitHub access is checked separately for each repository."}
+                  GitHub access is checked separately for each repository.
                 </p>
               </>
             )}
@@ -539,12 +495,24 @@ export function App() {
             )}
             <section className="page-heading">
               <div>
-                <h1>
-                  {creating ? "New goal" : editing ? "Edit goal" : selected ? "Goal" : "Goals"}
-                </h1>
+                {selected && !creating && !editing ? (
+                  <nav className="breadcrumbs" aria-label="Breadcrumb">
+                    <button className="back-button" onClick={navigateToList}>
+                      All goals
+                    </button>
+                    {goal && (
+                      <>
+                        <span aria-hidden="true">&gt;</span>
+                        <span aria-current="page">{goal.repository}</span>
+                      </>
+                    )}
+                  </nav>
+                ) : (
+                  <h1>{creating ? "New goal" : editing ? "Edit goal" : "Goals"}</h1>
+                )}
                 {!creating && !selected && <p>Work that keeps moving.</p>}
               </div>
-              {!creating && !editing && (
+              {!creating && !editing && !selected && (
                 <div className="heading-actions">
                   <button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>
                     New goal
@@ -563,9 +531,6 @@ export function App() {
                   failed: "Herbie could not verify the installation. Try connecting again.",
                 }[installationNotice] ?? "GitHub installation status updated."}
               </div>
-            )}
-            {mode === "demo" && (
-              <p className="subtle-note">Demo mode: attempts and pull requests are simulated.</p>
             )}
             {healthState === "error" && (
               <div className="status-message" role="alert">
@@ -636,22 +601,69 @@ export function App() {
                     aria-label="Selected goal"
                     aria-busy={eventsState === "loading"}
                   >
-                    <button className="back-button" onClick={navigateToList}>
-                      ← All goals
-                    </button>
                     <div className="detail-heading">
                       <div>
-                        <p className="subtle-note">{goal.repository}</p>
+                        <Badge goal={goal} />
                         <h2>{goal.name}</h2>
-                        <button
-                          className="text-button"
-                          disabled={busy}
-                          onClick={() => navigateToScreen(`${goal.id}/edit`)}
-                        >
-                          Edit goal
-                        </button>
                       </div>
-                      <Badge goal={goal} />
+                      {goal.state !== "cancelled" && (
+                        <>
+                          <button
+                            className="goal-actions-trigger"
+                            popoverTarget="goal-actions"
+                            aria-label="Goal actions"
+                          >
+                            <span aria-hidden="true">⋯</span>
+                          </button>
+                          <div
+                            id="goal-actions"
+                            popover="auto"
+                            className="goal-actions-menu"
+                            onClick={(event) => {
+                              if ((event.target as HTMLElement).closest("button"))
+                                event.currentTarget.hidePopover();
+                            }}
+                          >
+                            <button
+                              disabled={busy}
+                              onClick={() => navigateToScreen(`${goal.id}/edit`)}
+                            >
+                              Edit
+                            </button>
+                            {!terminal.has(goal.state) &&
+                              !["paused", "needs_attention"].includes(goal.state) && (
+                                <button
+                                  disabled={busy || Boolean(goal.stopRequested)}
+                                  onClick={() => {
+                                    void control("pause");
+                                  }}
+                                >
+                                  Pause
+                                </button>
+                              )}
+                            {goal.state === "paused" && (
+                              <button
+                                disabled={busy}
+                                onClick={() => {
+                                  void control("resume");
+                                }}
+                              >
+                                Resume
+                              </button>
+                            )}
+                            {!terminal.has(goal.state) && (
+                              <button
+                                disabled={busy}
+                                onClick={() => {
+                                  void control("cancel");
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                     <p className="goal-brief">{goal.prompt.replace("[demo:fail]", "").trim()}</p>
 
@@ -680,134 +692,21 @@ export function App() {
                         </button>
                       </div>
                     )}
-                    {goal.state === "cancelled" && (
-                      <p className="subtle-note" role="status">
-                        Goal cancelled.{" "}
-                        {goal.cleanupStatus === "pending"
-                          ? "Cleanup is pending."
-                          : goal.cleanupStatus === "needs_attention"
-                            ? "Remote work may remain. Cleanup needs attention; your goal stays cancelled."
-                            : goal.cleanupStatus === "complete"
-                              ? "Sandbox cleanup is complete."
-                              : ""}
-                      </p>
-                    )}
                     {goal.stopRequested && (
                       <p className="subtle-note">
                         {goal.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The
                         current attempt will finish before stopping.
                       </p>
                     )}
-                    <div className="controls">
-                      {!terminal.has(goal.state) &&
-                        !["paused", "needs_attention"].includes(goal.state) && (
-                          <button
-                            disabled={busy || Boolean(goal.stopRequested)}
-                            onClick={() => {
-                              void control("pause");
-                            }}
-                          >
-                            Pause
-                          </button>
-                        )}
-                      {goal.state === "paused" && (
-                        <button
-                          disabled={busy}
-                          onClick={() => {
-                            void control("resume");
-                          }}
-                        >
-                          Resume
-                        </button>
-                      )}
-                      {!terminal.has(goal.state) && (
-                        <button
-                          disabled={busy}
-                          onClick={() => {
-                            void control("cancel");
-                          }}
-                        >
-                          Cancel goal
-                        </button>
-                      )}
-                    </div>
-                    {(goal.pullRequests.length
-                      ? goal.pullRequests
-                      : goal.pullRequest
-                        ? [goal.pullRequest]
-                        : []
-                    ).map((pr) => (
-                      <div className="pr-card" key={pr.branch}>
-                        <strong>
-                          {goal.mode === "demo"
-                            ? "Simulated pull request"
-                            : `Pull request #${pr.number}`}
-                        </strong>
-                        <span>
-                          {pr.state === "open"
-                            ? "Ready for your review."
-                            : `Pull request ${pr.state}.`}
-                        </span>
-                        {goal.mode === "live" ? (
-                          <a href={pr.url} target="_blank" rel="noreferrer">
-                            Review on GitHub ↗
-                          </a>
-                        ) : (
-                          <span>Demo</span>
-                        )}
-                        {goal.mode === "demo" && pr.state === "open" && (
-                          <div className="controls">
-                            <span>Demo review:</span>
-                            <button
-                              disabled={busy}
-                              onClick={() => {
-                                void control("merge", pr.branch);
-                              }}
-                            >
-                              Simulate merge
-                            </button>
-                            <button
-                              disabled={busy}
-                              onClick={() => {
-                                void control("close", pr.branch);
-                              }}
-                            >
-                              Simulate close
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    <section className="activity">
-                      <h3>Activity</h3>
-                      {eventsState === "loading" ? (
-                        <p className="subtle-note" role="status">
-                          Loading activity…
-                        </p>
-                      ) : (
-                        <>
-                          {eventsError && (
-                            <p className="subtle-note" role="status">
-                              Activity could not refresh; showing the latest events.
-                            </p>
-                          )}
-                          {events.length === 0 ? (
-                            <p className="subtle-note">No activity yet.</p>
-                          ) : (
-                            <ol>
-                              {events.map((event) => (
-                                <li key={event.id}>
-                                  <span>{event.message}</span>
-                                  <time>
-                                    {time(event.createdAt)} · {event.type.replaceAll("_", " ")}
-                                  </time>
-                                </li>
-                              ))}
-                            </ol>
-                          )}
-                        </>
-                      )}
-                    </section>
+                    <hr className="goal-divider" />
+                    <AttemptHistory
+                      key={goal.id}
+                      goal={goal}
+                      events={events}
+                      eventsState={eventsState}
+                      eventsError={eventsError}
+                      time={time}
+                    />
                   </section>
                 )}
                 {selected && !goal && goalsLoaded && (
@@ -828,7 +727,7 @@ export function App() {
                 </button>
               </section>
             )}
-            {(creating || (editing && goal)) && formDraft && (
+            {(creating || (editing && goal && goal.state !== "cancelled")) && formDraft && (
               <section aria-label={editing ? "Edit goal" : "New goal"}>
                 <form
                   onSubmit={(event) => {
@@ -919,23 +818,6 @@ export function App() {
                     />
                     <span>Open pull requests and the attempt preparing the next one.</span>
                   </label>
-                  {mode === "demo" && (
-                    <label className="checkbox-label">
-                      <input
-                        disabled={busy}
-                        type="checkbox"
-                        checked={formDraft.prompt.includes("[demo:fail]")}
-                        onChange={(event) =>
-                          editForm({
-                            prompt: event.target.checked
-                              ? `[demo:fail] ${formDraft.prompt}`
-                              : formDraft.prompt.replace("[demo:fail]", "").trim(),
-                          })
-                        }
-                      />
-                      <span>Simulate an attempt failure</span>
-                    </label>
-                  )}
                   {editing && (
                     <p className="subtle-note">
                       Prompt changes apply to future attempts. Existing work will finish before a

@@ -25,6 +25,7 @@ const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
   max_wip AS "maxWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request) ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id),'[]'::jsonb) AS attempts,
   cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({
   createdAt: z.date().transform((d) => d.toISOString()),
@@ -145,11 +146,13 @@ async function addEvent(
   id: string,
   type: string,
   message: string,
+  attemptId?: string,
 ): Promise<void> {
-  await client.query("INSERT INTO goal_events(goal_id,type,message) VALUES ($1,$2,$3)", [
+  await client.query("INSERT INTO goal_events(goal_id,type,message,job_id) VALUES ($1,$2,$3,$4)", [
     id,
     type,
     message,
+    attemptId ?? null,
   ]);
 }
 async function loadJob(client: PoolClient, id: string): Promise<z.infer<typeof jobRow>> {
@@ -360,6 +363,9 @@ export class Store {
   async renameGoal(id: string, ownerId: string, name: string): Promise<Goal> {
     const parsed = goalName.parse(name);
     return this.transaction(async (client) => {
+      const goal = await goalFrom(client, id, true);
+      if (!goal || goal.ownerId !== ownerId) throw new StoreError(404, "Goal not found");
+      if (goal.state === "cancelled") throw new StoreError(409, "Cancelled goals cannot be edited");
       const result = await client.query<Record<string, unknown>>(
         `UPDATE goals SET name=$3,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$2 RETURNING ${goalColumns}`,
         [id, ownerId, parsed],
@@ -377,6 +383,7 @@ export class Store {
     return this.transaction(async (client) => {
       const goal = await goalFrom(client, id, true);
       if (!goal || goal.ownerId !== ownerId) throw new StoreError(404, "Goal not found");
+      if (goal.state === "cancelled") throw new StoreError(409, "Cancelled goals cannot be edited");
       // Normalize legacy request hashes before their fallback loses the original prompt.
       await client.query(
         `UPDATE goal_requests SET fingerprint=$2 WHERE goal_id=$1
@@ -476,7 +483,7 @@ export class Store {
   }
   async events(goalId: string, after = 0): Promise<GoalEvent[]> {
     const result = await this.pool.query<Record<string, unknown>>(
-      'SELECT id::text,goal_id AS "goalId",type,message,created_at AS "createdAt" FROM goal_events WHERE goal_id=$1 AND id>$2 ORDER BY goal_events.id LIMIT 1000',
+      'SELECT id::text,goal_id AS "goalId",job_id AS "attemptId",type,message,created_at AS "createdAt" FROM goal_events WHERE goal_id=$1 AND id>$2 ORDER BY goal_events.id LIMIT 1000',
       [goalId, after],
     );
     return result.rows.map((row) =>
@@ -596,6 +603,7 @@ export class Store {
         status === "complete"
           ? "Sandbox deletion confirmed after cancellation. Saved work retained."
           : "Cancellation remains in effect. Remote cleanup or publication outcome requires attention.",
+        jobId,
       );
       return true;
     });
@@ -635,6 +643,7 @@ export class Store {
           row.stage === "queued"
             ? `Attempt ${row.cycle} started`
             : "Resuming captured artifact publication",
+          id,
         );
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error("Missing claimed goal");
@@ -649,8 +658,13 @@ export class Store {
     );
     return result.rowCount === 1;
   }
-  async appendEvent(goalId: string, type: string, message: string): Promise<void> {
-    await this.transaction((client) => addEvent(client, goalId, type, message));
+  async appendEvent(
+    goalId: string,
+    type: string,
+    message: string,
+    attemptId?: string,
+  ): Promise<void> {
+    await this.transaction((client) => addEvent(client, goalId, type, message, attemptId));
   }
   async recordPublicationPhase(
     jobId: string,
@@ -666,7 +680,7 @@ export class Store {
       );
       const message = `Publication phase: ${phase}`;
       if (previous.rows[0]?.message !== message)
-        await addEvent(client, goal.id, "publication_phase", message);
+        await addEvent(client, goal.id, "publication_phase", message, jobId);
     });
   }
   async saveArtifact(
@@ -705,6 +719,7 @@ export class Store {
           : paused
             ? "Captured artifact held while paused"
             : "Captured artifact saved durably",
+        jobId,
       );
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error("Missing artifact goal");
@@ -725,6 +740,7 @@ export class Store {
         goal.id,
         "publishing",
         "Publishing captured artifact from the trusted service",
+        jobId,
       );
       return true;
     });
@@ -755,6 +771,7 @@ export class Store {
         goal.id,
         "pull_request_opened",
         `Pull request #${pr.number} awaits review: ${pr.url}`,
+        jobId,
       );
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error("Missing published goal");
@@ -787,7 +804,7 @@ export class Store {
       // changed causes and increasing backoff tiers, not every identical capped retry.
       const previousCause = goal.error?.split(" Automatic publication recovery #")[0];
       if (count <= 5 || previousCause !== error)
-        await addEvent(client, goal.id, "publication_uncertain", message);
+        await addEvent(client, goal.id, "publication_uncertain", message, jobId);
     });
   }
   async blockPublication(jobId: string, workerId: string, reason: string): Promise<void> {
@@ -803,7 +820,7 @@ export class Store {
         "UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1",
         [goal.id, message],
       );
-      await addEvent(client, goal.id, "publication_blocked", message);
+      await addEvent(client, goal.id, "publication_blocked", message, jobId);
     });
   }
   async queueSavedPublication(
@@ -846,6 +863,7 @@ export class Store {
         paused
           ? "Saved captured artifact held while paused; resume to publish it."
           : "Queued the saved captured artifact for publication; no new attempt will run.",
+        jobId,
       );
       const updated = await goalFrom(client, goal.id);
       if (!updated) throw new Error("Missing retried publication goal");
@@ -875,7 +893,7 @@ export class Store {
         "UPDATE goals SET state=$2,error=$3,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
         [goal.id, state, error],
       );
-      await addEvent(client, goal.id, state, error);
+      await addEvent(client, goal.id, state, error, jobId);
     });
   }
   async recoverExpired(): Promise<number> {
@@ -919,13 +937,14 @@ export class Store {
             "UPDATE goals SET state='needs_attention',error=$2,stop_requested=$3,updated_at=clock_timestamp() WHERE id=$1",
             [goal.id, error, row.stage === "publishing" ? goal.stopRequested : null],
           );
-          await addEvent(client, goal.id, "recovery_required", error);
+          await addEvent(client, goal.id, "recovery_required", error, row.id);
         } else
           await addEvent(
             client,
             goal.id,
             "artifact_recovered",
             "Recovered saved artifact after worker lease expired",
+            row.id,
           );
       }
       return result.rows.length;
@@ -997,6 +1016,7 @@ export class Store {
           result.rows[0].goal_id,
           "pull_request_ready",
           `CI passed; confirmed ${url} ready for review.`,
+          jobId,
         );
     });
   }
@@ -1037,6 +1057,7 @@ export class Store {
         goal.id,
         "ci_repair_started",
         `Repairing failing CI on ${row.branch} at ${head}`,
+        jobId,
       );
       return id;
     });
@@ -1096,6 +1117,7 @@ export class Store {
         row.goal_id,
         "ci_repair_completed",
         `CI repair at ${row.head} discarded: checks or PR state changed.`,
+        jobId,
       );
   }
 
@@ -1129,9 +1151,9 @@ export class Store {
     message: string,
   ): Promise<void> {
     await this.transaction(async (client) => {
-      const result = await client.query<{ goal_id: string }>(
+      const result = await client.query<{ goal_id: string; job_id: string }>(
         `UPDATE ci_repairs r SET state=$3 FROM jobs j
-        WHERE r.id=$1 AND r.lease_owner=$2 AND r.state='running' AND r.job_id=j.id RETURNING j.goal_id`,
+        WHERE r.id=$1 AND r.lease_owner=$2 AND r.state='running' AND r.job_id=j.id RETURNING j.goal_id,j.id AS job_id`,
         [id, workerId, succeeded ? "completed" : "failed"],
       );
       if (result.rows[0])
@@ -1140,6 +1162,7 @@ export class Store {
           result.rows[0].goal_id,
           succeeded ? "ci_repair_completed" : "ci_repair_failed",
           message,
+          result.rows[0].job_id,
         );
     });
   }
@@ -1165,6 +1188,7 @@ export class Store {
             row.state === "waiting"
               ? "Recovered saved CI repair before publication; waiting to recheck current CI."
               : "CI repair lease expired. Inspect sandbox cleanup and the PR head before manual recovery; the repair will not be replayed.",
+            repair.job_id,
           );
       }
     });
@@ -1232,6 +1256,7 @@ export class Store {
       goal.id,
       closed ? "pull_request_closed" : "pull_request_merged",
       closed ? "Pull request closed without merging; goal pause requested" : "Pull request merged",
+      jobId,
     );
     return updated;
   }
