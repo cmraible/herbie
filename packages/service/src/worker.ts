@@ -2,7 +2,7 @@ import {hasValidPublicationEvidence} from '@herbie/loop/publish-patch';
 import {logFailure} from './diagnostic-log.js';
 import {DaytonaAttemptError} from '@herbie/loop/daytona-attempt';
 import { setTimeout as delay } from 'node:timers/promises';
-import { KnownAttemptFailure, type Adapters, type Execution } from './adapters.js';
+import { KnownAttemptFailure, PublicationBlockedError, type Adapters, type Execution } from './adapters.js';
 import type { Job } from './store.js';
 import { Store, StoreError } from './store.js';
 import {publicationDiagnostic,publicationDiagnosticMessage} from './publication-diagnostics.js';
@@ -65,6 +65,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
           await store.blockPublication(job.id,workerId,'saved artifact lacks matching test and cleanup evidence');
           return true;
         }
+        if(adapters.mode==='live' && !changes.pullRequestBody?.trim()) throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description');
         if(!adapters.checkPublicationRetry){
           await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage({phase:'preflight_reconciliation',cause:'pull_request_not_found'}));
           return true;
@@ -110,6 +111,7 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
     if (!existing) await requireLease();
+    if(!existing && adapters.mode==='live' && !changes.pullRequestBody?.trim()) throw new PublicationBlockedError('Saved artifact has no agent-authored pull request description');
     if(existing)await reportPublicationPhase('state_persistence');
     const result = existing ?? await adapters.publish(execution,changes,requireLease,reportPublicationPhase);
     published = result;
@@ -127,7 +129,9 @@ export async function runWorkerOnce(store: Store, adapters: Adapters, workerId: 
     const errorId=logFailure(error,{component:publishing?'publication':'attempt',goalId:job.goal.id,jobId:job.id,stage:publishing?publicationPhase:error instanceof DaytonaAttemptError?error.diagnostics[0]?.stage:undefined});
     // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
     try {
-      if (publishing) {
+      if (publishing && error instanceof PublicationBlockedError) {
+        await store.blockPublication(job.id,workerId,error.message);
+      } else if (publishing) {
         await store.publicationUncertain(job.id,workerId,publicationDiagnosticMessage(publicationDiagnostic(error,publicationPhase)),errorId);
       }
       else await store.fail(job.id,workerId,error instanceof KnownAttemptFailure ? error.message : error instanceof DaytonaAttemptError ? `${error.safeMessage()} Reference: ${errorId}` : `Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal. Reference: ${errorId}`,!(error instanceof KnownAttemptFailure));

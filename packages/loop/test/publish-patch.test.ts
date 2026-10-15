@@ -43,7 +43,7 @@ async function fixture(t: TestContext, extraFiles = false) {
     id: 'fixture', delete: async () => {}, git: { clone: async () => {} },
     fs: {
       createFolder: async () => {}, uploadFile: async () => {},
-      downloadFileStream: async () => Readable.from([Buffer.from(JSON.stringify({ baseCommit, patchBase64: patch.toString('base64') }))]),
+      downloadFileStream: async () => Readable.from([Buffer.from(JSON.stringify({ pullRequestBody: 'Tested arithmetic fix', baseCommit, patchBase64: patch.toString('base64') }))]),
     },
     process: { executeCommand: async () => ({ exitCode: 0,
       result: 'herbie-attempt-completed\n',
@@ -67,7 +67,7 @@ async function fixture(t: TestContext, extraFiles = false) {
     t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
   }
   const createPullRequest = mock.fn<Parameters<typeof publishPatch>[0]>(async () => ({ url: 'https://github.com/example/repo/pull/1' }));
-  const request = { repository: 'example/repo', baseBranch: 'main', branch: 'herbie/fix-addition', title: 'Fix addition', body: 'Tested arithmetic fix', changes };
+  const request = { repository: 'example/repo', baseBranch: 'main', branch: 'herbie/fix-addition', title: 'Fix addition', body: changes.pullRequestBody!, changes };
   const publish = () => publishPatch(createPullRequest, request);
   return { directory, repo, remote, config, scratch, changes, request, createPullRequest, publish };
 }
