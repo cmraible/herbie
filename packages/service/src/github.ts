@@ -243,7 +243,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     repository: string,
     number: number,
   ): Promise<string | undefined> {
-    const files: { filename: string; status: string; patch: string }[] = [];
+    const files: { filename: string; status: string; changes: string[] }[] = [];
     for (let page = 1; page <= 30; page++) {
       const batch = z
         .array(
@@ -261,7 +261,14 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         );
       if (batch.some((file) => file.patch === undefined)) return undefined;
       files.push(
-        ...batch.map(({ filename, status, patch }) => ({ filename, status, patch: patch! })),
+        ...batch.map(({ filename, status, patch }) => ({
+          filename,
+          status,
+          changes: patch!
+            .split("\n")
+            .filter((line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("\\"))
+            .filter((line) => !line.startsWith("+++") && !line.startsWith("---")),
+        })),
       );
       if (batch.length < 100)
         return createHash("sha256").update(JSON.stringify(files)).digest("hex");

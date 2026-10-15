@@ -29,6 +29,7 @@ export async function githubFixture(t: TestContext) {
     prState: "open" as "open" | "closed",
     mergedAt: null as string | null,
     losePrResponse: false,
+    patch: "@@ -1 +1 @@\n-old\n+new",
     prBranch: "herbie/attempt-1",
     comparisonBase: "0".repeat(40),
     branchHeads: new Map<string, string>([["main", "0".repeat(40)]]),
@@ -104,14 +105,16 @@ export async function githubFixture(t: TestContext) {
           expires_at: new Date(Date.now() + 3600000).toISOString(),
         }),
       );
+    else if (path.startsWith("/repos/alice/project/pulls/8/files"))
+      res.end(JSON.stringify([{ filename: "file.txt", status: "modified", patch: fixture.patch }]));
     else if (path.startsWith("/repos/alice/project/pulls")) {
       const pr = {
         number: 8,
         html_url: "https://github.com/alice/project/pull/8",
         state: fixture.prState,
         merged_at: fixture.mergedAt,
-        head: { ref: fixture.prBranch },
-        base: { ref: "main" },
+        head: { ref: fixture.prBranch, sha: "1".repeat(40) },
+        base: { ref: "main", sha: "2".repeat(40) },
       };
       if (req.method === "POST") {
         fixture.pr = true;
@@ -292,6 +295,17 @@ test("recovers a successful PR creation with a lost response and never duplicate
   );
 });
 
+test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.pr = true;
+  fixture.patch = "@@ -1,1 +1,1 @@\n-old\n+new";
+  const before = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  fixture.patch = "@@ -101,1 +101,1 @@\n-old\n+new";
+  const after = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.ok(before?.patchSha);
+  assert.equal(after?.patchSha, before.patchSha);
+});
+
 test("review reconciliation uses only repository-scoped read permission after user login expires", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
   fixture.pr = true;
@@ -469,12 +483,16 @@ for (const state of ["open", "closed", "merged"] as const)
       { baseCommit: "0".repeat(40), patch: Buffer.alloc(0) },
       async () => {},
     );
-    assert.deepEqual(pr, {
+    const { headSha, baseSha, patchSha, ...published } = pr;
+    assert.deepEqual(published, {
       url: "https://github.com/alice/project/pull/8",
       number: 8,
       branch: "herbie/attempt-1",
       state,
     });
+    assert.equal(headSha, "1".repeat(40));
+    assert.equal(baseSha, "2".repeat(40));
+    assert.match(patchSha ?? "", /^[a-f0-9]{64}$/);
     assert.equal(
       requests.filter((request) => request.path === "/repos/alice/project/pulls").length,
       0,
