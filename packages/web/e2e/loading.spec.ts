@@ -52,7 +52,7 @@ test('goals and repository actions stay pending until their responses arrive',as
   await expect(page.getByRole('status').filter({hasText:'Checking repository access'})).toBeVisible();
   await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
   releaseRepos();
-  await expect(page.getByRole('dialog').getByText('No repositories available.')).toBeVisible();
+  await expect(page.getByRole('region',{name:'New goal',exact:true}).getByText('No repositories available.')).toBeVisible();
   await expect(page.getByRole('button',{name:/Start goal/})).toBeDisabled();
 });
 
@@ -99,10 +99,10 @@ test('repository discovery errors do not suggest connecting repositories',async(
   await page.route('**/api/repositories',route=>json(route,{error:'Repository discovery is unavailable'},503));
   await page.goto('/');
   await page.getByRole('button',{name:'New goal',exact:true}).click();
-  const dialog=page.getByRole('dialog');
-  await expect(dialog.getByRole('alert')).toContainText('Repository discovery is unavailable');
-  await expect(dialog.getByText('No repositories available.')).toHaveCount(0);
-  await expect(dialog.getByRole('button',{name:'Connect'})).toHaveCount(0);
+  const screen=page.getByRole('region',{name:'New goal',exact:true});
+  await expect(screen.getByRole('alert')).toContainText('Repository discovery is unavailable');
+  await expect(screen.getByText('No repositories available.')).toHaveCount(0);
+  await expect(screen.getByRole('button',{name:'Connect'})).toHaveCount(0);
 });
 
 test('signed-out, sign-in, and sign-out states only appear after their responses',async({page})=>{
@@ -164,6 +164,21 @@ test('the goal list hides finished work until requested and opens details separa
   await page.goBack();
   await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:/Stopped work/})).toBeVisible();
+  await page.getByRole('button',{name:'New goal',exact:true}).click();
+  await expect(page).toHaveURL(/#new$/);
+  await expect(page.getByRole('heading',{name:'New goal',exact:true})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Goals',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByLabel('What should Herbie work on?').fill('Keep my draft');
+  await page.goBack();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
+  await page.goForward();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'New goal',exact:true})).toBeVisible();
+  await expect(page.getByLabel('What should Herbie work on?')).toHaveValue('Keep my draft');
+  await page.getByRole('button',{name:'Back to goals'}).click();
+  await expect(page.getByRole('heading',{name:'Goals',exact:true})).toBeVisible();
 });
 
 test('mobile loading and repeated refresh clicks remain within the viewport',async({page})=>{
@@ -179,7 +194,8 @@ test('mobile loading and repeated refresh clicks remain within the viewport',asy
   await refresh.click();
   await expect(refresh).toBeEnabled();
   await refresh.click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('region',{name:'New goal',exact:true})).toBeVisible();
+  await page.screenshot({path:'test-results/new-goal-mobile.png',fullPage:true});
   expect(requests).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
 });
