@@ -35,7 +35,7 @@ test('hosted API leaves queued work untouched when execution is disabled',async 
   if(!database)return t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration');
   const app=await fixture(database);
   const runtime=await app.runtime(false);
-  const {goal}=await runtime.store.createGoal('demo-user',{repository:'demo/example',prompt:'Queued for an operator to enable execution',maxAttempts:1},'demo',randomUUID());
+  const {goal}=await runtime.store.createGoal('demo-user',{repository:'demo/example',prompt:'Queued for an operator to enable execution'},'demo',randomUUID());
   const service=await startHostedService(runtime);
   t.after(async()=>{await service.close();await app.close();});
   const token=(await clientFor(service).demoCliLogin()).token;
@@ -61,7 +61,7 @@ test('hosted shutdown stops HTTP first and lets the active bounded attempt persi
   t.after(async()=>{release.resolve();await service.close();await app.close();});
   const token=(await clientFor(service).demoCliLogin()).token;
   const client=clientFor(service,token);
-  const goal=await client.start({repository:'demo/example',prompt:'Finish cleanup even when deployment stops',maxAttempts:1},randomUUID());
+  const goal=await client.start({repository:'demo/example',prompt:'Finish cleanup even when deployment stops'},randomUUID());
   await started.promise;
   let closed=false;
   const closing=service.close().then(()=>{closed=true;});

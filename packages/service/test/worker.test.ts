@@ -16,7 +16,7 @@ test('worker completes queued work after the initiating client disconnects and d
   const store = new Store(new pg.Pool({connectionString:database,options:`-c search_path=${schema}`}));
   t.after(async () => { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
   await store.migrate();
-  const {goal} = await store.createGoal('demo-user',{repository:'demo/example',prompt:'Fix arithmetic',maxAttempts:1},'demo',randomUUID());
+  const {goal} = await store.createGoal('demo-user',{repository:'demo/example',prompt:'Fix arithmetic'},'demo',randomUUID());
   const adapters = createDemoAdapters();
   await runWorkerOnce(store, adapters, 'worker-one');
   const after = await store.getGoal(goal.id);
@@ -26,7 +26,7 @@ test('worker completes queued work after the initiating client disconnects and d
   assert.deepEqual((await store.getGoal(goal.id))?.pullRequest,after.pullRequest);
 });
 
-test('merged demo work starts a distinct bounded attempt and a simulated failure stops', async t => {
+test('merged demo work keeps advancing until cancelled and a simulated failure stops', async t => {
   const database=process.env.HERBIE_TEST_DATABASE_URL;
   if(!database)return t.skip('Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration');
   const schema=`worker_${randomUUID().replaceAll('-','')}`;
@@ -34,7 +34,7 @@ test('merged demo work starts a distinct bounded attempt and a simulated failure
   const store=new Store(new pg.Pool({connectionString:database,options:`-c search_path=${schema}`}));
   t.after(async()=>{await store.close();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();});
   await store.migrate();
-  const {goal}=await store.createGoal('demo-user',{repository:'demo/example',prompt:'Fix arithmetic',maxAttempts:2},'demo',randomUUID());
+  const {goal}=await store.createGoal('demo-user',{repository:'demo/example',prompt:'Fix arithmetic'},'demo',randomUUID());
   const adapters=createDemoAdapters();await runWorkerOnce(store,adapters,'worker-one');
   const [job]=await store.reviewJobs();assert.ok(job);
   const first=(await store.getGoal(goal.id))?.pullRequest;assert.ok(first);
@@ -43,9 +43,12 @@ test('merged demo work starts a distinct bounded attempt and a simulated failure
   const next=await store.getGoal(goal.id);assert.equal(next?.state,'awaiting_review');assert.equal(next.attemptCount,2);
   assert.notEqual(next.pullRequest?.branch,first.branch);
   const [second]=await store.reviewJobs();assert.ok(second);await store.reconcile(second.id,'merged');
-  assert.equal((await store.getGoal(goal.id))?.state,'completed');
+  assert.equal((await store.getGoal(goal.id))?.state,'queued');
+  await runWorkerOnce(store,adapters,'worker-one');
+  assert.equal((await store.getGoal(goal.id))?.attemptCount,3);
+  await store.control(goal.id,'demo-user','cancel');
   assert.equal(await runWorkerOnce(store,adapters,'worker-one'),false);
-  const {goal:failed}=await store.createGoal('demo-user',{repository:'demo/example',prompt:'[demo:fail]',maxAttempts:1},'demo',randomUUID());
+  const {goal:failed}=await store.createGoal('demo-user',{repository:'demo/example',prompt:'[demo:fail]'},'demo',randomUUID());
   await runWorkerOnce(store,adapters,'worker-one');
   assert.equal((await store.getGoal(failed.id))?.state,'failed');
   assert.equal((await store.getGoal(failed.id))?.pullRequest,null);
@@ -57,7 +60,7 @@ test('worker retains raw redacted causes privately and persists safe attempt ref
   const schema='diagnostic_'+randomUUID().replaceAll('-','');const admin=new pg.Pool({connectionString:database});await admin.query('CREATE SCHEMA '+schema);
   const store=new Store(new pg.Pool({connectionString:database,options:'-c search_path='+schema}));
   t.after(async()=>{await store.close();await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();});await store.migrate();
-  const {goal}=await store.createGoal('fixture-user',{repository:'demo/example',prompt:'Fixture',maxAttempts:1},'demo',randomUUID());
+  const {goal}=await store.createGoal('fixture-user',{repository:'demo/example',prompt:'Fixture'},'demo',randomUUID());
   const output:string[]=[];t.mock.method(console,'error',(line:string)=>output.push(line));
   const error=new DaytonaAttemptError([Object.assign(new Error('setup failed'),{stderr:'useful synthetic failure',authorization:'hidden-fixture-token'})],'wrapped failure');
   error.diagnostics=[{stage:'repository_clone',cause:'http_error',httpStatus:503}];error.cleanup='confirmed';

@@ -15,19 +15,19 @@ async function login(page:Page){
     }
   }
 }
-async function start(page:Page,prompt:string,attempts='1'){
+async function start(page:Page,prompt:string){
   await page.getByRole('button',{name:'New goal',exact:true}).click();
   await page.getByLabel('What should Herbie work on?').fill(prompt);
-  await page.getByLabel('Maximum attempts').selectOption(attempts);
+  await expect(page.getByLabel('Maximum attempts')).toHaveCount(0);
   await page.getByRole('button',{name:'Start goal',exact:false}).click();
   await expect(page.getByRole('region',{name:'New goal',exact:true})).not.toBeVisible();
   await expect(page.getByRole('region',{name:'Selected goal'}).getByRole('heading',{name:prompt})).toBeVisible();
 }
 const detail=(page:Page)=>page.getByRole('region',{name:'Selected goal'});
 
-test('a goal survives reload, pauses and resumes, then advances only to its attempt limit',async({page})=>{
+test('a goal survives reload, pauses and resumes, then continues until cancelled',async({page})=>{
   await login(page);
-  await start(page,'Add helpful validation and cover it with regression tests','2');
+  await start(page,'Add helpful validation and cover it with regression tests');
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   await page.reload();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
@@ -35,13 +35,14 @@ test('a goal survives reload, pauses and resumes, then advances only to its atte
   await expect(detail(page).getByText('Paused',{exact:true})).toBeVisible();
   await detail(page).getByRole('button',{name:'Resume'}).click();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Simulate merge'}).click();
-  await expect(detail(page).getByText('Attempt 2 of 2')).toBeVisible();
-  await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
-  await detail(page).getByRole('button',{name:'Simulate merge'}).click();
-  await expect(detail(page).getByText('Completed',{exact:true})).toBeVisible();
-  await expect(detail(page).getByText('Pull request merged; attempt budget complete')).toBeVisible();
-  await page.screenshot({path:'test-results/goal-completed.png',fullPage:true});
+  for(let attempt=2;attempt<=7;attempt++){
+    await detail(page).getByRole('button',{name:'Simulate merge'}).click();
+    await expect(detail(page).getByText(`Attempt ${attempt} · Created`,{exact:false})).toBeVisible();
+    await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
+  }
+  await detail(page).getByRole('button',{name:'Cancel goal'}).click();
+  await expect(detail(page).getByText('Cancelled',{exact:true})).toBeVisible();
+  await page.screenshot({path:'test-results/goal-cancelled.png',fullPage:true});
 });
 
 test('a goal needs no test command and a failed attempt has visible durable failure',async({page})=>{
@@ -123,7 +124,7 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
     await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Repository discovery is temporarily unavailable'})});
   });
   await login(page);
-  await start(page,'Keep durable progress visible during repository discovery failure','2');
+  await start(page,'Keep durable progress visible during repository discovery failure');
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   expect(repositoryRequests).toBe(1);
   await page.getByRole('button',{name:'New goal',exact:true}).click();
@@ -134,7 +135,7 @@ test('repository discovery failures do not interrupt goal polling or repeat GitH
   const id=z.uuid().parse(new URL(page.url()).hash.slice(1));
   const merged=await page.request.post(`/api/demo/goals/${id}/merge`,{headers:{origin:url},data:{}});
   expect(merged.ok()).toBeTruthy();
-  await expect(detail(page).getByText('Attempt 2 of 2')).toBeVisible();
+  await expect(detail(page).getByText('Attempt 2 · Created')).toBeVisible();
   await expect(detail(page).getByText('Ready for review',{exact:true})).toBeVisible();
   expect(repositoryRequests).toBe(2);
   await detail(page).getByRole('button',{name:'Cancel goal'}).click();
