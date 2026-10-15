@@ -264,16 +264,16 @@ host attempts retain server-owned sandbox and approval settings. The fixed model
 `gpt-6-luna`, low effort, default service tier, with web search disabled and a 32K
 configured context window. Token-usage notifications do not trigger spending-based
 cancellation. Herbie does not impose a dollar spending cap. Attempt counts and the
-90-second turn deadline still bound execution. Cancellation waits at most five
+20-minute turn deadline still bound execution. Cancellation waits at most five
 seconds for a matching terminal event, then the existing owned-process-group
 cleanup runs; unconfirmed termination remains a failure. There is no model
 fallback or retry.
 
 Creation is bounded at 120 seconds; each upload at 30 seconds; fresh runtime setup at
-240 seconds (snapshot configuration at 30); the turn at 90 seconds; each patch-extraction
-Git command and artifact download at 30 seconds; sandbox goal execution at 240 seconds;
+240 seconds (snapshot configuration at 30); the turn at 20 minutes; each patch-extraction
+Git command and artifact download at 30 seconds; sandbox goal execution at 22 minutes;
 and confirmed deletion at 60 seconds. Other SDK requests, including clone, use the
-caller's client timeout. A 15-minute sandbox TTL is a fallback. As in the lifecycle
+caller's client timeout. A 35-minute sandbox TTL is a fallback. As in the lifecycle
 smoke, ambiguous creation is reported by its unique name without retries; a handle
 is required for explicit deletion. Failed deletion rejects even after a successful
 goal. Reported phase messages omit command output and SDK details; inspect error

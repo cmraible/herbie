@@ -65,7 +65,7 @@ test('prepares runtime and repo, invokes the attempt, and waits for deletion usi
   const [params, options] = create.mock.calls[0].arguments;
   assert.deepEqual(params, {
     name: params.name, snapshot: request.snapshot, domainAllowList: request.domainAllowList,
-    secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 15,
+    secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 35,
   });
   assert.match(params.name ?? '', /^herbie-attempt-[0-9a-f-]+$/);
   assert.deepEqual(options, { timeout: 120 });
@@ -78,7 +78,7 @@ test('prepares runtime and repo, invokes the attempt, and waits for deletion usi
   const input = uploads.at(-1);
   assert.ok(input);
   assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, goal: request.goal });
-  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${root}/daytona-runner.js`, root, undefined, 240]);
+  assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [`chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${root}/daytona-runner.js`, root, undefined, 22 * 60]);
   assert.equal(sandbox.process.executeCommand.mock.calls[0].arguments[3], 30);
   assert.equal(sandbox.fs.downloadFileStream.mock.calls[0].arguments[0], `${root}/changes.json`);
   assert.equal(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].timeout, 30);
@@ -274,7 +274,7 @@ test('provisions a bounded Ubuntu runtime with default networking when no snapsh
   const [params] = create.mock.calls[0].arguments;
   assert.deepEqual(params, {
     name: params.name, image: 'ubuntu:22.04', resources: { cpu: 1, memory: 1, disk: 3 },
-    secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 15,
+    secrets: request.secrets, outboundProxyUrl: request.outboundProxyUrl, ttlMinutes: 35,
   });
   const [setup, cwd, , timeout] = sandbox.process.executeCommand.mock.calls[0].arguments;
   assert.equal(cwd, undefined);
