@@ -285,7 +285,7 @@ test("execution-disabled service rejects saved-publication retry before reposito
     body: "{}",
   });
   assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: "Live execution is disabled by the operator" });
+  assert.deepEqual(await response.json(), { error: "Live runs aren't configured yet" });
   assert.equal(setup.checks, 0);
 });
 

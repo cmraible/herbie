@@ -4,6 +4,7 @@ set -euo pipefail
 image="${1:?Pass a locally built Herbie image}"
 revision="${2:?Pass its expected image revision}"
 prefix="herbie-smoke-${RANDOM}-$$"
+test_private_key="$(node --input-type=module -e 'import {generateKeyPairSync} from "node:crypto"; process.stdout.write(generateKeyPairSync("rsa", {modulusLength: 2048}).privateKey.export({type: "pkcs8", format: "pem"}))')"
 cleanup() {
   docker rm -f "$prefix-app" "$prefix-db" >/dev/null 2>&1 || true
   docker network rm "$prefix" >/dev/null 2>&1 || true
@@ -34,7 +35,7 @@ docker run -d --name "$prefix-app" --network "$prefix" \
   -e HERBIE_CREDENTIAL_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8= \
   -e GITHUB_APP_ID=fixture -e GITHUB_CLIENT_ID=fixture \
   -e GITHUB_CLIENT_SECRET=fixture -e GITHUB_WEBHOOK_SECRET=fixture \
-  -e GITHUB_PRIVATE_KEY_FILE=/tmp/unused-private-key.pem \
+  -e "GITHUB_PRIVATE_KEY=$test_private_key" \
   -e OPENAI_API_KEY=fixture \
   -e DATABASE_URL=postgresql://fixture:fixture@postgres:5432/fixture \
   -e HERBIE_DEPLOYMENT_ID="$revision" "$image" >/dev/null

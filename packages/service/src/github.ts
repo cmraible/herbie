@@ -66,7 +66,13 @@ const pullSchema = z.object({
       .regex(/^[a-f0-9]{40}$/)
       .optional(),
   }),
-  base: z.object({ ref: z.string() }),
+  base: z.object({
+    ref: z.string(),
+    sha: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
+  }),
 });
 const tokenSchema = z.object({
   access_token: z.string().min(1),
@@ -227,6 +233,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       branch,
       state: pr.merged_at ? "merged" : pr.state,
       headSha: pr.head.sha,
+      baseSha: pr.base.sha,
     };
   }
   async function branchCommit(
@@ -752,6 +759,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           branch: input.head,
           state: pr.merged_at ? "merged" : pr.state,
           headSha: pr.head.sha,
+          baseSha: pr.base.sha,
         };
       } catch (error) {
         logFailure(error, { component: "github-publication-response" });

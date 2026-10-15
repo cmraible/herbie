@@ -51,6 +51,10 @@ export const pullRequestSchema = z.object({
     .string()
     .regex(/^[a-f0-9]{40}$/)
     .optional(),
+  baseSha: z
+    .string()
+    .regex(/^[a-f0-9]{40}$/)
+    .optional(),
 });
 export const attemptSchema = z.object({
   id: z.string().uuid(),

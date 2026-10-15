@@ -33,6 +33,7 @@ export interface PullRequest {
   branch: string;
   state: "open" | "closed" | "merged";
   headSha?: string;
+  baseSha?: string;
 }
 export type PublicationPhase =
   | "preflight_reconciliation"

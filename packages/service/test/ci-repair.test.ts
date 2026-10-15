@@ -13,6 +13,7 @@ for (const outcome of [
   "failure",
   "stale",
   "external-change",
+  "simple-rebase",
   "retry-at-capacity",
   "cancel",
   "lease",
@@ -79,18 +80,24 @@ for (const outcome of [
     }
     if (outcome === "external-change") {
       const originalHead = "a".repeat(40);
+      const originalBase = "c".repeat(40);
       await store.pool.query(
-        "UPDATE goals SET pull_requests=jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true) WHERE id=$1",
-        [goal.id, originalHead],
+        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase],
       );
       await store.pool.query(
-        "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
-        [job.id, originalHead],
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase],
       );
       const adapters: Adapters = {
         ...demo,
         mode: "live",
-        reconcile: async () => ({ ...pr, state: "open", headSha: "b".repeat(40) }),
+        reconcile: async () => ({
+          ...pr,
+          state: "open",
+          headSha: "b".repeat(40),
+          baseSha: "d".repeat(40),
+        }),
       };
       await reconcileReviews(store, adapters);
       await reconcileReviews(store, adapters);
@@ -104,6 +111,25 @@ for (const outcome of [
         ).rowCount,
         1,
       );
+      return;
+    }
+    if (outcome === "simple-rebase") {
+      const originalHead = "a".repeat(40);
+      const originalBase = "c".repeat(40);
+      await store.pool.query(
+        "UPDATE goals SET pull_requests=jsonb_set(jsonb_set(pull_requests,'{0,headSha}',to_jsonb($2::text),true),'{0,baseSha}',to_jsonb($3::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase],
+      );
+      await store.pool.query(
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase],
+      );
+      assert.equal(
+        await store.reconcilePullRequestHead(job.id, "b".repeat(40), originalBase),
+        false,
+      );
+      assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
+      assert.equal((await store.getGoal(goal.id))?.pullRequests[0]?.headSha, "b".repeat(40));
       return;
     }
     if (outcome.startsWith("audit-")) {

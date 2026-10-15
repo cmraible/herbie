@@ -1297,7 +1297,11 @@ export class Store {
   async reconcile(jobId: string, outcome: "merged" | "closed"): Promise<Goal> {
     return this.transaction((client) => this.reconcileReview(client, jobId, outcome));
   }
-  async reconcilePullRequestHead(jobId: string, headSha: string): Promise<boolean> {
+  async reconcilePullRequestHead(
+    jobId: string,
+    headSha: string,
+    baseSha?: string,
+  ): Promise<boolean> {
     return this.transaction(async (client) => {
       const { row, goal } = await lockJob(client, jobId);
       const pr = goal.pullRequests.find((item) => item.branch === row.branch);
@@ -1315,6 +1319,27 @@ export class Store {
       }
       if (pr.headSha === headSha || !["queued", "running", "awaiting_review"].includes(goal.state))
         return false;
+      if (pr.baseSha && baseSha && pr.baseSha === baseSha) {
+        await client.query(
+          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true) WHERE id=$1",
+          [jobId, headSha],
+        );
+        await client.query(
+          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{headSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
+          [goal.id, row.branch, headSha],
+        );
+        return false;
+      }
+      if (pr.baseSha && baseSha && pr.baseSha !== baseSha) {
+        await client.query(
+          "UPDATE jobs SET pull_request=jsonb_set(pull_request,'{baseSha}',to_jsonb($2::text),true) WHERE id=$1",
+          [jobId, baseSha],
+        );
+        await client.query(
+          "UPDATE goals SET pull_request=jsonb_set(pull_request,'{baseSha}',to_jsonb($3::text),true) WHERE id=$1 AND pull_request->>'branch'=$2",
+          [goal.id, row.branch, baseSha],
+        );
+      }
       const active = await client.query(
         "SELECT 1 FROM jobs WHERE goal_id=$1 AND stage IN ('running','publishing') LIMIT 1",
         [goal.id],
@@ -1324,7 +1349,7 @@ export class Store {
         [goal.id, active.rowCount ? "running" : "paused", active.rowCount ? "pause" : null],
       );
       await client.query(
-        "UPDATE ci_repairs SET state='completed',lease_owner=NULL,lease_expires_at=NULL WHERE job_id=$1 AND state IN ('waiting','running')",
+        "UPDATE ci_repairs SET state='completed' WHERE job_id=$1 AND state IN ('waiting','running')",
         [jobId],
       );
       await addEvent(

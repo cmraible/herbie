@@ -64,7 +64,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
     });
     assert.equal(response.status, 503);
     assert.deepEqual(await response.json(), {
-      error: "Live execution is disabled by the operator",
+      error: "Live runs aren't configured yet",
     });
   }
   assert.equal(authorizationCalls, 0);
@@ -87,7 +87,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
   for (let request = 0; request < 2; request++) {
     const resume = await control("resume");
     assert.equal(resume.status, 503);
-    assert.deepEqual(await resume.json(), { error: "Live execution is disabled by the operator" });
+    assert.deepEqual(await resume.json(), { error: "Live runs aren't configured yet" });
   }
   assert.equal(authorizationCalls, 0);
   assert.equal(await store.claim("disabled-http-test", 30_000, "demo"), null);
