@@ -145,7 +145,7 @@ export function createApiServer(options:ApiOptions){
         await adapters.authorize(userId,input.repository);
         const result=await store.createGoal(userId,input,adapters.mode,key);goalJson(result.created?201:200,result.goal);return;
       }
-      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry-publication|name))?$/);
+      const goalPath=url.pathname.match(/^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|name))?$/);
       if(goalPath){
         const id=z.string().uuid().parse(goalPath[1]);const goal=await store.getGoal(id,userId);
         if(!goal)throw new HttpError(404,'Goal not found');
@@ -156,12 +156,16 @@ export function createApiServer(options:ApiOptions){
             const {name}=goalRename.parse(await readJson(request));
             goalJson(200,await store.renameGoal(id,userId,name));return;
           }
-          if(goalPath[2]==='retry-publication'){
+          if(goalPath[2]==='retry'||goalPath[2]==='retry-publication'){
             requireExecution();
-            if(adapters.mode!=='live'||!adapters.checkPublicationRetry)throw new HttpError(404,'Not found');
             const candidate=await store.publicationRetryCandidate(id,userId);
             if(!candidate)throw new HttpError(404,'Goal not found');
             if(candidate.kind==='already_queued'||candidate.kind==='in_progress'){goalJson(200,candidate.goal);return;}
+            if(goalPath[2]==='retry'&&candidate.kind==='unavailable'){
+              await adapters.authorize(userId,goal.repository);
+              goalJson(200,await store.retryAttempt(id,userId));return;
+            }
+            if(adapters.mode!=='live'||!adapters.checkPublicationRetry)throw new HttpError(404,'Not found');
             if(candidate.kind!=='retryable')throw new HttpError(409,'No saved publication is eligible for a safe retry.');
             const job=candidate.job;
             if(!job.artifact||!hasValidPublicationEvidence(job.goal.repository,job.artifact))throw new HttpError(409,'The saved artifact does not meet publication verification requirements.');
