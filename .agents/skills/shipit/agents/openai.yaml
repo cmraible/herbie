@@ -1,0 +1,3 @@
+interface:
+  display_name: "Ship It"
+  short_description: "Take local changes through review, CI, and merge"
