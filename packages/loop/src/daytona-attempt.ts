@@ -231,7 +231,7 @@ export async function runDaytonaAttempt(
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
     request.signal?.throwIfAborted();
     const result = await sandbox.process.executeCommand(
-      `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`,
+      `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=/home/compat/.local/bin:/usr/local/bin:/usr/bin:/bin node ${directory}/daytona-runner.js`,
       directory,
       undefined,
       22 * 60,

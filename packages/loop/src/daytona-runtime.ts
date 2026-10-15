@@ -12,9 +12,15 @@ tar -xJf node.tar.xz
 curl --fail --silent --show-error --max-time 50 -o codex.tgz https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-x64.tgz
 /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node -e "const f=require('fs'),c=require('crypto');if(c.createHash('sha512').update(f.readFileSync('codex.tgz')).digest('base64')!=='RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q==')process.exit(1)"
 tar -xzf codex.tgz
+curl --fail --silent --show-error --max-time 50 -o python.tar.gz https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.15.0%2B20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz
+printf '%s\n' '69740dcd9b3480b3d53760f2d3b75582adb14fa54434628dea32480ddede542a  python.tar.gz' | sha256sum -c -
+tar -xzf python.tar.gz
+ln -sf /opt/herbie-tools/python/bin/python3 /usr/local/bin/python3
+ln -sf /opt/herbie-tools/python/bin/pip3 /usr/local/bin/pip3
+ln -sf /opt/herbie-tools/python/bin/pip3 /usr/local/bin/pip
 ln -sf /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node /usr/local/bin/node
 ln -sf /opt/herbie-tools/package/vendor/x86_64-unknown-linux-musl/bin/codex /usr/local/bin/codex
-rm node.tar.xz codex.tgz
+rm node.tar.xz codex.tgz python.tar.gz
 `;
 
 // No secret values: Daytona supplies the existing secret reference through its egress proxy.
@@ -47,4 +53,6 @@ chmod 600 /home/compat/.codex/config.toml
 runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin codex --version
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
 git --version
+runuser -u compat -- env HOME=/home/compat python3 --version
+runuser -u compat -- env HOME=/home/compat python3 -m pip --version
 `;
