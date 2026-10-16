@@ -537,7 +537,6 @@ export function App() {
           <a className="wordmark" href="#" aria-label="Herbie home">
             Herbie<span aria-hidden="true">.</span>
           </a>
-          <span>Coding workspace</span>
         </header>
       )}
       {error && (
