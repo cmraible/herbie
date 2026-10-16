@@ -78,7 +78,7 @@ export function ReasoningSelect({
             disabled={disabled}
             onClick={() => setRefresh((value) => value + 1)}
           >
-            Retry
+            Retry reasoning levels
           </button>
         </span>
       )}

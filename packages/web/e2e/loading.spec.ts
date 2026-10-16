@@ -381,7 +381,7 @@ test("repository refresh keeps alphabetical order and the current selection", as
     "zebra/App",
   ];
   await select.click();
-  await expect(page.getByRole("option")).toHaveText(
+  await expect(repositoryPicker.getByRole("option")).toHaveText(
     expected.map((name) => name.replace("/", " / ")),
   );
   await expect(repositoryPicker.locator(".repository-select__menu")).toHaveCSS(
@@ -393,7 +393,7 @@ test("repository refresh keeps alphabetical order and the current selection", as
   expect(policyErrors).toEqual([]);
   await page.screenshot({ path: "test-results/repository-picker-open.png" });
   await select.fill("btrp");
-  await expect(page.getByRole("option")).toHaveCount(1);
+  await expect(repositoryPicker.getByRole("option")).toHaveCount(1);
   await select.press("ArrowDown");
   await select.press("Enter");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -403,7 +403,7 @@ test("repository refresh keeps alphabetical order and the current selection", as
     "Beta / repo",
   );
   await select.click();
-  await expect(page.getByRole("option")).toHaveText(
+  await expect(repositoryPicker.getByRole("option")).toHaveText(
     expected.map((name) => name.replace("/", " / ")),
   );
   await select.fill("nonexistent-repository");
