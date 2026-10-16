@@ -19,7 +19,7 @@ In YOLO mode, skip all code review: launch no review subagents, request no PR re
 
 1. Read applicable repository instructions. Inspect staged, unstaged, and untracked changes, branch commits, remotes, and any existing PR. Establish the intended base branch and the full diff being shipped. If there is no diff to ship and no open PR to continue, report that and stop. Preserve concurrent or unrelated work; ask only when scope or target is genuinely ambiguous.
 2. When continuing a selected existing PR, switch to its head branch while preserving local changes; use that branch for the remaining workflow. If on the base branch or detached HEAD, create and switch to a feature branch using repository conventions before committing. Commit the intended changes on the feature branch.
-3. Always fetch the latest `main` from the base repository's remote and rebase the feature branch onto that fetched remote-tracking branch before running local checks or code review, in both normal and YOLO modes. Preserve unrelated local changes and resolve any rebase conflicts first. Validate the rebased changes using the verification policy below, fix failures caused by the change, and commit any fixes.
+3. Fetch the intended base branch from the base repository's remote and inspect the branch's mergeability and effective protections. Keep the feature head unchanged when it merges cleanly and protections permit it, even if it is behind the base. Rebase only to resolve an actual conflict, satisfy a confirmed requirement to be up to date, address an integration failure that needs the newer base, or follow an explicit user request. Preserve unrelated local changes. Validate the prepared feature head using the verification policy below, fix failures caused by the change, and commit any fixes.
 
 ## Verify locally
 
@@ -46,6 +46,8 @@ The watcher requires Herbie's protected `All tests passed` aggregate and every o
 ## Monitor CI and verify the merge
 
 The watcher exits with check names and links on failure, or a specific blocker for a changed head, draft, closure, conflict, timeout, or API error. Stop the watcher before making repairs or addressing actionable feedback; disable any existing auto-merge while repairing. Make the smallest correct fix, run relevant checks, commit, and repeat fresh-context local review before pushing. Reply to PR feedback with the fix and validation when applicable. Restart the watcher with the new reviewed SHA and the original start timestamp. Apply the same review cycle after conflict resolution or an unexpected head change.
+
+Base advancement alone leaves an unchanged head's local validation and review valid; let required CI and merge queues validate integration. If merging is rejected, inspect the specific protection or conflict before deciding whether to rebase. Approval, credential, and unrelated check failures require their own remedies. When a rebase changes the head, verify it under the policy above, repeat fresh-context review in normal mode, and update the PR with a lease-protected push before restarting the watcher. Refresh the base for that repair rather than repeatedly rebasing whenever another PR merges.
 
 Stop and report the blocker if credentials or permissions are missing, feedback requires a product decision or scope expansion, or the same failure persists after three repair attempts. On timeout, leave the PR open and report pending checks and whether a merge was already requested (a queue request may remain active). Never turn a timeout or missing result into approval.
 
