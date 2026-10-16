@@ -9,6 +9,16 @@ require this status in branch protection. The container job calls the reusable
 For same-repository PRs, it also uploads that exact image to GHCR before the
 container check passes. Fork PRs verify without uploading.
 
+When PR image publishing is enabled, same-repository PRs share intermediate
+BuildKit layers through `ghcr.io/<owner>/<repo>:buildcache-linux-amd64`.
+Recovery builds on main use the same cache; ordinary manifest-only promotion
+still needs no build. Cached builds use an isolated builder and load the image
+into Docker for the existing smoke test before any candidate is published.
+Missing cache entries cause a normal build, and cache export failures are
+nonblocking. Fork PRs and local verification keep their existing build path.
+Revision metadata is applied after runtime installation layers so a new commit
+SHA does not force system packages to be installed again.
+
 Checks use Node 24.19.0, pnpm 10.34.6 and the frozen lockfile. Actions are pinned
 to commit SHAs, and PostgreSQL and Node container images are pinned by digest.
 The runner and Debian package repositories still receive upstream updates.

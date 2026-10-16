@@ -71,6 +71,7 @@ jobs:
           registry=ghcr.io
           trap 'docker logout "$registry" >/dev/null 2>&1 || true' EXIT
           printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin "$registry"
+          export HERBIE_BUILD_CACHE="$IMAGE_REPOSITORY:buildcache-linux-amd64"
           tree="$(git rev-parse HEAD^{tree})"
           digest="$(bash scripts/promote-portable-image.sh "$IMAGE_REPOSITORY" "$tree" "$REVISION" "$RELEASE_SEQUENCE")"
           if [[ "$RELEASE_SEQUENCE" =~ ^[1-9][0-9]*$ ]]; then

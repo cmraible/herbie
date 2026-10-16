@@ -26,18 +26,24 @@ jobs:
           persist-credentials: false
       - name: Verify manifest-only image promotion
         run: bash scripts/test-image-promotion.sh
-      - name: Build and exercise the standalone container with an isolated database
-        run: bash scripts/build-portable-image.sh herbie:smoke "$REVISION"
-      - name: Upload the tested PR image
+      - name: Authenticate shared build cache
         if: inputs.publish && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
         run: |
+          printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin ghcr.io
+          echo "HERBIE_BUILD_CACHE=ghcr.io/${REPOSITORY,,}:buildcache-linux-amd64" >> "$GITHUB_ENV"
+      - name: Build and exercise the standalone container with an isolated database
+        run: bash scripts/build-portable-image.sh herbie:smoke "$REVISION"
+      - name: Upload the tested PR image
+        if: inputs.publish && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
           image_repository="ghcr.io/${REPOSITORY,,}"
           tree="$(git rev-parse HEAD^{tree})"
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          printf '%s' "$GHCR_TOKEN" | docker login --username "$GHCR_ACTOR" --password-stdin ghcr.io
           docker tag herbie:smoke "$image_repository:tree-$tree"
           docker push "$image_repository:tree-$tree"
           printf 'PR candidate: `%s:tree-%s`\n' "$image_repository" "$tree" >> "$GITHUB_STEP_SUMMARY"
+      - name: Clear registry credentials
+        if: always() && inputs.publish && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: docker logout ghcr.io

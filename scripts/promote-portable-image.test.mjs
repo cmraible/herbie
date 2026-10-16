@@ -12,6 +12,9 @@ for (const scenario of [
   "smoke-fails",
   "push-fails",
   "mismatched",
+  "cached-missing",
+  "cached-build-fails",
+  "cached-smoke-fails",
 ]) {
   test(`image promotion: ${scenario}`, (t) => {
     const dir = mkdtempSync(join(tmpdir(), "herbie-promotion-"));
@@ -55,6 +58,8 @@ case "$*" in
     [[ "$SCENARIO" != mismatched ]] || label=wrong
     printf '{"config":{"Labels":{"io.herbie.source-tree":"%s"}}}\\n' "$label" ;;
   'build '*) [[ "$SCENARIO" != build-fails ]] ;;
+  'buildx create '*) echo fixture-builder ;;
+  'buildx build '*) [[ "$SCENARIO" != cached-build-fails ]] ;;
   'push '*) [[ "$SCENARIO" != push-fails ]] && touch uploaded ;;
 esac
 `,
@@ -62,7 +67,7 @@ esac
     );
     writeFileSync(
       join(dir, "scripts", "test-portable-container.sh"),
-      'echo "smoke $*" >> "$TRACE"\n[[ "$SCENARIO" != smoke-fails ]]\n',
+      'echo "smoke $*" >> "$TRACE"\n[[ "$SCENARIO" != smoke-fails && "$SCENARIO" != cached-smoke-fails ]]\n',
     );
     const result = spawnSync(
       "bash",
@@ -77,11 +82,14 @@ esac
           TREE: tree,
           SCENARIO: scenario,
           REPOSITORY_URL: "https://github.com/example/herbie",
+          HERBIE_BUILD_CACHE: scenario.startsWith("cached-")
+            ? "registry.invalid/herbie:buildcache"
+            : "",
         },
       },
     );
     const trace = readFileSync(join(dir, "trace"), "utf8");
-    const succeeds = ["missing", "existing"].includes(scenario);
+    const succeeds = ["missing", "existing", "cached-missing"].includes(scenario);
     assert.equal(result.status === 0, succeeds, result.stderr);
     assert.equal(trace.includes("imagetools create"), succeeds, trace);
     if (scenario === "missing") {
@@ -99,5 +107,17 @@ esac
       assert.ok(!trace.includes("build --"), trace);
     if (["build-fails", "smoke-fails"].includes(scenario))
       assert.ok(!trace.includes("push "), trace);
+    if (scenario.startsWith("cached-")) {
+      assert.match(trace, /buildx build --builder .* --load/);
+      assert.match(trace, /--cache-from type=registry,ref=registry.invalid\/herbie:buildcache/);
+      assert.match(
+        trace,
+        /--cache-to type=registry,ref=registry.invalid\/herbie:buildcache,mode=max,ignore-error=true/,
+      );
+      assert.match(trace, /buildx rm herbie-cache-/);
+      if (scenario === "cached-missing")
+        assert.ok(trace.indexOf("smoke ") < trace.indexOf("push "), trace);
+      else assert.ok(!trace.includes("push "), trace);
+    } else assert.ok(!trace.includes("--cache-to"), trace);
   });
 }
