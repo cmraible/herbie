@@ -28,9 +28,6 @@ RUN --mount=type=secret,id=proxy_ca \
     pnpm install --frozen-lockfile --prod --filter herbie --filter '@herbie/service...'
 
 FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS runtime
-ARG HERBIE_RUNTIME_REVISION=1
-LABEL herbie.runtime-revision=$HERBIE_RUNTIME_REVISION
-ENV HERBIE_IMAGE_REVISION=$HERBIE_RUNTIME_REVISION
 ENV NODE_ENV=production HERBIE_HOST=0.0.0.0 HERBIE_PORT=8787
 WORKDIR /app
 # The trusted publisher uses native Git; generated code is never executed here.
@@ -52,6 +49,9 @@ COPY --from=build --chown=node:node /app/packages/contracts/src ./packages/contr
 COPY --from=build --chown=node:node /app/packages/loop/dist ./packages/loop/dist
 COPY --from=build --chown=node:node /app/packages/service/dist ./packages/service/dist
 COPY --from=build --chown=node:node /app/packages/web/dist ./packages/web/dist
+ARG HERBIE_RUNTIME_REVISION=1
+LABEL herbie.runtime-revision=$HERBIE_RUNTIME_REVISION
+ENV HERBIE_IMAGE_REVISION=$HERBIE_RUNTIME_REVISION
 USER node
 EXPOSE 8787
 STOPSIGNAL SIGTERM
