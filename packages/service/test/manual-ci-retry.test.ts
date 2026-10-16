@@ -13,6 +13,7 @@ import { testAuth, testSessionToken } from "./test-auth.js";
 
 for (const scenario of [
   "retry",
+  "status-failure",
   "cleanup-unknown",
   "publication",
   "paused",
@@ -48,19 +49,26 @@ for (const scenario of [
     const pr = job!.goal.pullRequests[0]!;
     let attempts = 0;
     let pushes = 0;
+    let statusFailed = false;
     let head = "a".repeat(40);
     const adapters: Adapters = {
       ...demo,
       mode: "live",
-      ciStatus: async () => ({
-        state: "failed",
-        head,
-        pullRequest: pr,
-        details: "Formatting failed",
-      }),
+      ciStatus: async () => {
+        if (scenario === "status-failure" && attempts === 1 && !statusFailed) {
+          statusFailed = true;
+          throw new Error("GitHub temporarily unavailable");
+        }
+        return {
+          state: "failed",
+          head,
+          pullRequest: pr,
+          details: "Formatting failed",
+        };
+      },
       attempt: async (execution, report) => {
         attempts++;
-        if (attempts === 1) {
+        if (attempts === 1 && scenario !== "status-failure") {
           await report("Attempt stage: repository_clone");
           if (scenario !== "cleanup-unknown")
             await report("Deletion confirmed for sandbox fixture");

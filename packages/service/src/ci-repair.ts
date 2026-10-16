@@ -15,6 +15,7 @@ export async function runCiRepairOnce(
   const job = await store.takeCiReview();
   if (!job) return false;
   let id: string | null = null;
+  let cleanupConfirmed = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const controller = new AbortController();
   try {
@@ -63,6 +64,7 @@ export async function runCiRepairOnce(
     }, 5000);
     await requireLease();
     let changes = await store.ciArtifact(id);
+    cleanupConfirmed = changes?.verification?.sandboxDeleted === true;
     if (!changes) {
       changes = await adapters.attempt(
         {
@@ -71,6 +73,7 @@ export async function runCiRepairOnce(
         },
         (message) => store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000), job.id),
       );
+      cleanupConfirmed = changes.verification?.sandboxDeleted === true;
       await requireLease();
       await store.saveCiArtifact(id, workerId, changes);
     }
@@ -119,7 +122,7 @@ export async function runCiRepairOnce(
         false,
         `CI repair stopped. Inspect diagnostics, sandbox cleanup, and PR state before manual recovery. Reference: ${reference}`,
         undefined,
-        error instanceof DaytonaAttemptError && error.cleanup === "confirmed",
+        cleanupConfirmed || (error instanceof DaytonaAttemptError && error.cleanup === "confirmed"),
       );
     // The periodic poll retries failed reads; immediate requeue starves other PRs.
   } finally {
