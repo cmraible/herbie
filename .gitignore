@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Local ChatGPT credentials and process lock
 .herbie/
 artifacts/
+
+# Generated Cloudflare Worker types
+/packages/cloudflare/worker-configuration.d.ts
