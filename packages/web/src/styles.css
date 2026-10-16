@@ -256,7 +256,8 @@ h2 {
 .status-queued {
   --status-color: #8eb6ec;
 }
-.status-paused {
+.status-paused,
+.status-merged {
   --status-color: #c4a5ef;
 }
 .status-cancelled {

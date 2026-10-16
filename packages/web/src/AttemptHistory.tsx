@@ -30,7 +30,7 @@ export function AttemptHistory({
             : attemptLabels[attempt.state],
       color:
         attempt.pullRequest?.state === "merged"
-          ? "completed"
+          ? "merged"
           : attempt.pullRequest?.state === "closed"
             ? "cancelled"
             : attempt.state,
