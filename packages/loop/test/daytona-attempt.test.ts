@@ -333,6 +333,50 @@ async function localFixture(t: TestContext, edits = "") {
   return { directory, sandbox, run, record, baseRepo, baseCommit };
 }
 
+test("clones an unmerged PR branch before checking out its feedback or repair head", async (t) => {
+  const { directory, sandbox, run } = await fixture(t);
+  const repository = join(directory, "origin");
+  createArithmeticFixture(repository);
+  const git = async (...args: string[]) =>
+    (await promisify(execFile)("git", ["-C", repository, ...args])).stdout.trim();
+  const branch = "herbie/review-feedback";
+  await git("checkout", "-b", branch);
+  await git(
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Unmerged PR head",
+  );
+  const commit = await git("rev-parse", "HEAD");
+  await git("checkout", "main");
+  const checkout = join(directory, "checkout");
+  sandbox.git.clone.mock.mockImplementation(async (_url, _path, selectedBranch, head) => {
+    // Daytona fetches only the selected branch, then checks out the requested commit.
+    await promisify(execFile)("git", [
+      "clone",
+      "--single-branch",
+      ...(selectedBranch ? ["--branch", selectedBranch] : []),
+      pathToFileURL(repository).href,
+      checkout,
+    ]);
+    await promisify(execFile)("git", ["-C", checkout, "checkout", "--detach", head!]);
+    assert.equal(
+      (await promisify(execFile)("git", ["-C", checkout, "rev-parse", "HEAD"])).stdout.trim(),
+      commit,
+    );
+  });
+  await run({ branch, commit });
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
 test(
   "uploaded runner executes the connected attempt with a local fake Codex and preserves an empty patch",
   { skip: process.platform === "win32", timeout: 10_000 },

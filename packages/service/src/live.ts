@@ -196,6 +196,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,
           project,
+          branch: (execution.feedback ?? execution.ciRepair) ? execution.branch : undefined,
           commit: (execution.feedback ?? execution.ciRepair)?.head,
           feedback: !!execution.feedback,
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),
