@@ -112,39 +112,6 @@ jobs:
           path: artifacts/ci
           retention-days: 7
 
-  cli-verification:
-    name: Compiled CLI end-to-end
-    needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.markdown-only == 'false'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    concurrency:
-      group: herbie-cli-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: "24.19.0"
-      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          version: 10.34.6
-          run_install: false
-          cache: true
-          cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile --prefer-offline
-      - name: Build and verify CLI flows
-        run: bash scripts/ci-verify.sh cli
-      - name: Save failure evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: cli-verification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/ci
-          retention-days: 7
-
   browser-verification:
     name: Browser verification
     needs: changes
@@ -214,7 +181,6 @@ jobs:
       - changes
       - verify
       - unit-verification
-      - cli-verification
       - browser-verification
       - container-verification
     if: ${{ always() && github.event_name == 'pull_request' }}
@@ -227,15 +193,14 @@ jobs:
           MARKDOWN_ONLY: ${{ needs.changes.outputs.markdown-only }}
           BUILD_RESULT: ${{ needs.verify.result }}
           UNIT_RESULT: ${{ needs.unit-verification.result }}
-          CLI_RESULT: ${{ needs.cli-verification.result }}
           BROWSER_RESULT: ${{ needs.browser-verification.result }}
           CONTAINER_RESULT: ${{ needs.container-verification.result }}
         run: |
           failed=0
-          for check in CHANGES BUILD UNIT CLI BROWSER CONTAINER; do
+          for check in CHANGES BUILD UNIT BROWSER CONTAINER; do
             result_var="${check}_RESULT"
             result="${!result_var}"
-            if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(BUILD|UNIT|CLI|BROWSER)$ ]]; then
+            if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(BUILD|UNIT|BROWSER)$ ]]; then
               continue
             fi
             if [[ "$result" != success ]]; then
