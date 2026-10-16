@@ -21,8 +21,10 @@ export function runCodexTurn(
     disposableDaytona = false,
     onActivity,
     model,
+    reasoningEffort,
   }: {
     model?: string;
+    reasoningEffort?: string;
     timeoutMs?: number;
     signal?: AbortSignal;
     interruptTimeoutMs?: number;
@@ -134,10 +136,11 @@ export function runCodexTurn(
           threadId,
           input: [{ type: "text", text: project }],
           ...(model ? { model } : {}),
+          ...(reasoningEffort ? { effort: reasoningEffort } : {}),
           ...(disposableDaytona
             ? {
                 model: model ?? "gpt-6-luna",
-                effort: "low",
+                effort: reasoningEffort ?? "low",
                 serviceTierForTurn: "default",
                 approvalPolicy: "never",
                 sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },

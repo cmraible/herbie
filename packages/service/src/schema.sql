@@ -192,3 +192,5 @@ WHERE r.state='failed' AND NOT r.publication_started AND NOT r.retryable
        AND e.created_at>=r.created_at ORDER BY e.id DESC LIMIT 1) LIKE 'Deletion confirmed for sandbox %';
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS model text NOT NULL DEFAULT 'gpt-6-luna';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasoning_effort text NOT NULL DEFAULT 'low';

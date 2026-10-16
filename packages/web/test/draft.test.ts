@@ -9,6 +9,7 @@ test("a new project needs only a repository and prompt", () => {
     prompt: "Add regression coverage",
     maxWip: 1,
     model: "gpt-6-luna",
+    reasoningEffort: "low",
   });
 });
 
@@ -30,6 +31,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     prompt: "Fix arithmetic",
     maxWip: 1,
     model: "gpt-6-luna",
+    reasoningEffort: "low",
   });
 });
 
@@ -41,4 +43,15 @@ test("WIP defaults to one for saved drafts and rejects invalid limits", () => {
   assert.equal(draftSchema.parse(oldDraft).maxWip, "1");
   for (const maxWip of ["0", "-1", "1.5", "no"])
     assert.throws(() => parseDraft({ ...oldDraft, maxWip }), /maxWip/);
+});
+
+test("old drafts default reasoning effort and new selections survive restoration", () => {
+  const { reasoningEffort: _effort, ...legacy } = newDraft("demo/example");
+  assert.equal(draftSchema.parse(legacy).reasoningEffort, "low");
+  const restored = draftSchema.parse({
+    ...legacy,
+    reasoningEffort: "high",
+    prompt: "Fix arithmetic",
+  });
+  assert.equal(parseDraft(restored).reasoningEffort, "high");
 });

@@ -1,3 +1,4 @@
+import { createReasoningEffortLister } from "./reasoning-efforts.js";
 import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -32,6 +33,7 @@ interface ApiOptions {
   imageRevision?: string;
   verifyWebhook?: (body: Buffer, signature: string) => boolean;
   webDirectory?: string;
+  listReasoningEfforts?: (model: string) => Promise<string[]>;
   listModels?: () => Promise<string[]>;
 }
 class HttpError extends Error {
@@ -81,6 +83,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   }
 }
 export function createApiServer(options: ApiOptions) {
+  const listReasoningEfforts = options.listReasoningEfforts ?? createReasoningEffortLister();
   const { store, auth, adapters } = options;
   const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
@@ -354,6 +357,16 @@ export function createApiServer(options: ApiOptions) {
           `herbie_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`,
         );
         json(response, 200, { ok: true });
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/reasoning-efforts") {
+        const model = z.string().trim().min(1).max(200).safeParse(url.searchParams.get("model"));
+        if (!model.success) throw new HttpError(400, "Provide a model");
+        try {
+          json(response, 200, await listReasoningEfforts(model.data));
+        } catch {
+          throw new HttpError(502, "Could not load reasoning levels. Retry later.");
+        }
         return;
       }
       if (method === "GET" && url.pathname === "/api/models") {

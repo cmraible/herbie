@@ -48,6 +48,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   commit?: string;
   project: string;
   model?: string;
+  reasoningEffort?: string;
   verifyLocally?: boolean;
   onActivity?: (message: string) => Promise<void>;
   feedback?: boolean;
@@ -246,6 +247,7 @@ export async function runDaytonaAttempt(
           cwd,
           project: request.project,
           model: request.model,
+          reasoningEffort: request.reasoningEffort,
           verifyLocally: request.verifyLocally,
           feedback: request.feedback,
         }),

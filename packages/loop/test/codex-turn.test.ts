@@ -421,3 +421,16 @@ test("captures full scoped activity including failed completion without waiting 
   await done;
   assert.deepEqual(activity, [notification, terminal]);
 });
+
+test("project reasoning effort is sent as the turn effort", async (t) => {
+  const { lines, sent, send, receive } = connection(t);
+  const turn = runCodexTurn(lines, send, "thread-1", "Fix addition", {
+    model: "custom-model",
+    reasoningEffort: "high",
+    disposableDaytona: true,
+  });
+  assert.equal((sent[0] as { params: { effort: string } }).params.effort, "high");
+  receive(started);
+  receive(completed());
+  await turn;
+});

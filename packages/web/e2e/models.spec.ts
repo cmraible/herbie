@@ -16,6 +16,18 @@ for (const discoveryFails of [false, true]) {
     await page.route("**/api/repositories", (route) =>
       route.fulfill(json([{ fullName: "demo/example", defaultBranch: "main", installationId: 1 }])),
     );
+    await page.route("**/api/reasoning-efforts?*", (route) => {
+      const model = new URL(route.request().url()).searchParams.get("model");
+      return route.fulfill(
+        json(
+          model === "gpt-6-luna"
+            ? ["low", "high"]
+            : model === "gpt-6-astra"
+              ? ["low", "medium"]
+              : [],
+        ),
+      );
+    });
     let calls = 0;
     await page.route("**/api/models", (route) => {
       calls++;
@@ -28,6 +40,9 @@ for (const discoveryFails of [false, true]) {
     await page.goto("/#new");
     const picker = page.getByRole("combobox", { name: "Model", exact: true });
     await expect(page.getByText("gpt-6-luna", { exact: true })).toBeVisible();
+    const reasoning = page.getByRole("combobox", { name: /^Reasoning level/ });
+    await expect(reasoning).toBeEnabled();
+    await reasoning.selectOption("high");
     if (discoveryFails) {
       await expect(
         page.getByRole("status").filter({ hasText: "Could not load models" }),
@@ -40,9 +55,17 @@ for (const discoveryFails of [false, true]) {
     await picker.fill("astra");
     await page.getByRole("option", { name: "gpt-6-astra", exact: true }).click();
     await expect(page.getByText("gpt-6-astra", { exact: true })).toBeVisible();
+    await expect(reasoning.getByRole("option")).toHaveText([
+      "Choose a supported level",
+      "low",
+      "medium",
+    ]);
+    await reasoning.selectOption("medium");
     await picker.fill("custom-model");
     await page.getByRole("option", { name: "Use custom model “custom-model”" }).click();
     await page.reload();
     await expect(page.getByText("custom-model", { exact: true })).toBeVisible();
+    await expect(reasoning).toBeDisabled();
+    await expect(reasoning).toHaveValue("medium");
   });
 }

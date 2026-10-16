@@ -11,6 +11,7 @@ type AttemptOptions = ProcessOptions & {
   cwd: string;
   project: string;
   model?: string;
+  reasoningEffort?: string;
   turnTimeoutMs?: number;
   onActivity?: (message: Record<string, unknown>) => void;
   interruptTimeoutMs?: number;
@@ -163,6 +164,7 @@ async function runCodexProcess(
           runCodexTurn(lines, send, threadId, options.project, {
             signal,
             model: options.model,
+            reasoningEffort: options.reasoningEffort,
             timeoutMs: options.turnTimeoutMs,
             interruptTimeoutMs: options.interruptTimeoutMs,
             disposableDaytona: options.disposableDaytona,

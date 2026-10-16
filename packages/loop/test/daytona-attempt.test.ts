@@ -17,6 +17,7 @@ type Create = Parameters<typeof runDaytonaAttempt>[0];
 type Sandbox = Awaited<ReturnType<Create>>;
 const request = {
   model: "custom-model",
+  reasoningEffort: "high",
   snapshot: "approved-codex-runtime",
   domainAllowList: "github.com,api.openai.com",
   outboundProxyUrl: "http://proxy.example:8080",
@@ -156,6 +157,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     cwd: `${root}/repo`,
     project: request.project,
     model: request.model,
+    reasoningEffort: request.reasoningEffort,
   });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
     `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
@@ -425,6 +427,7 @@ test(
       modelProvider: "daytona_openai",
     });
     assert.equal((paramsFor("turn/start") as { model: string }).model, request.model);
+    assert.equal((paramsFor("turn/start") as { effort: string }).effort, request.reasoningEffort);
     assert.ok(JSON.stringify(paramsFor("turn/start")).includes("externalSandbox"));
     assert.match(JSON.stringify(paramsFor("turn/start")), /why you chose it/);
     assert.match(JSON.stringify(paramsFor("turn/start")), /pr-description.md/);
