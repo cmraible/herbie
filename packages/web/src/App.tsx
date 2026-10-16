@@ -538,7 +538,7 @@ export function App() {
       {sessionState === "signed-in" && (
         <header className="app-header">
           <a className="wordmark" href="#" aria-label="Herbie home">
-            Herbie<span aria-hidden="true">.</span>
+            Herbie<span aria-hidden="true">. 🥁</span>
           </a>
         </header>
       )}
