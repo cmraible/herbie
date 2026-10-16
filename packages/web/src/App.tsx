@@ -498,17 +498,19 @@ export function App() {
       setFormError(null);
     } else edit(change);
   }
-  async function control(action: GoalAction | "retry") {
+  async function control(action: GoalAction | "retry" | "retry-repair", repairId?: string) {
     if (!goal) return;
     setBusy(true);
     setError(null);
     try {
       const result =
-        action === "retry"
-          ? workflowPermissionError
-            ? await api.retryPublication(goal.id)
-            : await api.retry(goal.id)
-          : await api.action(goal.id, action);
+        action === "retry-repair"
+          ? await api.retryRepair(goal.id, repairId!)
+          : action === "retry"
+            ? workflowPermissionError
+              ? await api.retryPublication(goal.id)
+              : await api.retry(goal.id)
+            : await api.action(goal.id, action);
       setGoals((current) => current.map((item) => (item.id === result.id ? result : item)));
     } catch (failure) {
       setError(message(failure));
@@ -850,6 +852,27 @@ export function App() {
                         </button>
                       </div>
                     )}
+                    {goal.attempts
+                      ?.filter((attempt) => attempt.ciRepair?.state === "failed")
+                      .map((attempt) => (
+                        <div className="status-message" key={attempt.id}>
+                          <span>Repair failed for PR #{attempt.pullRequest?.number}.</span>
+                          {attempt.ciRepair?.canRetry &&
+                            !goal.stopRequested &&
+                            ["queued", "running", "awaiting_review"].includes(goal.state) &&
+                            attempt.pullRequest?.state === "open" && (
+                              <button
+                                className="primary"
+                                disabled={busy}
+                                onClick={() => {
+                                  void control("retry-repair", attempt.ciRepair!.id);
+                                }}
+                              >
+                                {busy ? "Retrying…" : "Retry repair"}
+                              </button>
+                            )}
+                        </div>
+                      ))}
                     {goal.stopRequested && (
                       <p className="subtle-note">
                         {goal.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The

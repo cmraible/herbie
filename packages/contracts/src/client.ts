@@ -122,6 +122,8 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       ),
     action: (id: string, action: GoalAction) =>
       request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
+    retryRepair: (id: string, repairId: string) =>
+      request(`${goalPath(id)}/retry-repair`, goalSchema, { repairId }),
     retryPublication: (id: string) => request(`${goalPath(id)}/retry-publication`, goalSchema, {}),
     retry: (id: string) => request(`${goalPath(id)}/retry`, goalSchema, {}),
     authStart: (client: "cli" | "web") => request("/api/auth/start", authStartSchema, { client }),

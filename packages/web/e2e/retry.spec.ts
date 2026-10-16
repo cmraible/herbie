@@ -69,3 +69,77 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
     await expect(details.getByText("Queued", { exact: true })).toBeVisible();
     expect(retries).toBe(2);
   });
+
+for (const canRetry of [true, false])
+  test(`Failed PR repair offers retry only when safe: ${canRetry}`, async ({ page }) => {
+    const repairId = randomUUID();
+    const pr = {
+      url: "https://github.com/fixture/project/pull/123",
+      number: 123,
+      state: "open",
+      branch: "repair",
+      draft: true,
+    };
+    let goal = {
+      id: randomUUID(),
+      ownerId: "fixture",
+      repository: "fixture/project",
+      name: "Repair fixture",
+      prompt: "Fix tests",
+      attemptCount: 1,
+      state: "awaiting_review",
+      createdAt: "2026-10-14T00:00:00Z",
+      updatedAt: "2026-10-14T00:00:00Z",
+      mode: "live",
+      stopRequested: null,
+      error: null,
+      pullRequest: pr,
+      pullRequests: [pr],
+      attempts: [
+        {
+          id: randomUUID(),
+          number: 1,
+          state: "awaiting_review",
+          createdAt: "2026-10-14T00:00:00Z",
+          pullRequest: pr,
+          ciRepair: { id: repairId, state: "failed", canRetry },
+        },
+      ],
+    };
+    const json = (body: unknown) => ({
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+    await page.route("**/api/health", (r) => r.fulfill(json({ mode: "live" })));
+    await page.route("**/api/session", (r) =>
+      r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
+    );
+    await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
+    await page.route("**/api/goals/*/events**", (r) => r.fulfill(json([])));
+    let retries = 0;
+    await page.route("**/api/goals/*/retry-repair", (r) => {
+      expect(r.request().postDataJSON()).toEqual({ repairId });
+      retries++;
+      goal = {
+        ...goal,
+        attempts: goal.attempts.map((attempt) => ({
+          ...attempt,
+          ciRepair: { id: randomUUID(), state: "waiting", canRetry: false },
+        })),
+      };
+      return r.fulfill(json(goal));
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Repair fixture/ }).click();
+    await expect(page.getByText("Repair failed for PR #123.")).toBeVisible();
+    const retry = page.getByRole("button", { name: "Retry repair", exact: true });
+    if (!canRetry) {
+      await expect(retry).toHaveCount(0);
+      return;
+    }
+    await retry.click();
+    await expect(retry).toHaveCount(0);
+    await page.reload();
+    await expect(retry).toHaveCount(0);
+    expect(retries).toBe(1);
+  });

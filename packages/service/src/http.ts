@@ -378,7 +378,7 @@ export function createApiServer(options: ApiOptions) {
         return;
       }
       const goalPath = url.pathname.match(
-        /^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|name|prompt))?$/,
+        /^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|retry-repair|name|prompt))?$/,
       );
       if (goalPath) {
         const id = z.string().uuid().parse(goalPath[1]);
@@ -414,6 +414,16 @@ export function createApiServer(options: ApiOptions) {
           if (goalPath[2] === "name") {
             const { name } = goalRename.parse(await readJson(request));
             goalJson(200, await store.renameGoal(id, userId, name));
+            return;
+          }
+          if (goalPath[2] === "retry-repair") {
+            requireExecution();
+            const { repairId } = z
+              .object({ repairId: z.string().uuid() })
+              .strict()
+              .parse(await readJson(request));
+            await adapters.authorize(userId, goal.repository);
+            goalJson(200, await store.retryCiRepair(id, userId, repairId));
             return;
           }
           if (goalPath[2] === "retry" || goalPath[2] === "retry-publication") {
