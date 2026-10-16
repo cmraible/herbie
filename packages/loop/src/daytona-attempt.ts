@@ -44,6 +44,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   snapshot?: string;
   domainAllowList?: string;
   repoUrl: string;
+  branch?: string;
   commit?: string;
   project: string;
   verifyLocally?: boolean;
@@ -251,7 +252,7 @@ export async function runDaytonaAttempt(
       30,
     );
     await begin("repository_clone");
-    await sandbox.git.clone(repo.href, cwd, undefined, request.commit);
+    await sandbox.git.clone(repo.href, cwd, request.branch, request.commit);
     await begin("model_execution");
     await emit(`Running project in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The project and repo URL never do.
