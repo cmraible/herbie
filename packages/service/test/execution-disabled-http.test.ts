@@ -54,6 +54,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
     origin,
     "content-type": "application/json",
     "idempotency-key": randomUUID(),
+    "x-herbie-project-version": "3",
   };
   const input = { repository: "demo/example", prompt: "Do not execute this project" };
   for (let request = 0; request < 2; request++) {
