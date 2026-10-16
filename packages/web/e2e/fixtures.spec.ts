@@ -8,17 +8,15 @@ test("fixture preview uses production UI and supports local edits", async ({ pag
   await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(
     "acme/storefront",
   );
-  await expect(page.getByRole("button", { name: "Run 3 Ready for review" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await page.getByRole("link", { name: "Run 3 Ready for review" }).click();
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveAttribute(
     "href",
     "https://github.com/acme/storefront/pull/148",
   );
   await expect(page.getByText(/demo|simulat/i)).toHaveCount(0);
   await page.screenshot({ path: "test-results/fixtures-desktop.png", fullPage: true });
-  await page.getByRole("button", { name: "Run 2 Failed" }).click();
+  await page.goBack();
+  await page.getByRole("link", { name: "Run 2 Failed" }).click();
   await expect(page.getByText("Run failed. No patches were saved.")).toBeVisible();
   await expect(
     page.getByText("The integration suite could not connect to its test database.", {

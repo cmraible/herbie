@@ -383,32 +383,46 @@ h2 {
 .attempts > h3 {
   margin-bottom: 12px;
 }
-.run-layout {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
 .run-list {
   display: grid;
-  gap: 8px;
+  gap: 12px;
+}
+.run-row {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid #333;
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.run-row:hover {
+  background: #1b1b1b;
 }
 .run-select {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 14px;
-  text-align: left;
-  background: transparent;
-  border-color: transparent;
-}
-.run-select[aria-pressed="true"] {
-  background: #1b1b1b;
-  border-color: #555;
-}
-.run-select > span:first-child {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
   font-weight: 600;
+}
+.run-select::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+}
+.run-select:focus-visible::after {
+  outline: 2px solid currentColor;
+}
+.run-row .goal-meta {
+  margin: 0;
+}
+.run-pr-link {
+  position: relative;
+  justify-self: start;
 }
 .run-panel {
   min-width: 0;
@@ -601,18 +615,6 @@ textarea::placeholder {
 }
 
 @media (max-width: 700px) {
-  .run-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
-  }
-  .run-list {
-    display: flex;
-    overflow-x: auto;
-    padding: 3px;
-  }
-  .run-select {
-    flex-shrink: 0;
-  }
   .run-panel {
     padding: 18px;
   }

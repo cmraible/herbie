@@ -71,6 +71,7 @@ test("activity feed shows clear run progress and hides internal system events", 
 
   await expect(page.getByRole("region", { name: "Selected project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Clear activity messages" })).toBeVisible();
+  await page.getByRole("link", { name: /Run 1/ }).click();
   for (const text of [
     "Run #1 queued",
     "Run #1 started",

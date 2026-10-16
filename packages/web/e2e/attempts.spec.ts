@@ -75,11 +75,20 @@ for (const [draft, checksPassed, label] of [
     await page.route("**/api/goals/*/events**", (r) => r.fulfill(json(events)));
     await page.setViewportSize({ width: 796, height: 824 });
     await page.goto(`/#${goalId}`);
-    const one = page.getByRole("button", { name: "Run 1 Merged" });
-    const two = page.getByRole("button", { name: `Run 2 ${label}` });
-    await expect(two).toHaveAttribute("aria-pressed", "true");
+    const one = page.getByRole("link", { name: "Run 1 Merged" });
+    const two = page.getByRole("link", { name: `Run 2 ${label}` });
+    await expect(two).toHaveAttribute("href", `#${goalId}/runs/${second}`);
+    await expect(page.locator(".run-panel")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "#2 · Improve project details" })).toHaveAttribute(
+      "href",
+      "https://demo.invalid/pr/2",
+    );
     await expect(page.locator(".detail-heading .badge")).toHaveText(label);
-    await expect(one).toHaveAttribute("aria-pressed", "false");
+    await two.click();
+    await expect(page).toHaveURL(new RegExp(`/runs/${second}$`));
+    await expect(page.locator(".goal-brief")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Run history" })).toHaveCount(0);
+    await page.reload();
     await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
     await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
     await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
@@ -106,35 +115,39 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
     await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
     await expect(page.getByText(draft ? "Draft" : "Open", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Attempt history", exact: true }).click();
     await one.focus();
     await page.keyboard.press("Enter");
-    await expect(one).toHaveAttribute("aria-pressed", "true");
-    await expect(two).toHaveAttribute("aria-pressed", "false");
+    await expect(page).toHaveURL(new RegExp(`/runs/${first}$`));
+
     await expect(page.getByText("Pull request #1 merged")).toBeVisible();
     await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
       "href",
       "https://demo.invalid/pr/1",
     );
+    await page.goBack();
     await expect(one.locator(".badge")).toHaveCSS("color", "rgb(196, 165, 239)");
     const color = label === "Waiting for checks" ? "rgb(229, 199, 107)" : "rgb(112, 201, 152)";
     await expect(two.locator(".badge")).toHaveCSS("color", color);
     await expect(page.locator(".detail-heading .badge")).toHaveCSS("color", color);
-    await expect.poll(() => page.getByRole("button", { pressed: true }).count()).toBe(1);
+
     await page.setViewportSize({ width: 1440, height: 1100 });
     await two.click();
     await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
     await expect(page.getByRole("button", { name: "Goal history" })).toHaveCount(0);
     await expect(page.getByText("Goal renamed", { exact: true })).toHaveCount(0);
-    await one.click();
-    await expect(one).toHaveAttribute("aria-pressed", "true");
-    await page.getByRole("button", { name: "Project activity", exact: true }).click();
+    await page.goBack();
+    await page.getByRole("link", { name: "Project activity", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Project activity" })).toBeVisible();
     await expect(page.getByRole("link", { name: /on GitHub/ })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.goBack();
     await two.click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
     await page.screenshot({ path: "test-results/attempts-mobile.png", fullPage: true });
+    await page.goto(`/#${goalId}/runs/missing`);
+    await expect(page.getByText("Run not found.", { exact: true })).toBeVisible();
   });
 }
