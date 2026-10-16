@@ -5,7 +5,7 @@ export const daytonaPath = "/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin
 export const installDaytonaRuntime = String.raw`set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update
-apt-get -qq install -y --no-install-recommends ca-certificates curl xz-utils git >/dev/null
+apt-get -qq install -y --no-install-recommends ca-certificates curl xz-utils git jq >/dev/null
 curl --fail --silent --show-error --max-time 50 -o /tmp/install-docker.sh https://get.docker.com
 VERSION=28.3.3 sh /tmp/install-docker.sh
 rm /tmp/install-docker.sh
@@ -24,6 +24,10 @@ ln -sf /opt/herbie-tools/python/bin/python3 /usr/local/bin/python3
 ln -sf /opt/herbie-tools/python/bin/pip3 /usr/local/bin/pip3
 ln -sf /opt/herbie-tools/python/bin/pip3 /usr/local/bin/pip
 ln -sf /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node /usr/local/bin/node
+for tool in npm npx corepack; do
+  ln -sf /opt/herbie-tools/node-v24.19.0-linux-x64/bin/$tool /usr/local/bin/$tool
+done
+corepack enable --install-directory /usr/local/bin
 ln -sf /opt/herbie-tools/package/vendor/x86_64-unknown-linux-musl/bin/codex /usr/local/bin/codex
 rm node.tar.xz codex.tgz python.tar.gz
 `;
@@ -45,6 +49,8 @@ for attempt in $(seq 1 20); do
 done
 runuser -u compat -- docker info
 runuser -u compat -- docker compose version
+runuser -u compat -- docker buildx version
+runuser -u compat -- jq --version
 mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
 model_provider = "daytona_openai"
@@ -71,6 +77,8 @@ chmod 600 /home/compat/.codex/config.toml
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} codex --version
 env PATH=${daytonaPath} node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
 env PATH=${daytonaPath} git --version
+runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} npm --version
+runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} corepack --version
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -c 'import pathlib, sys, sysconfig; sys.exit("Snapshot Python must allow user installs; provide standalone Python") if pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").exists() else None; print(sys.version)'
 runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -m pip --version
 `;
