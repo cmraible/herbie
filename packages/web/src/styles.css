@@ -443,6 +443,7 @@ h2 {
   font-size: 13px;
 }
 .run-result strong {
+  overflow-wrap: anywhere;
   font-size: 18px;
 }
 .run-result p {
@@ -776,4 +777,20 @@ textarea::placeholder {
   margin-top: 6px;
   color: #888;
   font-size: 11px;
+}
+
+.pr-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.pr-additions {
+  color: #8edca5;
+}
+.pr-deletions {
+  color: #ff9b9b;
+}
+.pr-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

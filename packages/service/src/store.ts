@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import {
+  pullRequestMetadataSchema,
   goalUpdate,
   type GoalUpdate,
   goalName,
@@ -1299,18 +1300,20 @@ export class Store {
     }
     return jobs;
   }
-  async reconcile(jobId: string, outcome: "merged" | "closed"): Promise<Goal> {
-    return this.transaction((client) => this.reconcileReview(client, jobId, outcome));
-  }
-  async reconcilePullRequestHead(
+  async reconcile(
     jobId: string,
-    current: Pick<PullRequest, "headSha" | "baseSha" | "patchSha">,
-  ): Promise<boolean> {
+    outcome: "merged" | "closed",
+    current: Partial<PullRequest> = {},
+  ): Promise<Goal> {
+    return this.transaction((client) => this.reconcileReview(client, jobId, outcome, current));
+  }
+  async reconcilePullRequestHead(jobId: string, current: Partial<PullRequest>): Promise<boolean> {
     return this.transaction(async (client) => {
       const { row, goal } = await lockJob(client, jobId);
       const pr = goal.pullRequests.find((item) => item.branch === row.branch);
       if (row.stage !== "awaiting_review" || pr?.state !== "open") return false;
       const tracked = {
+        ...pullRequestMetadataSchema.parse(current),
         ...(current.headSha ? { headSha: current.headSha } : {}),
         ...(current.baseSha ? { baseSha: current.baseSha } : {}),
         ...(current.patchSha ? { patchSha: current.patchSha } : {}),
@@ -1331,7 +1334,8 @@ export class Store {
         return false;
       }
       if (pr.headSha === current.headSha) {
-        if (!pr.patchSha && current.patchSha) await updateTrackedPullRequest();
+        if (Object.entries(tracked).some(([key, value]) => pr[key as keyof PullRequest] !== value))
+          await updateTrackedPullRequest();
         return false;
       }
       if (!["queued", "running", "awaiting_review"].includes(goal.state)) return false;
@@ -1365,6 +1369,7 @@ export class Store {
     client: PoolClient,
     jobId: string,
     outcome: "merged" | "closed",
+    current: Partial<PullRequest> = {},
   ): Promise<Goal> {
     const { row, goal } = await lockJob(client, jobId);
     const pr = goal.pullRequests.find((pr) => pr.branch === row.branch);
@@ -1374,7 +1379,11 @@ export class Store {
       throw conflict("Only a published pull request can be reconciled");
     await this.discardWaitingCiWith(client, jobId);
     const closed = outcome === "closed";
-    const updatedPr = JSON.stringify({ ...pr, state: outcome });
+    const updatedPr = JSON.stringify({
+      ...pr,
+      ...pullRequestMetadataSchema.parse(current),
+      state: outcome,
+    });
     await client.query(
       "UPDATE jobs SET stage=$2,pull_request=$3,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
       [jobId, closed ? "cancelled" : "completed", updatedPr],

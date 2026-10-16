@@ -115,6 +115,12 @@ export async function githubFixture(t: TestContext) {
       res.end(JSON.stringify([{ filename: "file.txt", status: "modified", patch: fixture.patch }]));
     else if (path.startsWith("/repos/alice/project/pulls")) {
       const pr = {
+        title: "Fix bug",
+        body: "Verified evidence",
+        draft: true,
+        additions: 12,
+        deletions: 3,
+        changed_files: 2,
         number: 8,
         html_url: "https://github.com/alice/project/pull/8",
         state: fixture.prState,
@@ -128,7 +134,10 @@ export async function githubFixture(t: TestContext) {
           res.statusCode = 500;
           res.end("{}");
         } else res.end(JSON.stringify(pr));
-      } else res.end(JSON.stringify(fixture.pr ? [pr] : []));
+      } else
+        res.end(
+          JSON.stringify(path === "/repos/alice/project/pulls/8" ? pr : fixture.pr ? [pr] : []),
+        );
     } else {
       res.statusCode = 404;
       res.end("{}");
@@ -294,6 +303,11 @@ test("recovers a successful PR creation with a lost response and never duplicate
   const first = await github.openPullRequest("ghs_fixture", { ...input, draft: true });
   const repeated = await github.openPullRequest("ghs_fixture", { ...input, draft: true });
   assert.equal(first.number, 8);
+  assert.equal(first.title, "Fix bug");
+  assert.equal(first.body, "Verified evidence");
+  assert.equal(first.additions, 12);
+  assert.equal(first.deletions, 3);
+  assert.equal(first.changedFiles, 2);
   assert.deepEqual(repeated, first);
   assert.equal(
     requests.filter((request) => request.path === "/repos/alice/project/pulls").length,
@@ -499,6 +513,12 @@ for (const state of ["open", "closed", "merged"] as const)
     );
     const { headSha, baseSha, patchSha, ...published } = pr;
     assert.deepEqual(published, {
+      title: "Fix bug",
+      body: "Verified evidence",
+      draft: true,
+      additions: 12,
+      deletions: 3,
+      changedFiles: 2,
       url: "https://github.com/alice/project/pull/8",
       number: 8,
       branch: "herbie/attempt-1",
@@ -822,7 +842,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
   const lookups = requests.filter((request) =>
     request.path.startsWith("/repos/alice/project/pulls"),
   );
-  assert.equal(lookups.length, 3);
+  assert.equal(lookups.length, 4);
   assert.ok(
     lookups.every((request) => request.authorization === `Bearer ${fixture.installationToken}`),
   );

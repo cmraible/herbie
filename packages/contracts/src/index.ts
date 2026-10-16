@@ -44,7 +44,15 @@ export const goalUpdate = z
     "Provide at least one goal setting",
   );
 export type GoalUpdate = z.infer<typeof goalUpdate>;
-export const pullRequestSchema = z.object({
+export const pullRequestMetadataSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().nullable().optional(),
+  draft: z.boolean().optional(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
+  changedFiles: z.number().int().nonnegative().optional(),
+});
+export const pullRequestSchema = pullRequestMetadataSchema.extend({
   url: z.string().url(),
   number: z.number().int(),
   state: z.enum(["open", "merged", "closed"]),
