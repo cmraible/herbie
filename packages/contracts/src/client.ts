@@ -6,6 +6,7 @@ import {
   projectRename,
   projectInput,
   projectSchema,
+  runSchema,
   eventSchema,
   sessionSchema,
   repositorySchema,
@@ -17,6 +18,19 @@ import {
   type ProjectInput,
   type ProjectAction,
 } from "./index.js";
+
+const legacyProjectSchema = projectSchema
+  .omit({ runCount: true, runs: true })
+  .extend({
+    attemptCount: projectSchema.shape.runCount,
+    attempts: z.array(runSchema).optional(),
+  })
+  .transform(({ attemptCount, attempts, ...project }) => ({
+    ...project,
+    runCount: attemptCount,
+    runs: attempts,
+  }));
+const clientProjectSchema = z.union([projectSchema, legacyProjectSchema]);
 
 export class ApiError extends Error {
   constructor(
@@ -97,14 +111,14 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     session: () => request("/api/session", sessionSchema),
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
-    projects: () => request("/api/projects", z.array(projectSchema)),
-    project: (id: string) => request(projectPath(id), projectSchema),
+    projects: () => request("/api/projects", z.array(clientProjectSchema)),
+    project: (id: string) => request(projectPath(id), clientProjectSchema),
     start: (input: ProjectInput, requestId: string) => {
       const { maxWip, model, ...project } = projectInput.parse(input);
       // The default must remain acceptable to older strict APIs during rolling upgrades.
       return request(
         "/api/projects",
-        projectSchema,
+        clientProjectSchema,
         {
           ...project,
           ...(maxWip === 1 ? {} : { maxWip }),
@@ -114,23 +128,27 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       );
     },
     rename: (id: string, name: string) =>
-      request(`${projectPath(id)}/name`, projectSchema, projectRename.parse({ name })),
+      request(`${projectPath(id)}/name`, clientProjectSchema, projectRename.parse({ name })),
     update: (id: string, input: ProjectUpdate) =>
-      request(projectPath(id), projectSchema, projectUpdate.parse(input)),
+      request(projectPath(id), clientProjectSchema, projectUpdate.parse(input)),
     editPrompt: (id: string, prompt: string) =>
-      request(`${projectPath(id)}/prompt`, projectSchema, projectPromptEdit.parse({ prompt })),
+      request(
+        `${projectPath(id)}/prompt`,
+        clientProjectSchema,
+        projectPromptEdit.parse({ prompt }),
+      ),
     events: (id: string, after = 0) =>
       request(
         `${projectPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`,
         z.array(eventSchema),
       ),
     action: (id: string, action: ProjectAction) =>
-      request(`${projectPath(id)}/${actionSchema.parse(action)}`, projectSchema, {}),
+      request(`${projectPath(id)}/${actionSchema.parse(action)}`, clientProjectSchema, {}),
     retryRepair: (id: string, repairId: string) =>
-      request(`${projectPath(id)}/retry-repair`, projectSchema, { repairId }),
+      request(`${projectPath(id)}/retry-repair`, clientProjectSchema, { repairId }),
     retryPublication: (id: string) =>
-      request(`${projectPath(id)}/retry-publication`, projectSchema, {}),
-    retry: (id: string) => request(`${projectPath(id)}/retry`, projectSchema, {}),
+      request(`${projectPath(id)}/retry-publication`, clientProjectSchema, {}),
+    retry: (id: string) => request(`${projectPath(id)}/retry`, clientProjectSchema, {}),
     authStart: (client: "cli" | "web") => request("/api/auth/start", authStartSchema, { client }),
     installationStart: () => request("/api/auth/install/start", installationStartSchema, {}),
     authPoll: (token: string) =>

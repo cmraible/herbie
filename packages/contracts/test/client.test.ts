@@ -67,6 +67,43 @@ test("a non-JSON service failure retains HTTP status without exposing its body",
   );
 });
 
+test("project reads normalize legacy attempt fields from older servers", async () => {
+  const id = "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d";
+  const legacyProject = {
+    id,
+    ownerId: "owner",
+    repository: "demo/example",
+    name: "Work",
+    prompt: "Work",
+    model: "gpt-6-luna",
+    state: "queued",
+    attemptCount: 0,
+    attempts: [],
+    createdAt: "2026-10-15T00:00:00Z",
+    updatedAt: "2026-10-15T00:00:00Z",
+    mode: "demo",
+    stopRequested: null,
+    pullRequest: null,
+    cleanupStatus: "not_required",
+    error: null,
+  };
+  await withServer(
+    (request, response) => {
+      assert.equal(request.headers["x-herbie-project-version"], "3");
+      response.end(
+        JSON.stringify(request.url === "/api/projects" ? [legacyProject] : legacyProject),
+      );
+    },
+    async (client) => {
+      const project = await client.project(id);
+      assert.equal(project.runCount, 0);
+      assert.deepEqual(project.runs, []);
+      assert.equal(project.maxWip, 1);
+      assert.deepEqual(await client.projects(), [project]);
+    },
+  );
+});
+
 for (const maxWip of [undefined, 1, 2])
   test(`project creation preserves rollout compatibility (maxWip: ${maxWip})`, async () => {
     const bodies: unknown[] = [];
