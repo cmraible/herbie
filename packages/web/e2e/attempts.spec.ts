@@ -92,7 +92,11 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
     await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
     await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
-    await expect(page.getByText("#2 · Improve project details", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "#2 · Improve project details", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Breadcrumb").getByText("Run 2", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Run 2", exact: true })).toHaveCount(0);
     await expect(page.getByText("Show PR context.", { exact: false })).toContainText(
       "Keep review in Herbie.",
     );
@@ -114,7 +118,7 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByLabel("42 additions", { exact: true })).toBeVisible();
     await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
     await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
-    await expect(page.getByText(draft ? "Draft" : "Open", { exact: true })).toBeVisible();
+    await expect(page.locator(".pr-metadata .badge")).toHaveText(label);
     await page.getByRole("link", { name: "Attempt history", exact: true }).click();
     await one.focus();
     await page.keyboard.press("Enter");
