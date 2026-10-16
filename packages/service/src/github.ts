@@ -1,7 +1,7 @@
 import { registerDiagnosticSecret, logFailure } from "./diagnostic-log.js";
 import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import type { Repository } from "@herbie/contracts";
+import { githubPermissionsMessage, type Repository } from "@herbie/contracts";
 import type { PullRequest, RepositoryAccess, CiStatus } from "./adapters.js";
 
 export interface GithubConfig {
@@ -16,6 +16,7 @@ export class GithubError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: "github_permissions_required",
   ) {
     super(message);
   }
@@ -44,6 +45,7 @@ function requiredPermissions({ permissions }: z.infer<typeof installationSchema>
   return (
     permissions.contents === "write" &&
     permissions.pull_requests === "write" &&
+    permissions.workflows === "write" &&
     [permissions.checks, permissions.statuses, permissions.actions].every(
       (value) => value === "read" || value === "write",
     )
@@ -161,7 +163,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         .object({ installations: z.array(installationSchema) })
         .parse(await request(`/user/installations?per_page=100&page=${page}`, token)).installations;
       for (const installation of installations) {
-        if (!requiredPermissions(installation)) continue;
+        if (!requiredPermissions(installation))
+          throw new GithubError(403, githubPermissionsMessage, "github_permissions_required");
         for (let repoPage = 1; repoPage <= 100; repoPage++) {
           const repos = z
             .object({ repositories: z.array(repositorySchema) })
@@ -200,10 +203,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       (item) => item.fullName.toLowerCase() === repository.toLowerCase(),
     );
     if (!accessible)
-      throw new GithubError(
-        403,
-        "Update the GitHub App installation permissions: Contents and Pull requests write, plus Checks, Commit statuses and Actions read are required",
-      );
+      throw new GithubError(403, githubPermissionsMessage, "github_permissions_required");
     return {
       repository: accessible.fullName,
       defaultBranch: accessible.defaultBranch,
@@ -323,13 +323,14 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       !/^[\w.-]+\/[\w.-]+$/.test(repository)
     )
       throw new Error("Invalid repository installation");
-    // Request this optional permission only when the installation has granted it.
-    // Otherwise ordinary patches must remain publishable with existing installations.
-    const workflowWrite =
-      workflows &&
-      permission === "write" &&
-      installationSchema.parse(await request(`/repos/${repository}/installation`, jwt()))
-        .permissions.workflows === "write";
+    const workflowWrite = workflows && permission === "write";
+    if (
+      workflowWrite &&
+      !requiredPermissions(
+        installationSchema.parse(await request(`/repos/${repository}/installation`, jwt())),
+      )
+    )
+      throw new GithubError(403, githubPermissionsMessage, "github_permissions_required");
     // Installation tokens can be stateless ghs_APPID_JWT values (base64url + dots).
     // Accept bearer-token characters without assuming GitHub's opaque token layout.
     const value = z

@@ -21,6 +21,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -58,10 +59,11 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       );
     }
     if (!response.ok) {
-      const error = z.object({ error: z.string() }).safeParse(data);
+      const error = z.object({ error: z.string(), code: z.string().optional() }).safeParse(data);
       throw new ApiError(
         response.status,
         error.success ? error.data.error : `Service returned HTTP ${response.status}`,
+        error.success ? error.data.code : undefined,
       );
     }
     return schema.parse(data);

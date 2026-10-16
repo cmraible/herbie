@@ -108,3 +108,26 @@ for (const maxWip of [undefined, 1, 2])
       },
     );
   });
+
+test("repository permission failures preserve the code for the in-app update prompt", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: "Update installation permissions",
+          code: "github_permissions_required",
+        }),
+      );
+    },
+    async (client) => {
+      await assert.rejects(
+        client.repositories(),
+        (error) =>
+          error instanceof ApiError &&
+          error.code === "github_permissions_required" &&
+          error.status === 403,
+      );
+    },
+  );
+});

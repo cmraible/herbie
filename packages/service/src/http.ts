@@ -499,7 +499,10 @@ export function createApiServer(options: ApiOptions) {
         error instanceof AuthError ||
         error instanceof GithubError
       )
-        json(response, error.status, { error: error.message });
+        json(response, error.status, {
+          error: error.message,
+          ...(error instanceof GithubError && error.code ? { code: error.code } : {}),
+        });
       else if (error instanceof z.ZodError || error instanceof URIError)
         json(response, 400, { error: "Invalid request" });
       else json(response, 500, { error: `Request failed. Reference: ${errorId}` });

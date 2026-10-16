@@ -1,4 +1,6 @@
 import { z } from "zod";
+export const githubPermissionsMessage =
+  "Update the GitHub App installation permissions: Contents, Pull requests, and Workflows write, plus Checks, Commit statuses, and Actions read are required";
 export const goalState = z.enum([
   "queued",
   "running",

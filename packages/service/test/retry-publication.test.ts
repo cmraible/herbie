@@ -12,7 +12,7 @@ import {
 import { Store } from "../src/store.js";
 import { PgAuthStore, migrateAuth } from "../src/auth-store.js";
 import { createAuth } from "../src/auth.js";
-import { createGithub } from "../src/github.js";
+import { GithubError, createGithub } from "../src/github.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { createApiServer } from "../src/http.js";
 import type { Adapters } from "../src/adapters.js";
@@ -588,59 +588,83 @@ for (const conflict of ["branch_exists", "pull_request_exists", "base_changed"] 
     assert.ok(rows[0].artifact);
   });
 
-test("workflow permission rejection blocks retries, reaches the UI, and resumes the saved patches", async (t) => {
+for (const missing of ["workflow", "installation"] as const)
+  test(`${missing} permission rejection blocks retries, reaches the UI, and resumes the saved patches`, async (t) => {
+    const setup = await fixture(t);
+    if (!setup) return;
+    const { goal, jobId } = await setup.retryableGoal();
+    const publish = setup.adapters.publish;
+    setup.adapters.publish = async () => {
+      if (missing === "installation")
+        throw new GithubError(
+          403,
+          "Update installation permissions",
+          "github_permissions_required",
+        );
+      throw new PatchPublicationError(
+        [
+          Object.assign(new Error("private command"), {
+            stdout:
+              "!\tcommit:branch\t[remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci-deploy.yml` without `workflows` permission)\nprivate output",
+          }),
+        ],
+        { repository, branch: "fixture-branch", stage: "pushing" },
+      );
+    };
+    t.mock.method(console, "error", () => {});
+    await setup.store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [
+      jobId,
+    ]);
+    await runWorkerOnce(setup.store, setup.adapters, "permission-worker");
+    const saved = await setup.store.getGoal(goal.id);
+    assert.ok(saved);
+    assert.equal(saved.state, "needs_attention");
+    assert.match(saved.error!, /workflow_permission_missing|installation_permissions_missing/);
+    assert.doesNotMatch(saved.error!, /private|Retrying automatically/);
+    assert.ok(errorReference(saved.error!));
+    const event = (await setup.store.events(goal.id)).find((e) => e.type === "publication_blocked");
+    assert.ok(event);
+    assert.equal(activityMessage(saved, event), goalErrorMessage(saved));
+    assert.match(goalErrorMessage(saved), /Workflows/);
+    if (missing === "workflow")
+      assert.match(goalErrorMessage(saved), /\.github\/workflows\/ci-deploy.yml/);
+    assert.equal(errorReference(event.message), errorReference(saved.error!));
+    const row = (
+      await setup.store.pool.query("SELECT publication_blocked,artifact FROM jobs WHERE id=$1", [
+        jobId,
+      ])
+    ).rows[0];
+    assert.equal(row.publication_blocked, true);
+    assert.ok(row.artifact);
+    assert.equal(await runWorkerOnce(setup.store, setup.adapters, "automatic-retry"), false);
+
+    setup.adapters.publish = publish;
+    const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry-publication", {
+      method: "POST",
+      headers: await setup.session(),
+      body: "{}",
+    });
+    assert.equal(response.status, 200);
+    await runWorkerOnce(setup.store, setup.adapters, "permission-fixed-worker");
+    const resumed = await setup.store.getGoal(goal.id);
+    assert.equal(resumed?.state, "awaiting_review");
+    assert.equal(resumed?.attemptCount, 1);
+    assert.equal(setup.attempts, 0);
+    assert.equal(setup.publishes, 1);
+  });
+
+test("repository discovery exposes the required-permissions code to signed-in clients", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
-  const { goal, jobId } = await setup.retryableGoal();
-  const publish = setup.adapters.publish;
-  setup.adapters.publish = async () => {
-    throw new PatchPublicationError(
-      [
-        Object.assign(new Error("private command"), {
-          stdout:
-            "!\tcommit:branch\t[remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci-deploy.yml` without `workflows` permission)\nprivate output",
-        }),
-      ],
-      { repository, branch: "fixture-branch", stage: "pushing" },
-    );
+  setup.adapters.repositories = async () => {
+    throw new GithubError(403, "Update installation permissions", "github_permissions_required");
   };
-  t.mock.method(console, "error", () => {});
-  await setup.store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [
-    jobId,
-  ]);
-  await runWorkerOnce(setup.store, setup.adapters, "permission-worker");
-  const saved = await setup.store.getGoal(goal.id);
-  assert.ok(saved);
-  assert.equal(saved.state, "needs_attention");
-  assert.match(saved.error!, /workflow_permission_missing/);
-  assert.doesNotMatch(saved.error!, /private|Retrying automatically/);
-  assert.ok(errorReference(saved.error!));
-  const event = (await setup.store.events(goal.id)).find((e) => e.type === "publication_blocked");
-  assert.ok(event);
-  assert.equal(activityMessage(saved, event), goalErrorMessage(saved));
-  assert.match(goalErrorMessage(saved), /Workflows: Read and write/);
-  assert.match(goalErrorMessage(saved), /\.github\/workflows\/ci-deploy.yml/);
-  assert.equal(errorReference(event.message), errorReference(saved.error!));
-  const row = (
-    await setup.store.pool.query("SELECT publication_blocked,artifact FROM jobs WHERE id=$1", [
-      jobId,
-    ])
-  ).rows[0];
-  assert.equal(row.publication_blocked, true);
-  assert.ok(row.artifact);
-  assert.equal(await runWorkerOnce(setup.store, setup.adapters, "automatic-retry"), false);
-
-  setup.adapters.publish = publish;
-  const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry-publication", {
-    method: "POST",
+  const response = await fetch(setup.base + "/api/repositories", {
     headers: await setup.session(),
-    body: "{}",
   });
-  assert.equal(response.status, 200);
-  await runWorkerOnce(setup.store, setup.adapters, "permission-fixed-worker");
-  const resumed = await setup.store.getGoal(goal.id);
-  assert.equal(resumed?.state, "awaiting_review");
-  assert.equal(resumed?.attemptCount, 1);
-  assert.equal(setup.attempts, 0);
-  assert.equal(setup.publishes, 1);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    error: "Update installation permissions",
+    code: "github_permissions_required",
+  });
 });

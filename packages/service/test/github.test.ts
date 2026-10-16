@@ -22,7 +22,7 @@ export async function githubFixture(t: TestContext) {
     statuses: "read",
     actions: "read",
     pullRequests: "write",
-    workflows: undefined as string | undefined,
+    workflows: "write" as string | undefined,
     installationId: 11,
     installationToken: "ghs_fixture",
     pr: false,
@@ -885,10 +885,21 @@ test("live publication rejects a legacy artifact without verification evidence b
   );
 });
 
-for (const permission of ["checks", "statuses", "actions"] as const) {
+for (const permission of [
+  "contents",
+  "pullRequests",
+  "workflows",
+  "checks",
+  "statuses",
+  "actions",
+] as const) {
   test(`installation setup and authorization require ${permission} access`, async (t) => {
     const { github, fixture } = await githubFixture(t);
     fixture[permission] = "";
+    await assert.rejects(
+      github.repositories("ghu_fixture"),
+      (error) => error instanceof GithubError && error.code === "github_permissions_required",
+    );
     assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "permissions");
     await assert.rejects(
       github.authorize("ghu_fixture", "alice/project"),
@@ -899,16 +910,19 @@ for (const permission of ["checks", "statuses", "actions"] as const) {
   });
 }
 
-test("publication tokens pick up newly granted workflows permission without requiring it for ordinary patches", async (t) => {
+test("publication tokens require workflows permission while read tokens stay restricted", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
-  await github.installationToken(11, "alice/project", "write", false, true);
+  fixture.workflows = undefined;
+  await assert.rejects(
+    github.installationToken(11, "alice/project", "write", false, true),
+    /installation permissions/,
+  );
   fixture.workflows = "write";
   await github.installationToken(11, "alice/project", "write", false, true);
   await github.installationToken(11, "alice/project", "read", false, true);
   assert.deepEqual(
     requests.filter((r) => r.path === "/app/installations/11/access_tokens").map((r) => r.body),
     [
-      { repositories: ["project"], permissions: { contents: "write", pull_requests: "write" } },
       {
         repositories: ["project"],
         permissions: { contents: "write", pull_requests: "write", workflows: "write" },
