@@ -35,7 +35,13 @@ production image retains CI's AMD64 target (Docker needs emulation on ARM).
 Each run creates and removes its own databases and containers, without loading
 your `.env` or exposing database ports. Logs and browser evidence are saved in
 the printed `artifacts/ci/herbie-verify-*` directory. Any failed stage fails the
-command, which prints the total elapsed time including cleanup.
+command, which prints the total elapsed time including cleanup. The final timing
+tree includes each parallel branch, setup/check step, package build/typecheck/test,
+and browser spec. Durations are elapsed wall time; parallel entries overlap and
+must not be added together. Browser spec durations span their first test start
+through their last test finish, including retries. The same report is saved as
+`timings.txt` and machine-readable `timings.json` alongside the logs, including
+completed and failed checks when verification fails.
 
 For an individual workspace stage on Linux with Node 24 and installed
 dependencies, use `HERBIE_TEST_DATABASE_URL=<disposable-loopback-postgres-url>

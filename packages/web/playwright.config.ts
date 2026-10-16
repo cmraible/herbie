@@ -5,7 +5,9 @@ export default defineConfig({
   workers: 2,
   timeout: 30_000,
   expect: { timeout: 15_000 },
-  reporter: "list",
+  reporter: process.env.HERBIE_CI_ARTIFACT_DIR
+    ? [["list"], ["../../scripts/verify-timing.mjs"]]
+    : "list",
   use: {
     baseURL: process.env.HERBIE_E2E_URL ?? "http://127.0.0.1:8787",
     headless: true,
