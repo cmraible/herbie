@@ -189,7 +189,7 @@ if (command === 'checks' && scenario === 'api-error') {
   console.error('Authentication failed'); process.exit(1);
 }
 if (command === 'checks' && scenario === 'unregistered') {
-  console.error('no required checks reported on branch'); process.exit(1);
+  console.error("no required checks reported on the 'codex/deterministic-ship-watcher' branch"); process.exit(1);
 }
 if (command === 'view') {
   const pull = ${JSON.stringify(pull)};

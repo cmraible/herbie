@@ -12,7 +12,11 @@ async function github(args) {
   } catch (error) {
     // `gh pr checks` returns 1 for failing checks and 8 for pending checks.
     if (args[1] === "checks" && [1, 8].includes(error.code)) {
-      if (/^no (?:required )?checks reported on branch\b/.test(error.stderr?.trim() ?? ""))
+      if (
+        /^no (?:required )?checks reported on (?:the '.+' )?branch\b/.test(
+          error.stderr?.trim() ?? "",
+        )
+      )
         return "[]";
       try {
         if (Array.isArray(JSON.parse(error.stdout))) return error.stdout;
