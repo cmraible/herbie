@@ -337,7 +337,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
   async function installationToken(
     installationId: number,
     repository: string,
-    permission: "read" | "write" = "write",
+    permission: "read" | "write" | "react" = "write",
     ci = false,
     workflows = false,
   ) {
@@ -363,8 +363,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         await request(`/app/installations/${installationId}/access_tokens`, jwt(), {
           repositories: [repository.split("/")[1]],
           permissions: {
-            contents: permission,
-            pull_requests: permission,
+            contents: permission === "react" ? "read" : permission,
+            pull_requests: permission === "react" ? "write" : permission,
+            ...(permission === "react" ? { issues: "write" } : {}),
             ...(workflowWrite ? { workflows: "write" } : {}),
             ...(ci ? { checks: "read", statuses: "read", actions: "read" } : {}),
           },

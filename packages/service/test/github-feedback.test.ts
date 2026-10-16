@@ -2,6 +2,42 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { githubFeedback } from "../src/github-feedback.js";
 
+test("acknowledges the exact human comment with eyes after checking the lease", async () => {
+  const writes: { path: string; body: unknown }[] = [];
+  let owned = false;
+  const api = githubFeedback(async (path, _token, body) => {
+    assert.ok(owned);
+    writes.push({ path, body });
+    return {};
+  });
+  const item = {
+    kind: "comment" as const,
+    id: 2,
+    replyTo: 1,
+    author: "reviewer",
+    revision: "v1",
+    body: "Question",
+    url: "https://github.com/owner/repo/pull/1#issuecomment-2",
+  };
+  const lease = async () => {
+    owned = true;
+  };
+  await api.acknowledgeFeedback("token", "owner/repo", item, lease);
+  await api.acknowledgeFeedback("token", "owner/repo", { ...item, kind: "inline" }, lease);
+  assert.deepEqual(writes, [
+    { path: "/repos/owner/repo/issues/comments/2/reactions", body: { content: "eyes" } },
+    { path: "/repos/owner/repo/pulls/comments/2/reactions", body: { content: "eyes" } },
+  ]);
+  await api.acknowledgeFeedback("token", "owner/repo", { ...item, bot: true }, lease);
+  await api.acknowledgeFeedback("token", "owner/repo", { ...item, kind: "review" }, lease);
+  await assert.rejects(
+    api.acknowledgeFeedback("token", "owner/repo", item, async () => {
+      throw new Error("lease lost");
+    }),
+  );
+  assert.equal(writes.length, 2);
+});
+
 test("reads feedback, retains bot context, skips draft reviews, and distinguishes edits from line movement", async () => {
   let body = "Please fix this";
   let line = 5;

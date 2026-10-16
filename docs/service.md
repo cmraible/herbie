@@ -47,6 +47,11 @@ conversation context but never trigger attempts. Edits to feedback receive a new
 decision; duplicate deliveries and line movements do not. Existing feedback on
 tracked open PRs is considered on the first poll after upgrading.
 
+Herbie adds an 👀 reaction when it starts processing a human conversation or inline
+comment, before starting the agent. Submitted reviews do not support reactions.
+Reaction failures are logged without blocking the response. Enable **Issues write**
+permission and approve the installation update for conversation-comment reactions.
+
 Code updates require successful local verification and confirmed sandbox deletion.
 Feedback and CI repair sessions do not run concurrently on the same PR. Paused or
 cancelled projects do not process feedback. Feedback failures or expired leases block

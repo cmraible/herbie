@@ -58,6 +58,12 @@ export async function runFeedbackOnce(
         });
     }, 5000);
     await requireLease();
+    try {
+      await adapters.acknowledgeFeedback?.(execution, requireLease);
+    } catch (error) {
+      logFailure(error, { component: "feedback-acknowledgement", jobId: job.id });
+    }
+    await requireLease();
     const changes = await adapters.attempt(execution, (message) =>
       store.appendEvent(job.project.id, "pr_feedback", message.slice(0, 2000), job.id),
     );

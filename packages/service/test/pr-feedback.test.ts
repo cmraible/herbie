@@ -10,6 +10,7 @@ import type { Adapters, PullRequestFeedback } from "../src/adapters.js";
 
 for (const outcome of [
   "reply",
+  "acknowledge-failed",
   "ignore",
   "update",
   "unverified",
@@ -68,6 +69,7 @@ for (const outcome of [
     let attempts = 0,
       pushes = 0,
       replies = 0;
+    let acknowledgements = 0;
     let current = pr;
     const action =
       outcome === "ignore"
@@ -80,7 +82,13 @@ for (const outcome of [
       mode: "live",
       reconcile: async () => current,
       feedback: async () => context,
+      acknowledgeFeedback: async (_execution, lease) => {
+        await lease();
+        acknowledgements++;
+        if (outcome === "acknowledge-failed") throw new Error("Reaction unavailable");
+      },
       attempt: async (execution) => {
+        assert.equal(acknowledgements, attempts + 1, "acknowledge before starting the agent");
         attempts++;
         await execution.onActivity?.(
           JSON.stringify({
@@ -181,7 +189,7 @@ for (const outcome of [
         ).rowCount,
       );
     assert.equal(pushes, ["update", "reply-failed"].includes(outcome) ? 1 : 0);
-    assert.equal(replies, ["reply", "update"].includes(outcome) ? 1 : 0);
+    assert.equal(replies, ["reply", "update", "acknowledge-failed"].includes(outcome) ? 1 : 0);
     if (pushes)
       assert.equal((await store.getProject(project.id))?.pullRequests[0]?.headSha, current.headSha);
     if (outcome !== "edited") {

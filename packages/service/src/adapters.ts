@@ -67,6 +67,7 @@ export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
+  acknowledgeFeedback?(execution: Execution, requireLease: () => Promise<void>): Promise<void>;
   replyToFeedback?(
     execution: Execution,
     body: string,

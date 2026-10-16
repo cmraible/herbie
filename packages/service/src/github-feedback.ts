@@ -18,6 +18,19 @@ export function githubFeedback(
   request: (path: string, token: string, body?: unknown) => Promise<unknown>,
 ) {
   return {
+    async acknowledgeFeedback(
+      token: string,
+      repository: string,
+      item: PullRequestFeedback,
+      beforeWrite: () => Promise<void>,
+    ) {
+      if (item.bot || item.kind === "review") return;
+      await beforeWrite();
+      const endpoint = item.kind === "inline" ? "pulls/comments" : "issues/comments";
+      await request(`/repos/${repository}/${endpoint}/${item.id}/reactions`, token, {
+        content: "eyes",
+      });
+    },
     async feedback(
       token: string,
       repository: string,
