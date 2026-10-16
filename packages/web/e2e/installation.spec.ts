@@ -72,9 +72,12 @@ test("repository setup runs during onboarding, refreshes access, and survives Ba
   await expect(page).toHaveURL(`${baseUrl}/`);
   expect(repositoryRequests).toBeGreaterThanOrEqual(2);
   await page.getByRole("button", { name: "New project", exact: true }).click();
-  await expect(page.locator(".repository-select__single-value")).toHaveText(
-    "public-sample / project",
-  );
+  await expect(
+    page
+      .locator(".repository-picker")
+      .filter({ has: page.getByRole("combobox", { name: /^Repository/ }) })
+      .locator(".repository-select__single-value"),
+  ).toHaveText("public-sample / project");
   await expect(page.getByRole("button", { name: "Add repositories" })).toBeVisible();
   await page.getByRole("button", { name: "Back to projects" }).click();
 
@@ -86,7 +89,10 @@ test("repository setup runs during onboarding, refreshes access, and survives Ba
   await expect(page.getByRole("button", { name: "Connect repositories" })).toHaveCount(0);
   await page.getByRole("button", { name: "New project", exact: true }).click();
   await expect(page.getByRole("button", { name: "Back to projects" })).toBeEnabled();
-  await expect(page.locator(".repository-select__single-value")).toHaveText(
-    "public-sample / project",
-  );
+  await expect(
+    page
+      .locator(".repository-picker")
+      .filter({ has: page.getByRole("combobox", { name: /^Repository/ }) })
+      .locator(".repository-select__single-value"),
+  ).toHaveText("public-sample / project");
 });

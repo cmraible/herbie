@@ -177,7 +177,7 @@ test("an initial project failure has a retry state instead of looking like an em
   await page.goto("/");
   await expect(page.getByRole("alert")).toContainText("projects unavailable");
   await expect(page.getByText("No projects yet")).toHaveCount(0);
-  await page.getByRole("button", { name: "Retry" }).click();
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByText("No projects yet")).toBeVisible();
 });
 
@@ -366,7 +366,11 @@ test("repository refresh keeps alphabetical order and the current selection", as
   await page.goto("/");
   await page.getByRole("button", { name: "New project", exact: true }).click();
   const select = page.getByRole("combobox", { name: /^Repository/ });
-  await expect(page.locator(".repository-select__control")).toHaveCSS("display", "flex");
+  const repositoryPicker = page.locator(".repository-picker").filter({ has: select });
+  await expect(repositoryPicker.locator(".repository-select__control")).toHaveCSS(
+    "display",
+    "flex",
+  );
   const promptY = (await page.getByLabel("What should Herbie work on?").boundingBox())!.y;
   const expected = [
     "alpha/apple",
@@ -380,9 +384,12 @@ test("repository refresh keeps alphabetical order and the current selection", as
   await expect(page.getByRole("option")).toHaveText(
     expected.map((name) => name.replace("/", " / ")),
   );
-  await expect(page.locator(".repository-select__menu")).toHaveCSS("position", "absolute");
+  await expect(repositoryPicker.locator(".repository-select__menu")).toHaveCSS(
+    "position",
+    "absolute",
+  );
   expect((await page.getByLabel("What should Herbie work on?").boundingBox())!.y).toBe(promptY);
-  await expect(page.getByRole("log")).toHaveCSS("position", "absolute");
+  await expect(repositoryPicker.getByRole("log")).toHaveCSS("position", "absolute");
   expect(policyErrors).toEqual([]);
   await page.screenshot({ path: "test-results/repository-picker-open.png" });
   await select.fill("btrp");
@@ -392,7 +399,9 @@ test("repository refresh keeps alphabetical order and the current selection", as
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect.poll(() => requests).toBe(2);
   await expect(select).toBeEnabled();
-  await expect(page.locator(".repository-select__single-value")).toHaveText("Beta / repo");
+  await expect(repositoryPicker.locator(".repository-select__single-value")).toHaveText(
+    "Beta / repo",
+  );
   await select.click();
   await expect(page.getByRole("option")).toHaveText(
     expected.map((name) => name.replace("/", " / ")),
@@ -401,7 +410,9 @@ test("repository refresh keeps alphabetical order and the current selection", as
   await expect(page.getByText("No matching repositories", { exact: true })).toBeVisible();
   await select.press("Escape");
   await expect(page.getByRole("listbox")).toHaveCount(0);
-  await expect(page.locator(".repository-select__single-value")).toHaveText("Beta / repo");
+  await expect(repositoryPicker.locator(".repository-select__single-value")).toHaveText(
+    "Beta / repo",
+  );
 });
 
 test("a pending creation respects browser Back navigation", async ({ page }) => {
@@ -465,7 +476,7 @@ test("direct creation waits for the initial projects request to succeed", async 
   await expect(page.getByRole("alert")).toContainText("projects unavailable");
   await expect(start).toBeDisabled();
   fail = false;
-  await page.getByRole("button", { name: "Retry" }).click();
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(start).toBeEnabled();
 });
 

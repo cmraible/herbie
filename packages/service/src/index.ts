@@ -1,11 +1,13 @@
 import { serveConfigurationError } from "./configuration-page.js";
 import { logFailure } from "./diagnostic-log.js";
 import { createRuntime } from "./runtime.js";
+import { createModelLister } from "./models.js";
 import { createApiServer } from "./http.js";
 
 try {
   const { config, store, auth, adapters, github } = await createRuntime();
   const server = createApiServer({
+    listModels: config.openaiApiKey ? createModelLister(config.openaiApiKey) : undefined,
     store,
     auth,
     adapters,
