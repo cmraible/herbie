@@ -20,15 +20,12 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           filter: blob:none
-          fetch-depth: 0
+          fetch-depth: 2
           persist-credentials: false
       - id: diff
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           # Include both sides of renames so moving code to a .md file runs tests.
-          changes="$(git diff --name-only --no-renames "$BASE...$HEAD" -- . ':(exclude)*.md')"
+          changes="$(git diff --name-only --no-renames HEAD^1 HEAD^2 -- . ':(exclude)*.md')"
           markdown_only=false
           if [[ -z "$changes" ]]; then markdown_only=true; fi
           echo "markdown-only=$markdown_only" >> "$GITHUB_OUTPUT"
