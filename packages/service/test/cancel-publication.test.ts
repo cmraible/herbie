@@ -8,7 +8,7 @@ for (const result of ["absent", "pull_request_exists", "branch_exists"] as const
   test("cancellation checks exact remote state with read-only credentials: " + result, async () => {
     const calls: string[] = [];
     const repository = "fixture-owner/fixture-project",
-      branch = "herbie/exact-attempt";
+      branch = "herbie/exact-run";
     const access = { repository, defaultBranch: "main", installationId: 11 };
     const github = {
       async authorize(token: string, repo: string) {
@@ -47,7 +47,7 @@ for (const result of ["absent", "pull_request_exists", "branch_exists"] as const
     const execution = {
       project: { ownerId: "7", repository },
       repository: access,
-      attemptId: "fixture",
+      runId: "fixture",
       branch,
     } as Execution;
     assert.equal(await adapter.checkUnpublished!(execution), result);

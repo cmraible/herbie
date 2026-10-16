@@ -12,7 +12,7 @@ test("a new project needs only a repository and prompt", () => {
   });
 });
 
-test("saved drafts from before test-command and attempt-limit removal still restore", () => {
+test("saved drafts from before test-command and run-limit removal still restore", () => {
   const draft = { ...newDraft("demo/example"), prompt: "Fix arithmetic" };
   assert.deepEqual(
     draftSchema.parse({ ...draft, test: '["npm","test"]', maxAttempts: "2" }),

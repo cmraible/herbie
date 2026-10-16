@@ -41,7 +41,7 @@ integration(
       "ALTER TABLE projects ADD COLUMN max_attempts integer NOT NULL DEFAULT 1 CHECK (max_attempts BETWEEN 1 AND 5)",
     );
     await store.pool.query(
-      "ALTER TABLE jobs DROP CONSTRAINT jobs_cycle_check, ADD CONSTRAINT jobs_cycle_check CHECK (cycle BETWEEN 1 AND 5)",
+      "ALTER TABLE project_runs DROP CONSTRAINT project_runs_cycle_check, ADD CONSTRAINT project_runs_cycle_check CHECK (cycle BETWEEN 1 AND 5)",
     );
     await store.pool.query("ALTER TABLE projects ALTER COLUMN test_command SET NOT NULL");
     const id = randomUUID();
@@ -128,7 +128,7 @@ integration(
     };
     await store.pool.query("UPDATE projects SET state='needs_attention' WHERE id=$1", [id]);
     await store.pool.query(
-      `INSERT INTO jobs(id,project_id,cycle,branch,stage,artifact) VALUES($1,$2,6,$3,'publishing',$4)`,
+      `INSERT INTO project_runs(id,project_id,cycle,branch,stage,artifact) VALUES($1,$2,6,$3,'publishing',$4)`,
       [
         randomUUID(),
         id,
@@ -142,9 +142,9 @@ integration(
       ],
     );
     const candidate = await store.publicationRetryCandidate(id, "owner");
-    assert.ok(candidate && "job" in candidate && candidate.job.artifact);
-    assert.deepEqual(candidate.job.artifact, { baseCommit, patch, verification: evidence });
-    assert.ok(hasValidPublicationEvidence("example/repo", candidate.job.artifact));
+    assert.ok(candidate && "run" in candidate && candidate.run.artifact);
+    assert.deepEqual(candidate.run.artifact, { baseCommit, patch, verification: evidence });
+    assert.ok(hasValidPublicationEvidence("example/repo", candidate.run.artifact));
   },
 );
 
@@ -153,10 +153,10 @@ for (const paused of [false, true])
     `saved artifact activity describes capture without claiming tests passed (paused: ${paused})`,
     async () => {
       const { project } = await store.createProject("owner", input(), "live", randomUUID());
-      const job = await store.claim("worker");
-      assert.ok(job);
+      const run = await store.claim("worker");
+      assert.ok(run);
       if (paused) await store.control(project.id, "owner", "pause");
-      await store.saveArtifact(job.id, "worker", {
+      await store.saveArtifact(run.id, "worker", {
         baseCommit: "a".repeat(40),
         patch: Buffer.from("captured patch"),
       });
@@ -195,15 +195,15 @@ integration(
 );
 
 integration(
-  "one worker claims work and a paused artifact resumes without repeating the attempt",
+  "one worker claims work and a paused artifact resumes without repeating the run",
   async () => {
     const owner = randomUUID();
     const { project } = await store.createProject(owner, input(), "demo", randomUUID());
     const claimed = await Promise.all([store.claim("worker-a"), store.claim("worker-b")]);
-    const job = claimed.find((candidate) => candidate !== null);
-    assert.ok(job);
+    const run = claimed.find((candidate) => candidate !== null);
+    assert.ok(run);
     assert.equal(claimed.filter((candidate) => candidate !== null).length, 1);
-    assert.equal(job.project.attemptCount, 1);
+    assert.equal(run.project.runCount, 1);
     const worker = claimed[0] ? "worker-a" : "worker-b";
     const pausing = await store.control(project.id, owner, "pause");
     assert.equal(pausing.stopRequested, "pause");
@@ -221,18 +221,18 @@ integration(
         sandboxDeleted: true,
       },
     };
-    const held = await store.saveArtifact(job.id, worker, {
+    const held = await store.saveArtifact(run.id, worker, {
       ...changes,
       verification: { ...changes.verification, goalCompleted: true, sandboxDeleted: true },
     });
     assert.equal(held.project.state, "paused");
-    assert.equal(await store.beginPublication(job.id, worker), false);
+    assert.equal(await store.beginPublication(run.id, worker), false);
     assert.equal(await store.claim("another-worker"), null);
     await store.control(project.id, owner, "resume");
     const resumed = await store.claim("another-worker");
     assert.ok(resumed);
     assert.equal(resumed.stage, "ready");
-    assert.equal(resumed.project.attemptCount, 1);
+    assert.equal(resumed.project.runCount, 1);
     assert.deepEqual(resumed.artifact, changes);
     assert.equal(await store.beginPublication(resumed.id, "another-worker"), true);
     const published = await store.completePublication(resumed.id, "another-worker", {
@@ -244,53 +244,47 @@ integration(
   },
 );
 
-integration(
-  "expired attempts require attention and expired publications only reconcile",
-  async () => {
-    const owner = randomUUID();
-    const { project } = await store.createProject(owner, input(), "demo", randomUUID());
-    const running = await store.claim("lost-worker", 150);
-    assert.ok(running);
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    assert.equal(await store.heartbeat(running.id, "lost-worker"), false);
-    assert.equal(await store.recoverExpired(), 1);
-    assert.equal((await store.getProject(project.id))?.state, "needs_attention");
-    assert.equal(await store.claim("restarted-worker"), null);
-    await assert.rejects(
-      store.saveArtifact(running.id, "lost-worker", {
-        baseCommit: "abc",
-        patch: Buffer.from("late"),
-      }),
-      /lease/,
-    );
-    await store.control(project.id, owner, "cancel");
-    const next = await store.createProject(owner, input(), "demo", randomUUID());
-    const publishing = await store.claim("publisher", 150);
-    assert.ok(publishing);
-    await store.saveArtifact(publishing.id, "publisher", {
+integration("expired runs require attention and expired publications only reconcile", async () => {
+  const owner = randomUUID();
+  const { project } = await store.createProject(owner, input(), "demo", randomUUID());
+  const running = await store.claim("lost-worker", 150);
+  assert.ok(running);
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.equal(await store.heartbeat(running.id, "lost-worker"), false);
+  assert.equal(await store.recoverExpired(), 1);
+  assert.equal((await store.getProject(project.id))?.state, "needs_attention");
+  assert.equal(await store.claim("restarted-worker"), null);
+  await assert.rejects(
+    store.saveArtifact(running.id, "lost-worker", {
       baseCommit: "abc",
-      patch: Buffer.from("verified"),
-    });
-    await store.beginPublication(publishing.id, "publisher");
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    assert.equal(await store.recoverExpired(), 1);
-    const resumed = await store.claim("restarted-worker");
-    assert.ok(resumed);
-    assert.equal(resumed.stage, "publishing");
-    assert.equal(resumed.project.id, next.project.id);
-    await assert.rejects(
-      store.beginPublication(resumed.id, "restarted-worker"),
-      /first publication/,
-    );
-    await store.publicationUncertain(
-      resumed.id,
-      "restarted-worker",
-      "Remote publication outcome is not confirmed",
-    );
-    assert.equal((await store.getProject(next.project.id))?.state, "needs_attention");
-    assert.equal(await store.claim("restarted-worker"), null);
-  },
-);
+      patch: Buffer.from("late"),
+    }),
+    /lease/,
+  );
+  await store.control(project.id, owner, "cancel");
+  const next = await store.createProject(owner, input(), "demo", randomUUID());
+  const publishing = await store.claim("publisher", 150);
+  assert.ok(publishing);
+  await store.saveArtifact(publishing.id, "publisher", {
+    baseCommit: "abc",
+    patch: Buffer.from("verified"),
+  });
+  await store.beginPublication(publishing.id, "publisher");
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.equal(await store.recoverExpired(), 1);
+  const resumed = await store.claim("restarted-worker");
+  assert.ok(resumed);
+  assert.equal(resumed.stage, "publishing");
+  assert.equal(resumed.project.id, next.project.id);
+  await assert.rejects(store.beginPublication(resumed.id, "restarted-worker"), /first publication/);
+  await store.publicationUncertain(
+    resumed.id,
+    "restarted-worker",
+    "Remote publication outcome is not confirmed",
+  );
+  assert.equal((await store.getProject(next.project.id))?.state, "needs_attention");
+  assert.equal(await store.claim("restarted-worker"), null);
+});
 
 integration(
   "merge advances once beyond five iterations and close unmerged preserves a paused project",
@@ -298,22 +292,22 @@ integration(
     const owner = randomUUID();
     const { project } = await store.createProject(owner, input(), "demo", randomUUID());
     async function publish() {
-      const job = await store.claim("worker");
-      assert.ok(job);
-      await store.saveArtifact(job.id, "worker", {
+      const run = await store.claim("worker");
+      assert.ok(run);
+      await store.saveArtifact(run.id, "worker", {
         baseCommit: "abc",
         patch: Buffer.from("tested"),
       });
-      await store.beginPublication(job.id, "worker");
-      await store.completePublication(job.id, "worker", {
+      await store.beginPublication(run.id, "worker");
+      await store.completePublication(run.id, "worker", {
         url: "https://github.com/example/repo/pull/1",
         number: 1,
-        branch: job.branch,
+        branch: run.branch,
       });
-      return job;
+      return run;
     }
     const first = await publish();
-    const reviewing = await store.reviewJobs("demo");
+    const reviewing = await store.reviewRuns("demo");
     assert.equal(reviewing.length, 1);
     assert.equal(reviewing[0]?.id, first.id);
     await store.control(project.id, owner, "pause");
@@ -324,15 +318,15 @@ integration(
     assert.equal(await store.claim("worker"), null);
     await store.control(project.id, owner, "resume");
     for (let count = 2; count <= 7; count++) {
-      const job = await publish();
-      const next = await store.reconcile(job.id, "merged");
+      const run = await publish();
+      const next = await store.reconcile(run.id, "merged");
       assert.equal(next.state, "queued");
-      assert.equal(next.attemptCount, count);
-      await store.reconcile(job.id, "merged");
+      assert.equal(next.runCount, count);
+      await store.reconcile(run.id, "merged");
       assert.equal(
         (
           await store.pool.query(
-            "SELECT count(*)::int AS count FROM jobs WHERE project_id=$1 AND stage='queued'",
+            "SELECT count(*)::int AS count FROM project_runs WHERE project_id=$1 AND stage='queued'",
             [project.id],
           )
         ).rows[0].count,
@@ -390,24 +384,24 @@ integration(
     const workers = ["worker-a", "worker-b"];
     const claimed = await Promise.all(workers.map((worker) => store.claim(worker)));
     assert.deepEqual(
-      new Set(claimed.map((job) => job?.project.id)),
+      new Set(claimed.map((run) => run?.project.id)),
       new Set([first.id, second.id]),
     );
-    for (const [index, job] of claimed.entries()) {
-      assert.ok(job);
+    for (const [index, run] of claimed.entries()) {
+      assert.ok(run);
       const worker = workers[index]!;
-      await store.saveArtifact(job.id, worker, { baseCommit: "abc", patch: Buffer.from("tested") });
-      await store.beginPublication(job.id, worker);
-      await store.completePublication(job.id, worker, {
+      await store.saveArtifact(run.id, worker, { baseCommit: "abc", patch: Buffer.from("tested") });
+      await store.beginPublication(run.id, worker);
+      await store.completePublication(run.id, worker, {
         url: `https://github.com/example/repo/pull/${index + 1}`,
         number: index + 1,
-        branch: job.branch,
+        branch: run.branch,
       });
     }
-    assert.equal((await store.reviewJobs()).length, 2);
-    const firstJob = claimed.find((job) => job?.project.id === first.id);
-    assert.ok(firstJob);
-    await store.reconcile(firstJob.id, "merged");
+    assert.equal((await store.reviewRuns()).length, 2);
+    const firstRun = claimed.find((run) => run?.project.id === first.id);
+    assert.ok(firstRun);
+    await store.reconcile(firstRun.id, "merged");
     assert.equal((await store.getProject(second.id))?.state, "awaiting_review");
   },
 );
@@ -417,19 +411,20 @@ integration(
   async () => {
     const owner = randomUUID();
     const { project } = await store.createProject(owner, input(), "demo", randomUUID());
-    const job = await store.claim("worker");
-    assert.ok(job);
+    const run = await store.claim("worker");
+    assert.ok(run);
     await store.control(project.id, owner, "cancel");
     await store.control(project.id, owner, "cancel");
     await assert.rejects(store.control(project.id, owner, "resume"), /cancelled/);
     const changes = { baseCommit: "abc", patch: Buffer.from("retain me") };
-    await assert.rejects(store.saveArtifact(job.id, "worker", changes), /lease/);
-    assert.equal(await store.finishCancelled(job.id, "worker", "complete", changes), true);
+    await assert.rejects(store.saveArtifact(run.id, "worker", changes), /lease/);
+    assert.equal(await store.finishCancelled(run.id, "worker", "complete", changes), true);
     assert.equal((await store.getProject(project.id))?.cleanupStatus, "complete");
     assert.ok(
-      (await store.pool.query("SELECT artifact FROM jobs WHERE id=$1", [job.id])).rows[0].artifact,
+      (await store.pool.query("SELECT artifact FROM project_runs WHERE id=$1", [run.id])).rows[0]
+        .artifact,
     );
-    assert.equal(await store.beginPublication(job.id, "worker"), false);
+    assert.equal(await store.beginPublication(run.id, "worker"), false);
     await store.control(project.id, owner, "cancel");
     assert.equal(await store.claim("worker"), null);
     assert.equal(
@@ -449,10 +444,10 @@ integration(
     const request = input();
     const { project } = await store.createProject(owner, request, "live", randomUUID());
     assert.equal(await store.claim("demo-worker", 30_000, "demo"), null);
-    const job = await store.claim("live-worker", 30_000, "live");
-    assert.ok(job);
-    await assert.rejects(store.fail(job.id, "wrong-worker", "bad worker"), /lease/);
-    await store.fail(job.id, "live-worker", "Repository tests failed");
+    const run = await store.claim("live-worker", 30_000, "live");
+    assert.ok(run);
+    await assert.rejects(store.fail(run.id, "wrong-worker", "bad worker"), /lease/);
+    await store.fail(run.id, "live-worker", "Repository tests failed");
     const failed = await store.getProject(project.id);
     assert.equal(failed?.state, "failed");
     assert.equal(failed.error, "Repository tests failed");
@@ -472,7 +467,7 @@ integration(
   async () => {
     const { project } = await store.createProject(randomUUID(), input(), "demo", randomUUID());
     for (const message of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"])
-      await store.appendEvent(project.id, "attempt", message);
+      await store.appendEvent(project.id, "run", message);
     assert.deepEqual(
       (await store.events(project.id)).map((event) => event.id),
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -506,7 +501,7 @@ integration(
     assert.equal(renamed.name, "Better arithmetic");
     assert.equal(renamed.prompt, project.prompt);
     assert.equal(renamed.state, project.state);
-    assert.equal(renamed.attemptCount, 0);
+    assert.equal(renamed.runCount, 0);
     assert.equal((await new Store(store.pool).listProjects(owner))[0]?.name, "Better arithmetic");
     const replay = await store.createProject(owner, request, "demo", key);
     assert.equal(replay.created, false);
@@ -607,8 +602,11 @@ integration(
       const result = await pending;
       assert.equal(result.project.name, "Arithmetic cleanup");
       assert.equal(
-        (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id]))
-          .rowCount,
+        (
+          await store.pool.query("SELECT id FROM project_runs WHERE project_id=$1", [
+            result.project.id,
+          ])
+        ).rowCount,
         1,
       );
     } finally {
@@ -647,8 +645,11 @@ integration("naming failures leave no project or request and allow a clean retry
     assert.equal(result.project.name, "Arithmetic cleanup");
     assert.equal((await retry.createProject(owner, request, "live", key)).created, false);
     assert.equal(
-      (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id]))
-        .rowCount,
+      (
+        await store.pool.query("SELECT id FROM project_runs WHERE project_id=$1", [
+          result.project.id,
+        ])
+      ).rowCount,
       1,
     );
   }
@@ -695,16 +696,16 @@ for (const named of [false, true])
   );
 
 async function publishNext(number: number) {
-  const job = await store.claim("worker");
-  assert.ok(job);
-  await store.saveArtifact(job.id, "worker", { baseCommit: "abc", patch: Buffer.from("captured") });
-  assert.equal(await store.beginPublication(job.id, "worker"), true);
-  await store.completePublication(job.id, "worker", {
+  const run = await store.claim("worker");
+  assert.ok(run);
+  await store.saveArtifact(run.id, "worker", { baseCommit: "abc", patch: Buffer.from("captured") });
+  assert.equal(await store.beginPublication(run.id, "worker"), true);
+  await store.completePublication(run.id, "worker", {
     url: `https://github.com/example/repo/pull/${number}`,
     number,
-    branch: job.branch,
+    branch: run.branch,
   });
-  return job;
+  return run;
 }
 
 integration(
@@ -734,9 +735,9 @@ integration(
     ]);
     const claimed = await Promise.all([store.claim("a"), store.claim("b")]);
     assert.equal(claimed.filter(Boolean).length, 1);
-    const third = claimed.find((job) => job !== null)!;
+    const third = claimed.find((run) => run !== null)!;
     const worker = claimed[0] ? "a" : "b";
-    assert.equal(third.project.attemptCount, 3);
+    assert.equal(third.project.runCount, 3);
     assert.equal(third.project.pullRequests.filter((pr) => pr.state === "merged").length, 2);
     await store.saveArtifact(third.id, worker, {
       baseCommit: "abc",
@@ -755,7 +756,7 @@ integration(
     assert.equal(await store.claim("full"), null);
     await store.reconcile(fifth.id, "merged");
     const sixth = await publishNext(6);
-    assert.equal(sixth.project.attemptCount, 6);
+    assert.equal(sixth.project.runCount, 6);
     assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
     await store.control(project.id, "owner", "pause");
     await store.reconcile(fourth.id, "merged");
@@ -766,52 +767,49 @@ integration(
     assert.equal(await store.claim("paused"), null);
     await store.control(project.id, "owner", "resume");
     const seventh = await publishNext(7);
-    assert.equal(seventh.project.attemptCount, 7);
+    assert.equal(seventh.project.runCount, 7);
     await store.control(project.id, "owner", "cancel");
     assert.equal(await store.claim("cancelled"), null);
   },
 );
 
-integration(
-  "a merge during an attempt preserves its reservation and a requested pause",
-  async () => {
-    const { project } = await store.createProject(
-      "owner",
-      { ...input(), maxWip: 2 },
-      "demo",
-      randomUUID(),
-    );
-    const first = await publishNext(1);
-    const second = await store.claim("worker");
-    assert.ok(second);
-    await store.control(project.id, "owner", "pause");
-    const merged = await store.reconcile(first.id, "merged");
-    assert.equal(merged.state, "running");
-    assert.equal(merged.stopRequested, "pause");
-    assert.equal(await store.claim("extra"), null);
-    await store.saveArtifact(second.id, "worker", {
-      baseCommit: "abc",
-      patch: Buffer.from("held"),
-    });
-    assert.equal((await store.getProject(project.id))?.state, "paused");
-    assert.equal(await store.beginPublication(second.id, "worker"), false);
-    await store.control(project.id, "owner", "resume");
-    const resumed = await store.claim("worker");
-    assert.equal(resumed?.id, second.id);
-    assert.equal(resumed?.project.attemptCount, 2);
-    await store.beginPublication(second.id, "worker");
-    await store.completePublication(second.id, "worker", {
-      url: "https://github.com/example/repo/pull/2",
-      number: 2,
-      branch: second.branch,
-    });
-    await publishNext(3);
-    assert.equal(await store.claim("overflow"), null);
-  },
-);
+integration("a merge during a run preserves its reservation and a requested pause", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), maxWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await publishNext(1);
+  const second = await store.claim("worker");
+  assert.ok(second);
+  await store.control(project.id, "owner", "pause");
+  const merged = await store.reconcile(first.id, "merged");
+  assert.equal(merged.state, "running");
+  assert.equal(merged.stopRequested, "pause");
+  assert.equal(await store.claim("extra"), null);
+  await store.saveArtifact(second.id, "worker", {
+    baseCommit: "abc",
+    patch: Buffer.from("held"),
+  });
+  assert.equal((await store.getProject(project.id))?.state, "paused");
+  assert.equal(await store.beginPublication(second.id, "worker"), false);
+  await store.control(project.id, "owner", "resume");
+  const resumed = await store.claim("worker");
+  assert.equal(resumed?.id, second.id);
+  assert.equal(resumed?.project.runCount, 2);
+  await store.beginPublication(second.id, "worker");
+  await store.completePublication(second.id, "worker", {
+    url: "https://github.com/example/repo/pull/2",
+    number: 2,
+    branch: second.branch,
+  });
+  await publishNext(3);
+  assert.equal(await store.claim("overflow"), null);
+});
 
 integration(
-  "closing an older PR pauses after the active attempt and preserves resumable work",
+  "closing an older PR pauses after the active run and preserves resumable work",
   async () => {
     const { project } = await store.createProject(
       "owner",
@@ -839,7 +837,7 @@ integration(
     await store.control(project.id, "owner", "resume");
     const resumed = await store.claim("worker");
     assert.equal(resumed?.id, third.id);
-    assert.equal(resumed?.project.attemptCount, 3);
+    assert.equal(resumed?.project.runCount, 3);
     assert.equal(resumed?.artifact?.patch.toString(), "held");
   },
 );
@@ -947,7 +945,7 @@ for (const recovery of ["uncertain", "expired", "blocked"] as const)
     await store.reconcile(first.id, "closed");
     if (recovery === "expired") {
       await store.pool.query(
-        "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+        "UPDATE project_runs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
         [second.id],
       );
       await store.recoverExpired();
@@ -961,7 +959,7 @@ for (const recovery of ["uncertain", "expired", "blocked"] as const)
       await store.control(project.id, "owner", "resume");
     } else {
       await store.publicationUncertain(second.id, "worker", "fixture uncertain");
-      await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [
+      await store.pool.query("UPDATE project_runs SET eligible_at=clock_timestamp() WHERE id=$1", [
         second.id,
       ]);
     }
@@ -975,7 +973,7 @@ for (const recovery of ["uncertain", "expired", "blocked"] as const)
       branch: second.branch,
     });
     assert.equal(after.state, recovery === "blocked" ? "queued" : "paused");
-    assert.equal(after.attemptCount, 2);
+    assert.equal(after.runCount, 2);
     if (recovery !== "blocked") assert.equal(await store.claim("extra"), null);
   });
 
@@ -1026,7 +1024,7 @@ integration(
         await store.publicationUncertain(second.id, "worker", "fixture uncertain");
       }
       const before = await store.getProject(project.id);
-      assert.ok((await store.reviewJobs()).some((job) => job.id === first.id));
+      assert.ok((await store.reviewRuns()).some((run) => run.id === first.id));
       const after = await store.reconcile(first.id, "merged");
       assert.equal(after.state, before?.state);
       assert.equal(after.error, before?.error);
@@ -1042,8 +1040,8 @@ integration(
   async () => {
     const { project } = await store.createProject("owner", input(), "demo", randomUUID());
     const first = await publishNext(1);
-    await store.pool.query("DROP TRIGGER IF EXISTS notify_project_change ON jobs");
-    await store.pool.query("ALTER TABLE jobs DROP COLUMN pull_request");
+    await store.pool.query("DROP TRIGGER IF EXISTS notify_project_change ON project_runs");
+    await store.pool.query("ALTER TABLE project_runs DROP COLUMN pull_request");
     await store.pool.query("ALTER TABLE projects DROP COLUMN max_wip");
     await store.migrate();
     await store.migrate();
@@ -1080,7 +1078,7 @@ for (const outcome of ["merged", "closed"] as const)
       await store.reconcile(first.id, "closed");
       assert.equal((await store.getProject(project.id))?.state, "cancelled");
       assert.deepEqual(
-        (await store.reviewJobs()).map((job) => job.id),
+        (await store.reviewRuns()).map((run) => run.id),
         [second.id],
       );
       const updated = await store.reconcile(second.id, outcome);
@@ -1098,7 +1096,7 @@ for (const outcome of ["merged", "closed"] as const)
         outcome === "merged" ? "pull_request_merged" : "pull_request_closed",
       );
       assert.equal(await store.claim("extra"), null);
-      assert.deepEqual(await store.reviewJobs(), []);
+      assert.deepEqual(await store.reviewRuns(), []);
     },
   );
 
@@ -1106,19 +1104,19 @@ integration(
   "a draining older coordinator can publish and reconcile after the PR backfill",
   async () => {
     const { project } = await store.createProject("owner", input(), "demo", randomUUID());
-    const job = await store.claim("old-worker");
-    assert.ok(job);
+    const run = await store.claim("old-worker");
+    assert.ok(run);
     await store.migrate();
     // The pre-upgrade worker writes only the project's PR column after migrations ran.
     const pr = {
       url: "https://github.com/example/repo/pull/1",
       number: 1,
-      branch: job.branch,
+      branch: run.branch,
       state: "open",
     };
     await store.pool.query(
-      "UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
-      [job.id],
+      "UPDATE project_runs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
+      [run.id],
     );
     await store.pool.query(
       "UPDATE projects SET state='awaiting_review',pull_request=$2 WHERE id=$1",
@@ -1126,12 +1124,12 @@ integration(
     );
     assert.deepEqual((await store.getProject(project.id))?.pullRequests, [pr]);
     assert.deepEqual(
-      (await store.reviewJobs()).map((job) => job.id),
-      [job.id],
+      (await store.reviewRuns()).map((run) => run.id),
+      [run.id],
     );
-    // An old coordinator may also observe the merge while it is draining.
+    // Another coordinator may also observe the merge while it is draining.
     const merged = { ...pr, state: "merged" };
-    await store.pool.query("UPDATE jobs SET stage='completed' WHERE id=$1", [job.id]);
+    await store.pool.query("UPDATE project_runs SET stage='completed' WHERE id=$1", [run.id]);
     await store.pool.query("UPDATE projects SET pull_request=$2 WHERE id=$1", [
       project.id,
       JSON.stringify(merged),
@@ -1159,7 +1157,7 @@ integration(
     assert.equal(edited.prompt, "Updated instructions");
     assert.equal(edited.name, project.name);
     assert.equal(edited.state, project.state);
-    assert.equal(edited.attemptCount, 0);
+    assert.equal(edited.runCount, 0);
     assert.equal((await new Store(store.pool).getProject(project.id))?.prompt, edited.prompt);
     const replay = await store.createProject(owner, request, "demo", key);
     assert.equal(replay.created, false);
@@ -1168,25 +1166,25 @@ integration(
       store.createProject(owner, { ...request, prompt: edited.prompt }, "demo", key),
       /different request/,
     );
-    const job = await store.claim("worker");
-    assert.ok(job);
-    assert.equal(job.project.prompt, edited.prompt);
+    const run = await store.claim("worker");
+    assert.ok(run);
+    assert.equal(run.project.prompt, edited.prompt);
     const running = await store.editProjectPrompt(
       project.id,
       owner,
-      "Instructions for the next attempt",
+      "Instructions for the next run",
     );
     assert.equal(running.state, "running");
-    assert.equal(job.project.prompt, edited.prompt);
-    await store.saveArtifact(job.id, "worker", {
+    assert.equal(run.project.prompt, edited.prompt);
+    await store.saveArtifact(run.id, "worker", {
       baseCommit: "abc",
       patch: Buffer.from("saved work"),
     });
-    await store.beginPublication(job.id, "worker");
-    await store.completePublication(job.id, "worker", {
+    await store.beginPublication(run.id, "worker");
+    await store.completePublication(run.id, "worker", {
       url: "https://github.com/example/repo/pull/1",
       number: 1,
-      branch: job.branch,
+      branch: run.branch,
     });
     assert.equal((await store.claim("next-worker"))?.project.prompt, running.prompt);
     await store.control(project.id, owner, "cancel");

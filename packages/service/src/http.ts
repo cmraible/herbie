@@ -1,5 +1,6 @@
 import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
+import { apiEvents, apiProject } from "./api-compat.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
@@ -105,11 +106,8 @@ export function createApiServer(options: ApiOptions) {
     const url = new URL(request.url ?? "/", origin);
     const method = request.method ?? "GET";
     function projectJson(status: number, value: Project | Project[]): void {
-      const compatible = (project: Project) => {
-        if (request.headers["x-herbie-project-version"] === "2") return project;
-        const { maxWip: _maxWip, pullRequests: _pullRequests, ...legacy } = project;
-        return legacy;
-      };
+      const version = request.headers["x-herbie-project-version"];
+      const compatible = (project: Project) => apiProject(project, version);
       json(response, status, Array.isArray(value) ? value.map(compatible) : compatible(value));
     }
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
@@ -414,7 +412,11 @@ export function createApiServer(options: ApiOptions) {
             .min(0)
             .safe()
             .parse(url.searchParams.get("after") ?? 0);
-          json(response, 200, await store.events(id, after));
+          json(
+            response,
+            200,
+            apiEvents(await store.events(id, after), request.headers["x-herbie-project-version"]),
+          );
           return;
         }
         if (method === "POST" && projectPath[2] && projectPath[2] !== "events") {
@@ -448,23 +450,23 @@ export function createApiServer(options: ApiOptions) {
             }
             if (projectPath[2] === "retry" && candidate.kind === "unavailable") {
               await adapters.authorize(userId, project.repository);
-              projectJson(200, await store.retryAttempt(id, userId));
+              projectJson(200, await store.retryRun(id, userId));
               return;
             }
             if (adapters.mode !== "live" || !adapters.checkPublicationRetry)
               throw new HttpError(404, "Not found");
             if (candidate.kind !== "retryable")
               throw new HttpError(409, "No saved publication is eligible for a safe retry.");
-            const job = candidate.job;
-            if (!job.artifact || !hasValidPublicationEvidence(job.project.repository, job.artifact))
+            const run = candidate.run;
+            if (!run.artifact || !hasValidPublicationEvidence(run.project.repository, run.artifact))
               throw new HttpError(
                 409,
                 "The saved artifact does not meet publication verification requirements.",
               );
-            const repository = await adapters.reconciliationRepository(job.project.repository);
+            const repository = await adapters.reconciliationRepository(run.project.repository);
             const check = await adapters.checkPublicationRetry(
-              { project: job.project, repository, attemptId: job.attemptId, branch: job.branch },
-              job.artifact,
+              { project: run.project, repository, runId: run.runId, branch: run.branch },
+              run.artifact,
             );
             if (check === "pull_request_exists")
               throw new HttpError(
@@ -474,20 +476,20 @@ export function createApiServer(options: ApiOptions) {
             if (check === "branch_exists")
               throw new HttpError(
                 409,
-                "The exact attempt branch already exists; automatic retry was refused.",
+                "The exact run branch already exists; automatic retry was refused.",
               );
             if (check === "base_changed")
               throw new HttpError(
                 409,
-                "The repository history no longer contains the original base; the saved artifact cannot be published without a new attempt.",
+                "The repository history no longer contains the original base; the saved artifact cannot be published without a new run.",
               );
             projectJson(
               200,
               await store.queueSavedPublication(
-                job.id,
+                run.id,
                 userId,
-                job.branch,
-                job.artifact.baseCommit,
+                run.branch,
+                run.artifact.baseCommit,
               ),
             );
             return;

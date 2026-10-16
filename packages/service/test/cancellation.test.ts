@@ -5,7 +5,7 @@ import pg from "pg";
 import { Store } from "../src/store.js";
 import { runWorkerOnce } from "../src/worker.js";
 import { createDemoAdapters } from "../src/demo.js";
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { DaytonaRunError } from "@herbie/loop/daytona-run";
 
 async function fixture(t: TestContext) {
   const connectionString = process.env.HERBIE_TEST_DATABASE_URL;
@@ -55,11 +55,11 @@ test("stuck publication with undecodable App key cancels without invoking reconc
   const f = await fixture(t);
   if (!f) return;
   const { store, project } = f;
-  const job = await store.claim("publisher");
-  assert.ok(job);
-  await store.saveArtifact(job.id, "publisher", changes);
-  await store.beginPublication(job.id, "publisher");
-  await store.publicationUncertain(job.id, "publisher", "ERR_OSSL_UNSUPPORTED");
+  const run = await store.claim("publisher");
+  assert.ok(run);
+  await store.saveArtifact(run.id, "publisher", changes);
+  await store.beginPublication(run.id, "publisher");
+  await store.publicationUncertain(run.id, "publisher", "ERR_OSSL_UNSUPPORTED");
   const result = await store.control(project.id, "owner", "cancel");
   assert.equal(result.state, "cancelled");
   assert.equal(result.cleanupStatus, "needs_attention");
@@ -69,24 +69,25 @@ test("stuck publication with undecodable App key cancels without invoking reconc
     async reconciliationRepository() {
       throw new Error("Must not decode App key");
     },
-    async attempt() {
+    async run() {
       throw new Error("Must not spend");
     },
   };
   assert.equal(await runWorkerOnce(store, adapters, "next"), false);
   await assert.rejects(
-    store.queueSavedPublication(job.id, "owner", job.branch, changes.baseCommit),
+    store.queueSavedPublication(run.id, "owner", run.branch, changes.baseCommit),
     /no longer eligible/,
   );
   assert.equal((await store.events(project.id)).filter((e) => e.type === "cancel").length, 1);
   assert.ok(
-    (await store.pool.query("SELECT artifact FROM jobs WHERE id=$1", [job.id])).rows[0].artifact,
+    (await store.pool.query("SELECT artifact FROM project_runs WHERE id=$1", [run.id])).rows[0]
+      .artifact,
   );
 });
 
 for (const cleanup of ["confirmed", "unconfirmed"] as const)
   test(
-    "running attempt receives cancellation; cleanup " + cleanup + " never revives work",
+    "running run receives cancellation; cleanup " + cleanup + " never revives work",
     async (t) => {
       const f = await fixture(t);
       if (!f) return;
@@ -96,14 +97,14 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
         publishes = 0;
       const adapters = {
         ...createDemoAdapters(),
-        async attempt(execution: Parameters<ReturnType<typeof createDemoAdapters>["attempt"]>[0]) {
+        async run(execution: Parameters<ReturnType<typeof createDemoAdapters>["run"]>[0]) {
           entered.resolve();
           await new Promise<void>((resolve) => {
             if (execution.signal?.aborted) resolve();
             else execution.signal?.addEventListener("abort", () => resolve(), { once: true });
           });
           stopped = true;
-          const error = new DaytonaAttemptError([], "synthetic cancelled attempt");
+          const error = new DaytonaRunError([], "synthetic cancelled run");
           error.cleanup = cleanup;
           error.changes = changes;
           throw error;
@@ -124,8 +125,11 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
       assert.equal(saved.cleanupStatus, cleanup === "confirmed" ? "complete" : "needs_attention");
       assert.equal(await runWorkerOnce(store, adapters, "next"), false);
       assert.ok(
-        (await store.pool.query("SELECT artifact FROM jobs WHERE project_id=$1", [project.id]))
-          .rows[0].artifact,
+        (
+          await store.pool.query("SELECT artifact FROM project_runs WHERE project_id=$1", [
+            project.id,
+          ])
+        ).rows[0].artifact,
       );
     },
   );
@@ -139,7 +143,7 @@ test("cancel fences a publisher already in flight and preserves its eventual PR 
   let fence: (() => Promise<void>) | undefined;
   const adapters = {
     ...createDemoAdapters(),
-    async attempt() {
+    async run() {
       return changes;
     },
     async publish(
@@ -165,16 +169,20 @@ test("cancel fences a publisher already in flight and preserves its eventual PR 
   assert.equal(saved.cleanupStatus, "needs_attention");
   assert.equal(saved.pullRequest?.number, 1);
   assert.equal(await store.claim("next"), null);
-  assert.equal((await store.reviewJobs()).length, 1);
-  const job = (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [project.id]))
-    .rows[0];
-  await store.reconcile(job.id, "merged");
+  assert.equal((await store.reviewRuns()).length, 1);
+  const run = (
+    await store.pool.query("SELECT id FROM project_runs WHERE project_id=$1", [project.id])
+  ).rows[0];
+  await store.reconcile(run.id, "merged");
   assert.equal((await store.getProject(project.id))?.state, "cancelled");
   assert.equal((await store.getProject(project.id))?.pullRequest?.state, "merged");
-  assert.deepEqual(await store.reviewJobs(), []);
+  assert.deepEqual(await store.reviewRuns(), []);
   assert.equal(
-    (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [project.id]))
-      .rows[0].n,
+    (
+      await store.pool.query("SELECT count(*)::int n FROM project_runs WHERE project_id=$1", [
+        project.id,
+      ])
+    ).rows[0].n,
     1,
   );
 });
@@ -183,19 +191,19 @@ test("late worker writes cannot overwrite cancellation and abandoned cleanup bec
   const f = await fixture(t);
   if (!f) return;
   const { store, project } = f;
-  const job = await store.claim("lost");
-  assert.ok(job);
+  const run = await store.claim("lost");
+  assert.ok(run);
   await store.control(project.id, "owner", "cancel");
-  assert.equal(await store.heartbeat(job.id, "lost"), false);
-  await assert.rejects(store.saveArtifact(job.id, "lost", changes), /lease/);
-  await assert.rejects(store.fail(job.id, "lost", "failure"), /lease/);
-  await assert.rejects(store.publicationUncertain(job.id, "lost", "failure"), /lease/);
+  assert.equal(await store.heartbeat(run.id, "lost"), false);
+  await assert.rejects(store.saveArtifact(run.id, "lost", changes), /lease/);
+  await assert.rejects(store.fail(run.id, "lost", "failure"), /lease/);
+  await assert.rejects(store.publicationUncertain(run.id, "lost", "failure"), /lease/);
   await store.pool.query(
-    "UPDATE jobs SET cancel_cleanup_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",
-    [job.id],
+    "UPDATE project_runs SET cancel_cleanup_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",
+    [run.id],
   );
   await store.recoverExpired();
   assert.equal((await store.getProject(project.id))?.cleanupStatus, "needs_attention");
-  assert.equal(await store.finishCancelled(job.id, "unrelated", "complete"), false);
+  assert.equal(await store.finishCancelled(run.id, "unrelated", "complete"), false);
   assert.equal((await store.getProject(project.id))?.state, "cancelled");
 });

@@ -12,7 +12,7 @@ import {
 import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
-import { AttemptHistory } from "./AttemptHistory.js";
+import { RunHistory } from "./RunHistory.js";
 import {
   errorReference,
   projectErrorMessage,
@@ -20,7 +20,7 @@ import {
 } from "./activity-message.js";
 import { ModelSelect } from "./ModelSelect.js";
 import { RepositorySelect } from "./RepositorySelect.js";
-import { projectReadyForReview } from "./attempts.js";
+import { projectReadyForReview } from "./runs.js";
 
 const api = createClient();
 const terminal = new Set(["completed", "cancelled", "failed"]);
@@ -345,6 +345,7 @@ export function App() {
     function connect() {
       const url = new URL("/api/stream", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      url.searchParams.set("version", "3");
       if (selected) url.searchParams.set("project", selected);
       socket = new WebSocket(url);
       socket.onmessage = (event) => {
@@ -610,7 +611,7 @@ export function App() {
                             <span aria-current="page">
                               {selectedRun === "project-activity"
                                 ? "Project activity"
-                                : `Run ${project.attempts?.find((attempt) => attempt.id === selectedRun)?.number ?? "details"}`}
+                                : `Run ${project.runs?.find((run) => run.id === selectedRun)?.number ?? "details"}`}
                             </span>
                           </>
                         ) : (
@@ -747,8 +748,8 @@ export function App() {
                             <Badge project={item} />
                           </span>
                           <span className="project-row-meta">
-                            {item.repository} <span>·</span> {item.attemptCount}{" "}
-                            {item.attemptCount === 1 ? "run" : "runs"} <span>·</span> Updated{" "}
+                            {item.repository} <span>·</span> {item.runCount}{" "}
+                            {item.runCount === 1 ? "run" : "runs"} <span>·</span> Updated{" "}
                             {time(item.updatedAt)}
                           </span>
                         </button>
@@ -844,8 +845,8 @@ export function App() {
                     <p className="project-brief">{project.prompt}</p>
 
                     <p className="project-meta">
-                      {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"}{" "}
-                      <span>·</span> Max parallel runs {project.maxWip} <span>·</span> Created{" "}
+                      {project.runCount} {project.runCount === 1 ? "run" : "runs"} <span>·</span>{" "}
+                      Max parallel runs {project.maxWip} <span>·</span> Created{" "}
                       {time(project.createdAt)}
                     </p>
                     {project.error && (
@@ -881,20 +882,20 @@ export function App() {
                         </button>
                       </div>
                     )}
-                    {project.attempts
-                      ?.filter((attempt) => attempt.ciRepair?.state === "failed")
-                      .map((attempt) => (
-                        <div className="status-message" key={attempt.id}>
-                          <span>Repair failed for PR #{attempt.pullRequest?.number}.</span>
-                          {attempt.ciRepair?.canRetry &&
+                    {project.runs
+                      ?.filter((run) => run.ciRepair?.state === "failed")
+                      .map((run) => (
+                        <div className="status-message" key={run.id}>
+                          <span>Repair failed for PR #{run.pullRequest?.number}.</span>
+                          {run.ciRepair?.canRetry &&
                             !project.stopRequested &&
                             ["queued", "running", "awaiting_review"].includes(project.state) &&
-                            attempt.pullRequest?.state === "open" && (
+                            run.pullRequest?.state === "open" && (
                               <button
                                 className="primary"
                                 disabled={busy}
                                 onClick={() => {
-                                  void control("retry-repair", attempt.ciRepair!.id);
+                                  void control("retry-repair", run.ciRepair!.id);
                                 }}
                               >
                                 {busy ? "Retrying…" : "Retry repair"}
@@ -909,7 +910,7 @@ export function App() {
                       </p>
                     )}
                     <hr className="project-divider" />
-                    <AttemptHistory
+                    <RunHistory
                       key={project.id}
                       project={project}
                       events={events}
@@ -920,7 +921,7 @@ export function App() {
                   </section>
                 )}
                 {project && selectedRun && (
-                  <AttemptHistory
+                  <RunHistory
                     key={project.id}
                     project={project}
                     selected={selectedRun}

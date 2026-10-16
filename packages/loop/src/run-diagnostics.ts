@@ -1,6 +1,6 @@
 import { parseSandboxFailure } from "./diagnostic-log.js";
 
-export type AttemptStage =
+export type RunStage =
   | "sandbox_creation"
   | "runtime_preparation"
   | "runtime_upload"
@@ -8,8 +8,8 @@ export type AttemptStage =
   | "model_execution"
   | "artifact_download"
   | "sandbox_deletion";
-export interface AttemptDiagnostic {
-  stage: AttemptStage;
+export interface RunDiagnostic {
+  stage: RunStage;
   cause:
     | "timeout"
     | "http_error"
@@ -21,7 +21,7 @@ export interface AttemptDiagnostic {
   httpStatus?: number;
   exitCode?: number;
 }
-export class AttemptCommandError extends Error {
+export class RunCommandError extends Error {
   readonly stdout?: string;
   readonly stderr?: string;
   constructor(
@@ -35,7 +35,7 @@ export class AttemptCommandError extends Error {
     this.stderr = stderr;
   }
 }
-export class AttemptResultError extends Error {
+export class RunResultError extends Error {
   constructor(
     message: string,
     readonly stdout?: string,
@@ -43,12 +43,12 @@ export class AttemptResultError extends Error {
     super(message);
   }
 }
-export class AttemptReportError extends Error {}
+export class RunReportError extends Error {}
 
 // Never copy SDK messages, command output, URLs, request configs, or headers.
-export function attemptDiagnostic(error: unknown, stage: AttemptStage): AttemptDiagnostic {
-  if (error instanceof AttemptReportError) return { stage, cause: "event_persistence_failed" };
-  if (error instanceof AttemptCommandError)
+export function runDiagnostic(error: unknown, stage: RunStage): RunDiagnostic {
+  if (error instanceof RunReportError) return { stage, cause: "event_persistence_failed" };
+  if (error instanceof RunCommandError)
     return {
       stage,
       cause: "command_failed",
@@ -56,7 +56,7 @@ export function attemptDiagnostic(error: unknown, stage: AttemptStage): AttemptD
         ? { exitCode: error.exitCode }
         : {}),
     };
-  if (error instanceof AttemptResultError) return { stage, cause: "invalid_result" };
+  if (error instanceof RunResultError) return { stage, cause: "invalid_result" };
   const value = error as {
     name?: unknown;
     code?: unknown;
@@ -91,6 +91,6 @@ export function attemptDiagnostic(error: unknown, stage: AttemptStage): AttemptD
     return { stage, cause: "network_failure" };
   return { stage, cause: "unexpected" };
 }
-export function attemptDiagnosticMessage(diagnostic: AttemptDiagnostic): string {
+export function runDiagnosticMessage(diagnostic: RunDiagnostic): string {
   return `${diagnostic.stage}: ${diagnostic.cause}${diagnostic.httpStatus === undefined ? "" : `; HTTP ${diagnostic.httpStatus}`}${diagnostic.exitCode === undefined ? "" : `; exit ${diagnostic.exitCode}`}`;
 }

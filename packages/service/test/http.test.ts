@@ -8,11 +8,23 @@ import { createApiServer } from "../src/http.js";
 import { projectSchema } from "@herbie/contracts";
 import { testAuth, testSessionToken } from "./test-auth.js";
 
-for (const version of [undefined, "2"])
+for (const version of [undefined, "2", "3"])
   test(`HTTP project contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
-    const responseSchema = version
-      ? projectSchema
-      : projectSchema.omit({ maxWip: true, pullRequests: true }).strict();
+    const responseSchema =
+      version === "3"
+        ? projectSchema
+        : version === "2"
+          ? projectSchema.omit({ runCount: true, runs: true }).extend({
+              attemptCount: projectSchema.shape.runCount,
+              attempts: projectSchema.shape.runs,
+            })
+          : projectSchema
+              .omit({ maxWip: true, pullRequests: true, runCount: true, runs: true })
+              .extend({
+                attemptCount: projectSchema.shape.runCount,
+                attempts: projectSchema.shape.runs,
+              })
+              .strict();
     const database = process.env.HERBIE_TEST_DATABASE_URL;
     if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
     const schema = `http_${randomUUID().replaceAll("-", "")}`;
@@ -76,7 +88,8 @@ for (const version of [undefined, "2"])
       });
     const first = await request();
     assert.equal(first.status, 201);
-    const project = responseSchema.parse(await first.json());
+    const firstBody = await first.json();
+    const project = responseSchema.parse(firstBody);
     const replay = await request();
     assert.equal(replay.status, 200);
     assert.equal(responseSchema.parse(await replay.json()).id, project.id);
@@ -90,8 +103,8 @@ for (const version of [undefined, "2"])
       .parse(await (await fetch(`${base}/api/projects`, { headers })).json());
     assert.deepEqual(projects, [project]);
     if (version) {
-      assert.equal(projectSchema.parse(project).maxWip, 2);
-      assert.deepEqual(projectSchema.parse(project).pullRequests, []);
+      assert.equal(firstBody.maxWip, 2);
+      assert.deepEqual(firstBody.pullRequests, []);
     }
     const rename = (name: string, extraHeaders = {}) =>
       fetch(`${base}/api/projects/${project.id}/name`, {
@@ -128,12 +141,16 @@ for (const version of [undefined, "2"])
       });
     assert.equal((await update({ name: "Changed", prompt: "New", maxWip: 0 })).status, 400);
     assert.equal((await update({ repository: "other/repo" })).status, 400);
-    const updated = responseSchema.parse(
-      await (await update({ name: "Updated project", prompt: "Updated prompt", maxWip: 3 })).json(),
-    );
+    const updatedResponse = await update({
+      name: "Updated project",
+      prompt: "Updated prompt",
+      maxWip: 3,
+    });
+    const updatedBody = await updatedResponse.json();
+    const updated = responseSchema.parse(updatedBody);
     assert.equal(updated.name, "Updated project");
     assert.equal(updated.prompt, "Updated prompt");
-    if (version) assert.equal(projectSchema.parse(updated).maxWip, 3);
+    if (version) assert.equal(updatedBody.maxWip, 3);
     assert.equal(responseSchema.parse(await (await request()).json()).prompt, "Updated prompt");
     const paused = await fetch(`${base}/api/projects/${project.id}/pause`, {
       method: "POST",

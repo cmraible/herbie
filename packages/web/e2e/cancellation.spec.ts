@@ -8,7 +8,7 @@ for (const state of ["queued", "running", "paused", "awaiting_review", "needs_at
       repository: "fixture/project",
       name: "Synthetic cancellation fixture",
       prompt: "Synthetic cancellation fixture",
-      attemptCount: 1,
+      runCount: 1,
       state,
       createdAt: "2026-10-14T00:00:00Z",
       updatedAt: "2026-10-14T00:00:00Z",

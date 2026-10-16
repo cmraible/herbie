@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { mock, test, type TestContext } from "node:test";
-import { runDaytonaAttempt } from "../src/daytona-attempt.js";
+import { runDaytonaRun } from "../src/daytona-run.js";
 import {
   PatchPublicationError,
   PatchHeadChangedError,
@@ -60,7 +60,7 @@ async function fixture(t: TestContext, extraFiles = false) {
   ]) {
     await writeFile(join(runtime, `${name}.js`), "");
   }
-  const changes = await runDaytonaAttempt(
+  const changes = await runDaytonaRun(
     async () => ({
       id: "fixture",
       delete: async () => {},
@@ -81,7 +81,7 @@ async function fixture(t: TestContext, extraFiles = false) {
           ]),
       },
       process: {
-        executeCommand: async () => ({ exitCode: 0, result: "herbie-attempt-completed\n" }),
+        executeCommand: async () => ({ exitCode: 0, result: "herbie-run-completed\n" }),
       },
     }),
     {

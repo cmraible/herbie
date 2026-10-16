@@ -79,7 +79,7 @@ export const ciRepairSchema = z.object({
   state: z.enum(["running", "waiting", "completed", "failed"]),
   canRetry: z.boolean(),
 });
-export const attemptSchema = z.object({
+export const runSchema = z.object({
   ciRepair: ciRepairSchema.nullable().optional(),
   id: z.string().uuid(),
   number: z.number().int().positive(),
@@ -97,14 +97,14 @@ export const attemptSchema = z.object({
   createdAt: z.string(),
   pullRequest: pullRequestSchema.nullable(),
 });
-export type Attempt = z.infer<typeof attemptSchema>;
+export type Run = z.infer<typeof runSchema>;
 export const projectSchema = projectInput.extend({
   name: projectName,
   id: z.string().uuid(),
   ownerId: z.string(),
   state: projectState,
-  attemptCount: z.number().int(),
-  attempts: z.array(attemptSchema).optional(),
+  runCount: z.number().int(),
+  runs: z.array(runSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   mode: z.enum(["demo", "live"]),
@@ -117,7 +117,7 @@ export const projectSchema = projectInput.extend({
   error: z.string().nullable(),
 });
 export const eventSchema = z.object({
-  attemptId: z.string().uuid().nullable().optional(),
+  runId: z.string().uuid().nullable().optional(),
   id: z.number().int(),
   projectId: z.string().uuid(),
   type: z.string(),

@@ -70,14 +70,14 @@ async function githubFixture(t: TestContext) {
       await release.promise;
       response.end("[]");
     } else if (path === "/repos/alice/project/pulls" && request.method === "POST") {
-      remotePullRequests.push("herbie/attempt-1");
+      remotePullRequests.push("herbie/run-1");
       response.end(
         JSON.stringify({
           number: 1,
           html_url: "https://github.com/alice/project/pull/1",
           state: "open",
           merged_at: null,
-          head: { ref: "herbie/attempt-1" },
+          head: { ref: "herbie/run-1" },
           base: { ref: "main" },
         }),
       );
@@ -119,7 +119,7 @@ test("GitHub rechecks ownership after its final PR lookup before posting a new P
     {
       repository: "alice/project",
       base: "main",
-      head: "herbie/attempt-1",
+      head: "herbie/run-1",
       title: "Fix arithmetic",
       body: "Fixture only",
       draft: true,
@@ -156,14 +156,14 @@ test("live publication stops after awaited GitHub preflight when its durable lea
     "live",
     randomUUID(),
   );
-  const job = await store.claim("publisher");
-  assert.ok(job);
+  const run = await store.claim("publisher");
+  assert.ok(run);
   const changes = {
     baseCommit: "0".repeat(40),
     patch: Buffer.from("unused: ownership fails before local preparation"),
   };
-  await store.saveArtifact(job.id, "publisher", changes);
-  await store.beginPublication(job.id, "publisher");
+  await store.saveArtifact(run.id, "publisher", changes);
+  await store.beginPublication(run.id, "publisher");
   const live = createLiveAdapters(
     { apiKey: "fixture-never-used", openaiSecretName: "fixture-never-used" },
     github,
@@ -171,24 +171,24 @@ test("live publication stops after awaited GitHub preflight when its durable lea
   );
   const pending = live.publish(
     {
-      project: job.project,
+      project: run.project,
       repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
-      attemptId: job.id,
-      branch: job.branch,
+      runId: run.id,
+      branch: run.branch,
     },
     changes,
     async () => {
-      if (!(await store.heartbeat(job.id, "publisher")))
+      if (!(await store.heartbeat(run.id, "publisher")))
         throw new StoreError(409, "Worker lease lost");
     },
   );
   await entered.promise;
-  assert.equal(await store.heartbeat(job.id, "publisher", 1), true);
+  assert.equal(await store.heartbeat(run.id, "publisher", 1), true);
   await delay(15);
   const recovered = await store.recoverExpired();
   release.resolve();
   await assert.rejects(pending, (error) => error instanceof StoreError && error.status === 409);
   assert.equal(recovered, 1);
-  assert.equal((await store.getProject(job.project.id))?.state, "needs_attention");
+  assert.equal((await store.getProject(run.project.id))?.state, "needs_attention");
   assert.deepEqual(remotePullRequests, []);
 });

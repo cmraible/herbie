@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { DaytonaRunError } from "@herbie/loop/daytona-run";
 import { Store } from "../src/store.js";
 import { runWorkerOnce } from "../src/worker.js";
 import { runCiRepairOnce } from "../src/ci-repair.js";
@@ -45,9 +45,9 @@ for (const scenario of [
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "initial");
     await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
-    const [job] = await store.reviewJobs("live");
-    const pr = job!.project.pullRequests[0]!;
-    let attempts = 0;
+    const [run] = await store.reviewRuns("live");
+    const pr = run!.project.pullRequests[0]!;
+    let runs = 0;
     let pushes = 0;
     let statusFailed = false;
     let head = "a".repeat(40);
@@ -55,7 +55,7 @@ for (const scenario of [
       ...demo,
       mode: "live",
       ciStatus: async () => {
-        if (scenario === "status-failure" && attempts === 1 && !statusFailed) {
+        if (scenario === "status-failure" && runs === 1 && !statusFailed) {
           statusFailed = true;
           throw new Error("GitHub temporarily unavailable");
         }
@@ -66,13 +66,13 @@ for (const scenario of [
           details: "Formatting failed",
         };
       },
-      attempt: async (execution, report) => {
-        attempts++;
-        if (attempts === 1 && scenario !== "status-failure") {
-          await report("Attempt stage: repository_clone");
+      run: async (execution, report) => {
+        runs++;
+        if (runs === 1 && scenario !== "status-failure") {
+          await report("Run stage: repository_clone");
           if (scenario !== "cleanup-unknown")
             await report("Deletion confirmed for sandbox fixture");
-          const error = new DaytonaAttemptError([new Error("Clone failed")]);
+          const error = new DaytonaRunError([new Error("Clone failed")]);
           error.cleanup = scenario === "cleanup-unknown" ? "unconfirmed" : "confirmed";
           throw error;
         }
@@ -99,12 +99,12 @@ for (const scenario of [
     };
     await store.requestCiReview();
     await runCiRepairOnce(store, adapters, "repair");
-    const repair = (await store.getProject(project.id))!.attempts![0]!.ciRepair!;
+    const repair = (await store.getProject(project.id))!.runs![0]!.ciRepair!;
     assert.equal(repair.state, "failed");
     assert.equal(repair.canRetry, scenario !== "cleanup-unknown");
     await store.requestCiReview();
     await runCiRepairOnce(store, adapters, "automatic");
-    assert.equal(attempts, 1, "failures must not automatically retry");
+    assert.equal(runs, 1, "failures must not automatically retry");
     await assert.rejects(
       store.retryCiRepair(project.id, "other-owner", repair.id),
       /Project not found/,
@@ -114,7 +114,7 @@ for (const scenario of [
         repair.id,
       ]);
     if (scenario === "paused") await store.control(project.id, "demo-user", "pause");
-    if (scenario === "closed") await store.reconcile(job!.id, "closed");
+    if (scenario === "closed") await store.reconcile(run!.id, "closed");
     if (["cleanup-unknown", "publication", "paused", "closed"].includes(scenario)) {
       await assert.rejects(store.retryCiRepair(project.id, "demo-user", repair.id));
       assert.equal((await store.pool.query("SELECT * FROM ci_repairs")).rowCount, 1);
@@ -123,7 +123,7 @@ for (const scenario of [
     if (scenario === "legacy") {
       await store.pool.query("UPDATE ci_repairs SET retryable=false WHERE id=$1", [repair.id]);
       await store.migrate();
-      assert.equal((await store.getProject(project.id))!.attempts![0]!.ciRepair!.canRetry, true);
+      assert.equal((await store.getProject(project.id))!.runs![0]!.ciRepair!.canRetry, true);
     }
     const server = createApiServer({
       store,
@@ -168,7 +168,7 @@ for (const scenario of [
     await store.migrate(); // Restarts must preserve retry history and constraints.
     if (scenario === "changed-head") head = "b".repeat(40);
     await runCiRepairOnce(store, adapters, "manual");
-    assert.equal(attempts, scenario === "changed-head" ? 1 : 2);
+    assert.equal(runs, scenario === "changed-head" ? 1 : 2);
     assert.equal(pushes, scenario === "changed-head" ? 0 : 1);
     assert.ok((await store.events(project.id)).some((event) => event.type === "ci_repair_failed"));
     assert.ok(

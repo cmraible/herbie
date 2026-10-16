@@ -31,7 +31,7 @@ export async function githubFixture(t: TestContext) {
     mergedAt: null as string | null,
     losePrResponse: false,
     patch: "@@ -1 +1 @@\n-old\n+new",
-    prBranch: "herbie/attempt-1",
+    prBranch: "herbie/run-1",
     comparisonBase: "0".repeat(40),
     branchHeads: new Map<string, string>([["main", "0".repeat(40)]]),
   };
@@ -295,7 +295,7 @@ test("recovers a successful PR creation with a lost response and never duplicate
   const input = {
     repository: "alice/project",
     base: "main",
-    head: "herbie/attempt-1",
+    head: "herbie/run-1",
     title: "Fix bug",
     body: "Verified evidence",
     draft: true,
@@ -373,7 +373,7 @@ test("publication recovery permits main to advance while retaining the original 
     repository: "alice/project",
     name: "Fix bug",
     prompt: "Fix bug",
-    attemptCount: 1,
+    runCount: 1,
     state: "needs_attention",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -385,15 +385,15 @@ test("publication recovery permits main to advance while retaining the original 
   const execution = {
     project,
     repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
-    attemptId: randomUUID(),
-    branch: "herbie/synthetic-project/synthetic-job",
+    runId: randomUUID(),
+    branch: "herbie/synthetic-project/synthetic-run",
   };
   const changes = { baseCommit: "0".repeat(40), patch: Buffer.from("fixture") };
   assert.equal(await live.checkPublicationRetry?.(execution, changes), "ready");
   assert.ok(
     requests.some(
       (request) =>
-        request.path === "/repos/alice/project/branches/herbie%2Fsynthetic-project%2Fsynthetic-job",
+        request.path === "/repos/alice/project/branches/herbie%2Fsynthetic-project%2Fsynthetic-run",
     ),
   );
   assert.ok(
@@ -429,7 +429,7 @@ test("cancellation absence checks use read-only reconciliation access after arch
     repository: "alice/project",
     name: "Fix bug",
     prompt: "Fix bug",
-    attemptCount: 1,
+    runCount: 1,
     state: "needs_attention",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -441,8 +441,8 @@ test("cancellation absence checks use read-only reconciliation access after arch
   const execution = {
     project,
     repository: await live.reconciliationRepository(project.repository),
-    attemptId: randomUUID(),
-    branch: "herbie/attempt-1",
+    runId: randomUUID(),
+    branch: "herbie/run-1",
   };
   assert.equal(await live.checkUnpublished?.(execution), "absent");
   fixture.branchHeads.set(execution.branch, "1".repeat(40));
@@ -491,7 +491,7 @@ for (const state of ["open", "closed", "merged"] as const)
       repository: "alice/project",
       name: "Fix bug",
       prompt: "Fix bug",
-      attemptCount: 1,
+      runCount: 1,
       state: "running",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -503,8 +503,8 @@ for (const state of ["open", "closed", "merged"] as const)
     const execution = {
       project,
       repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
-      attemptId: randomUUID(),
-      branch: "herbie/attempt-1",
+      runId: randomUUID(),
+      branch: "herbie/run-1",
     };
     const pr = await live.publish(
       execution,
@@ -521,7 +521,7 @@ for (const state of ["open", "closed", "merged"] as const)
       changedFiles: 2,
       url: "https://github.com/alice/project/pull/8",
       number: 8,
-      branch: "herbie/attempt-1",
+      branch: "herbie/run-1",
       state,
     });
     assert.equal(headSha, "1".repeat(40));
@@ -811,7 +811,7 @@ test("owner policy rejects OAuth and pending CLI grants and invalidates existing
 
 // GitHub now returns ghs_APPID_JWT installation tokens. This is synthetic,
 // includes base64url punctuation, and is intentionally not a signed credential.
-test("reconciliation accepts stateless installation tokens before looking up the attempt PR", async (t) => {
+test("reconciliation accepts stateless installation tokens before looking up the run PR", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
   fixture.installationToken = `ghs_123_eyJhbGciOiJSUzI1NiJ9.${"cGF5bG9hZA".repeat(40)}.signature-with_hyphen`;
   const live = createLiveAdapters(undefined, github, {
@@ -826,7 +826,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
     repository: "alice/project",
     name: "Fix bug",
     prompt: "Fix bug",
-    attemptCount: 1,
+    runCount: 1,
     state: "running",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -835,7 +835,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
     pullRequest: null,
     error: null,
   });
-  const execution = { project, repository, attemptId: randomUUID(), branch: "herbie/attempt-1" };
+  const execution = { project, repository, runId: randomUUID(), branch: "herbie/run-1" };
   assert.equal(await live.reconcile(execution), null);
   fixture.pr = true;
   assert.equal((await live.reconcile(execution))?.state, "open");
@@ -881,7 +881,7 @@ test("live publication rejects a legacy artifact without verification evidence b
     repository: "alice/project",
     name: "Fix bug",
     prompt: "Fix bug",
-    attemptCount: 1,
+    runCount: 1,
     state: "running",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -895,8 +895,8 @@ test("live publication rejects a legacy artifact without verification evidence b
       {
         project,
         repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
-        attemptId: randomUUID(),
-        branch: "herbie/attempt-1",
+        runId: randomUUID(),
+        branch: "herbie/run-1",
       },
       { baseCommit: "0".repeat(40), patch: Buffer.from("patch") },
       async () => {},

@@ -1,4 +1,4 @@
-import { parseFeedbackDecision } from "@herbie/loop/daytona-attempt";
+import { parseFeedbackDecision } from "@herbie/loop/daytona-run";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { StaleRepairError, type Adapters, type Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -11,28 +11,28 @@ export async function runFeedbackOnce(
 ): Promise<boolean> {
   if (!adapters.feedback || !adapters.replyToFeedback) return false;
   await store.recoverFeedback();
-  const job = await store.takeFeedbackReview();
-  if (!job) return false;
+  const run = await store.takeFeedbackReview();
+  if (!run) return false;
   let id: string | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      project: job.project,
-      branch: job.branch,
-      attemptId: job.attemptId,
-      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
+      project: run.project,
+      branch: run.branch,
+      runId: run.runId,
+      repository: await adapters.authorize(run.project.ownerId, run.project.repository),
       signal: controller.signal,
-      onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
+      onActivity: (message) => store.appendEvent(run.project.id, "agent", message, run.id),
     };
     const current = await adapters.reconcile(execution);
     if (!current || current.state !== "open" || !current.headSha) return true;
-    if (await store.reconcilePullRequestHead(job.id, current)) return true;
+    if (await store.reconcilePullRequestHead(run.id, current)) return true;
     const context = await adapters.feedback(execution);
-    const claimed = await store.startFeedback(job.id, context, workerId);
+    const claimed = await store.startFeedback(run.id, context, workerId);
     if (!claimed) return true;
     id = claimed.id;
-    execution.attemptId = id;
+    execution.runId = id;
     execution.feedback = {
       head: current.headSha,
       pullRequest: current,
@@ -58,13 +58,13 @@ export async function runFeedbackOnce(
         });
     }, 5000);
     await requireLease();
-    const changes = await adapters.attempt(execution, (message) =>
-      store.appendEvent(job.project.id, "pr_feedback", message.slice(0, 2000), job.id),
+    const changes = await adapters.run(execution, (message) =>
+      store.appendEvent(run.project.id, "pr_feedback", message.slice(0, 2000), run.id),
     );
     await requireLease();
     const decision = parseFeedbackDecision(changes.feedbackDecision);
     if (
-      !hasValidPublicationEvidence(job.project.repository, changes) ||
+      !hasValidPublicationEvidence(run.project.repository, changes) ||
       changes.baseCommit !== current.headSha
     )
       throw new Error("Feedback lacks matching completion and cleanup evidence");
@@ -124,8 +124,8 @@ export async function runFeedbackOnce(
   } catch (error) {
     const reference = logFailure(error, {
       component: "pr-feedback",
-      projectId: job.project.id,
-      jobId: job.id,
+      projectId: run.project.id,
+      runId: run.id,
     });
     if (id)
       await store.finishFeedback(

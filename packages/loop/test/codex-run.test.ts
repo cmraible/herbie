@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
 import { getEventListeners } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
-import { initializeCodexProcess, runCodexAttempt } from "../src/codex-process.js";
+import { initializeCodexProcess, runCodexRun } from "../src/codex-process.js";
 
-const fixture = fileURLToPath(new URL("./fixtures/project-attempt.ts", import.meta.url));
+const fixture = fileURLToPath(new URL("./fixtures/project-run.ts", import.meta.url));
 const posix = { skip: process.platform === "win32", timeout: 10_000 };
 const project = "Fix addition without changing the tests";
 
@@ -32,7 +32,7 @@ function messages(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 async function setup(t: TestContext) {
-  const cwd = await realpath(await mkdtemp(join(tmpdir(), "herbie-attempt-")));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), "herbie-run-")));
   const record = join(cwd, "events");
   const events = async (): Promise<unknown[]> => {
     const text = await readFile(record, "utf8").catch((error) => {
@@ -68,7 +68,7 @@ async function setup(t: TestContext) {
 }
 
 test(
-  "initialization probe ignores extra attempt fields in a reused options object",
+  "initialization probe ignores extra run fields in a reused options object",
   posix,
   async (t) => {
     const { cwd, record, events, gone } = await setup(t);
@@ -94,7 +94,7 @@ test(
   posix,
   async (t) => {
     const { cwd, record, events, gone } = await setup(t);
-    await runCodexAttempt(process.execPath, [fixture, "success", record], {
+    await runCodexRun(process.execPath, [fixture, "success", record], {
       cwd: relative(process.cwd(), cwd),
       project,
       shutdownMs: 100,
@@ -134,10 +134,10 @@ for (const [mode, expected] of [
   ["timeout", "Codex turn timed out"],
   ["interrupt-unconfirmed", "Codex turn termination unconfirmed"],
 ]) {
-  test(`attempt rejects ${mode} after group cleanup`, posix, async (t) => {
+  test(`run rejects ${mode} after group cleanup`, posix, async (t) => {
     const { cwd, record, events, gone } = await setup(t);
     await assert.rejects(
-      runCodexAttempt(process.execPath, [fixture, mode, record], {
+      runCodexRun(process.execPath, [fixture, mode, record], {
         cwd,
         project,
         turnTimeoutMs: 200,
@@ -171,7 +171,7 @@ test("abort interrupts the active turn before closing its transport", posix, asy
   const { cwd, record, events, gone } = await setup(t);
   const controller = new AbortController();
   const rejected = assert.rejects(
-    runCodexAttempt(process.execPath, [fixture, "cancel", record], {
+    runCodexRun(process.execPath, [fixture, "cancel", record], {
       cwd,
       project,
       signal: controller.signal,
@@ -203,7 +203,7 @@ test(
   async (t) => {
     const { cwd, record, events, gone } = await setup(t);
     // Only the fake protocol executable runs on the host, never paid execution.
-    await runCodexAttempt(process.execPath, [fixture, "high-usage", record], {
+    await runCodexRun(process.execPath, [fixture, "high-usage", record], {
       cwd,
       project,
       disposableDaytona: true,

@@ -73,7 +73,7 @@ test("hosted API leaves queued work untouched when execution is disabled", async
   await assert.rejects(client.health());
 });
 
-test("hosted shutdown stops HTTP first and lets the active bounded attempt persist before closing Postgres", async (t) => {
+test("hosted shutdown stops HTTP first and lets the active bounded run persist before closing Postgres", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
   if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
   const app = await fixture(database);
@@ -83,10 +83,10 @@ test("hosted shutdown stops HTTP first and lets the active bounded attempt persi
   const demo = runtime.adapters;
   runtime.adapters = {
     ...demo,
-    async attempt(execution, report) {
+    async run(execution, report) {
       started.resolve();
       await release.promise;
-      return demo.attempt(execution, report);
+      return demo.run(execution, report);
     },
   };
   const service = await startHostedService(runtime);
@@ -115,7 +115,7 @@ test("hosted shutdown stops HTTP first and lets the active bounded attempt persi
   try {
     const after = await clientFor(restarted, token).project(project.id);
     assert.equal(after.state, "awaiting_review");
-    assert.equal(after.attemptCount, 1);
+    assert.equal(after.runCount, 1);
     assert.ok(after.pullRequest);
   } finally {
     await restarted.close();
@@ -143,13 +143,13 @@ test("overlapping hosted processes keep exactly one coordinator during a rollout
     const demo = runtime.adapters;
     runtime.adapters = {
       ...demo,
-      async attempt(execution, report) {
+      async run(execution, report) {
         active++;
         maximumActive = Math.max(maximumActive, active);
         entered.resolve();
         try {
           await release.promise;
-          return await demo.attempt(execution, report);
+          return await demo.run(execution, report);
         } finally {
           active--;
         }

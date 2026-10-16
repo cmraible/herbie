@@ -29,15 +29,15 @@ async function database(t: TestContext): Promise<Store | null> {
 const request = { repository: "demo/example", prompt: "Fix arithmetic" };
 const artifact = { baseCommit: "0".repeat(40), patch: Buffer.from("DEMO recovered artifact") };
 
-test("worker survives losing its attempt lease without publishing or repeating paid work", async (t) => {
+test("worker survives losing its run lease without publishing or repeating paid work", async (t) => {
   const store = await database(t);
   if (!store) return;
   const { project } = await store.createProject("demo-user", request, "demo", randomUUID());
   const adapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt(execution) {
-      // Simulate an unresponsive worker being recovered while its external attempt completes.
-      assert.equal(await store.heartbeat(execution.attemptId, "old-worker", 1), true);
+    async run(execution) {
+      // Simulate an unresponsive worker being recovered while its external run completes.
+      assert.equal(await store.heartbeat(execution.runId, "old-worker", 1), true);
       await delay(15);
       assert.equal(await store.recoverExpired(), 1);
       return artifact;
@@ -49,7 +49,7 @@ test("worker survives losing its attempt lease without publishing or repeating p
   assert.equal(await runWorkerOnce(store, adapters, "old-worker"), true);
   const interrupted = await store.getProject(project.id);
   assert.equal(interrupted?.state, "needs_attention");
-  assert.equal(interrupted.attemptCount, 1);
+  assert.equal(interrupted.runCount, 1);
   assert.equal(interrupted.pullRequest, null);
   assert.equal(await runWorkerOnce(store, adapters, "new-worker"), false);
 });
@@ -72,8 +72,8 @@ test("a replacement worker reconciles an interrupted publication without calling
   await delay(15);
   const adapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt() {
-      throw new Error("Recovered publication must not rerun its attempt");
+    async run() {
+      throw new Error("Recovered publication must not rerun its run");
     },
     async publish() {
       throw new Error("Recovered publication must not repeat its write");
@@ -102,15 +102,15 @@ test("worker resumes a held artifact after restart and cooperative cancellation 
   await store.saveArtifact(claimed.id, "old-worker", artifact);
   const resumeAdapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt() {
-      throw new Error("A saved artifact must not rerun its paid attempt");
+    async run() {
+      throw new Error("A saved artifact must not rerun its paid run");
     },
   };
   assert.equal(await runWorkerOnce(store, resumeAdapters, "new-worker"), false);
   await store.control(project.id, "demo-user", "resume");
   assert.equal(await runWorkerOnce(store, resumeAdapters, "new-worker"), true);
   assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
-  assert.equal((await store.getProject(project.id))?.attemptCount, 1);
+  assert.equal((await store.getProject(project.id))?.runCount, 1);
   await store.control(project.id, "demo-user", "cancel");
   const { project: cancelled } = await store.createProject(
     "demo-user",
@@ -120,7 +120,7 @@ test("worker resumes a held artifact after restart and cooperative cancellation 
   );
   const cancelAdapters: Adapters = {
     ...createDemoAdapters(),
-    async attempt(execution) {
+    async run(execution) {
       await store.control(execution.project.id, "demo-user", "cancel");
       return artifact;
     },
@@ -149,7 +149,7 @@ test("a stale publisher cannot overwrite a replacement worker that already recov
         branch: execution.branch,
       };
       remotePr = published;
-      await store.heartbeat(execution.attemptId, "stale-publisher", 1);
+      await store.heartbeat(execution.runId, "stale-publisher", 1);
       await delay(15);
       assert.equal(await runWorkerOnce(store, adapters, "replacement"), true);
       return published;
@@ -163,7 +163,7 @@ test("a stale publisher cannot overwrite a replacement worker that already recov
   assert.equal(recovered?.state, "awaiting_review");
   assert.equal(recovered.error, null);
   assert.equal(recovered.pullRequest?.number, 43);
-  assert.equal(recovered.attemptCount, 1);
+  assert.equal(recovered.runCount, 1);
   assert.equal(
     (await store.events(project.id)).filter((event) => event.type === "pull_request_opened").length,
     1,
@@ -175,7 +175,7 @@ for (const heartbeatMs of [5000, 400]) {
     heartbeatMs === 400
       ? "after a heartbeat reports lease loss"
       : "before the first scheduled heartbeat";
-  test(`authorization finishing ${observed} cannot start a paid attempt`, async (t) => {
+  test(`authorization finishing ${observed} cannot start a paid run`, async (t) => {
     const store = await database(t);
     if (!store) return;
     const { project } = await store.createProject("demo-user", request, "demo", randomUUID());
@@ -190,8 +190,8 @@ for (const heartbeatMs of [5000, 400]) {
         await release.promise;
         return demo.authorize(userId, repository);
       },
-      async attempt() {
-        effects.push("paid attempt");
+      async run() {
+        effects.push("paid run");
         return artifact;
       },
       async publish(execution, changes, requireLease) {
@@ -221,7 +221,7 @@ for (const heartbeatMs of [5000, 400]) {
     const demo = createDemoAdapters();
     const adapters: Adapters = {
       ...demo,
-      async attempt() {
+      async run() {
         return artifact;
       },
       async reconcile() {
@@ -260,13 +260,13 @@ for (const recovering of [false, true])
         randomUUID(),
       );
       if (recovering) {
-        const job = await store.claim("lost-publisher");
-        assert.ok(job);
-        await store.saveArtifact(job.id, "lost-publisher", artifact);
-        await store.beginPublication(job.id, "lost-publisher");
+        const run = await store.claim("lost-publisher");
+        assert.ok(run);
+        await store.saveArtifact(run.id, "lost-publisher", artifact);
+        await store.beginPublication(run.id, "lost-publisher");
         await store.pool.query(
-          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
-          [job.id],
+          "UPDATE project_runs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+          [run.id],
         );
       }
       // Observe the commit before the worker can perform a subsequent transaction.
@@ -281,7 +281,7 @@ for (const recovering of [false, true])
       };
       const adapters: Adapters = {
         ...createDemoAdapters(),
-        async attempt() {
+        async run() {
           assert.equal(recovering, false);
           return artifact;
         },
@@ -302,10 +302,10 @@ for (const recovering of [false, true])
       if (outcome === "closed") {
         assert.equal(competing, null);
         assert.equal((await store.getProject(project.id))?.state, "paused");
-        assert.equal((await store.getProject(project.id))?.attemptCount, 1);
+        assert.equal((await store.getProject(project.id))?.runCount, 1);
         assert.equal(
           (
-            await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [
+            await store.pool.query("SELECT count(*)::int n FROM project_runs WHERE project_id=$1", [
               project.id,
             ])
           ).rows[0].n,
@@ -313,7 +313,7 @@ for (const recovering of [false, true])
         );
       } else {
         assert.ok(competing);
-        assert.equal(competing.project.attemptCount, 2);
+        assert.equal(competing.project.runCount, 2);
         assert.equal(competing.project.pullRequests[0]?.state, "merged");
       }
     });

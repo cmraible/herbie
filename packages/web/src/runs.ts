@@ -1,6 +1,6 @@
-import type { Attempt, Project, ProjectEvent } from "@herbie/contracts";
+import type { Run, Project, ProjectEvent } from "@herbie/contracts";
 
-export const attemptLabels: Record<Attempt["state"], string> = {
+export const runLabels: Record<Run["state"], string> = {
   queued: "Queued",
   running: "Running",
   ready: "Ready to publish",
@@ -12,39 +12,37 @@ export const attemptLabels: Record<Attempt["state"], string> = {
   needs_attention: "Needs attention",
 };
 
-export function groupAttempts(project: Project, events: ProjectEvent[]) {
-  const attempts = (project.attempts ?? []).map((attempt) => ({
-    ...attempt,
+export function groupRuns(project: Project, events: ProjectEvent[]) {
+  const runs = (project.runs ?? []).map((run) => ({
+    ...run,
     events: [] as ProjectEvent[],
   }));
   const history: ProjectEvent[] = [];
-  let legacyAttempt: (typeof attempts)[number] | undefined;
+  let legacyRun: (typeof runs)[number] | undefined;
   for (const event of events) {
-    let attempt = attempts.find((item) => item.id === event.attemptId);
-    if (event.attemptId === undefined) {
+    let run = runs.find((item) => item.id === event.runId);
+    if (event.runId === undefined) {
       // Older servers did not include event attribution.
       history.push(event);
       continue;
     }
-    if (!event.attemptId) {
-      if (["attempt_started", "queued", "retry"].includes(event.type)) {
+    if (!event.runId) {
+      if (["run_started", "queued", "retry"].includes(event.type)) {
         const number =
           /Run #(\d+)/.exec(event.message)?.[1] ?? (event.type === "queued" ? "1" : undefined);
-        legacyAttempt = attempts.find((item) => item.number === Number(number));
-        attempt = legacyAttempt;
+        legacyRun = runs.find((item) => item.number === Number(number));
+        run = legacyRun;
       } else if (
-        ["attempt", "artifact_ready", "publishing", "publication_phase"].includes(event.type)
+        ["run", "artifact_ready", "publishing", "publication_phase"].includes(event.type)
       ) {
-        attempt = legacyAttempt;
+        run = legacyRun;
       } else if (event.type === "pull_request_opened") {
-        attempt = attempts.find(
-          (item) => item.pullRequest && event.message.includes(item.pullRequest.url),
-        );
+        run = runs.find((item) => item.pullRequest && event.message.includes(item.pullRequest.url));
       }
     }
-    (attempt?.events ?? history).push(event);
+    (run?.events ?? history).push(event);
   }
-  return { attempts: attempts.reverse(), history };
+  return { runs: runs.reverse(), history };
 }
 
 export function reviewLabel(pr: Project["pullRequest"]): string {

@@ -60,22 +60,22 @@ test("merged demo work keeps advancing until cancelled and a simulated failure s
   );
   const adapters = createDemoAdapters();
   await runWorkerOnce(store, adapters, "worker-one");
-  const [job] = await store.reviewJobs();
-  assert.ok(job);
+  const [run] = await store.reviewRuns();
+  assert.ok(run);
   const first = (await store.getProject(project.id))?.pullRequest;
   assert.ok(first);
-  await store.reconcile(job.id, "merged");
+  await store.reconcile(run.id, "merged");
   await runWorkerOnce(store, adapters, "restarted-worker");
   const next = await store.getProject(project.id);
   assert.equal(next?.state, "awaiting_review");
-  assert.equal(next.attemptCount, 2);
+  assert.equal(next.runCount, 2);
   assert.notEqual(next.pullRequest?.branch, first.branch);
-  const [second] = await store.reviewJobs();
+  const [second] = await store.reviewRuns();
   assert.ok(second);
   await store.reconcile(second.id, "merged");
   assert.equal((await store.getProject(project.id))?.state, "queued");
   await runWorkerOnce(store, adapters, "worker-one");
-  assert.equal((await store.getProject(project.id))?.attemptCount, 3);
+  assert.equal((await store.getProject(project.id))?.runCount, 3);
   await store.control(project.id, "demo-user", "cancel");
   assert.equal(await runWorkerOnce(store, adapters, "worker-one"), false);
   const { project: failed } = await store.createProject(
@@ -89,10 +89,10 @@ test("merged demo work keeps advancing until cancelled and a simulated failure s
   assert.equal((await store.getProject(failed.id))?.pullRequest, null);
 });
 
-test("worker retains raw redacted causes privately and persists safe attempt reference without retry", async (t) => {
+test("worker retains raw redacted causes privately and persists safe run reference without retry", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
   if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL");
-  const { DaytonaAttemptError } = await import("@herbie/loop/daytona-attempt");
+  const { DaytonaRunError } = await import("@herbie/loop/daytona-run");
   const schema = "diagnostic_" + randomUUID().replaceAll("-", "");
   const admin = new pg.Pool({ connectionString: database });
   await admin.query("CREATE SCHEMA " + schema);
@@ -113,7 +113,7 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   );
   const output: string[] = [];
   t.mock.method(console, "error", (line: string) => output.push(line));
-  const error = new DaytonaAttemptError(
+  const error = new DaytonaRunError(
     [
       Object.assign(new Error("setup failed"), {
         stderr: "useful synthetic failure",
@@ -124,11 +124,11 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   );
   error.diagnostics = [{ stage: "repository_clone", cause: "http_error", httpStatus: 503 }];
   error.cleanup = "confirmed";
-  let attempts = 0;
+  let runs = 0;
   const adapters = {
     ...createDemoAdapters(),
-    async attempt() {
-      attempts++;
+    async run() {
+      runs++;
       throw error;
     },
   };
@@ -147,5 +147,5 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   assert.ok(!saved?.error?.includes("repository_clone"));
   assert.ok(!saved?.error?.includes("useful synthetic failure"));
   assert.equal(await runWorkerOnce(store, adapters, "fixture-worker"), false);
-  assert.equal(attempts, 1);
+  assert.equal(runs, 1);
 });

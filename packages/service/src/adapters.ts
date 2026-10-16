@@ -1,5 +1,5 @@
 import type { Project, Repository, RepositoryDiscovery } from "@herbie/contracts";
-import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
+import type { DaytonaRunChanges } from "@herbie/loop/daytona-run";
 
 export interface RepositoryAccess {
   repository: string;
@@ -9,7 +9,7 @@ export interface RepositoryAccess {
 export interface Execution {
   project: Project;
   repository: RepositoryAccess;
-  attemptId: string;
+  runId: string;
   branch: string;
   signal?: AbortSignal;
   ciRepair?: CiFailure;
@@ -61,7 +61,7 @@ export type PublicationRetryCheck =
   | "pull_request_exists"
   | "branch_exists"
   | "base_changed";
-export class KnownAttemptFailure extends Error {}
+export class KnownRunFailure extends Error {}
 export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
@@ -84,14 +84,11 @@ export interface Adapters {
   reconciliationRepository(repository: string): Promise<RepositoryAccess>;
   repositories(userId: string): Promise<Repository[]>;
   discoverRepositories?(userId: string): Promise<RepositoryDiscovery>;
-  attempt(
-    execution: Execution,
-    report: (message: string) => Promise<void>,
-  ): Promise<DaytonaAttemptChanges>;
+  run(execution: Execution, report: (message: string) => Promise<void>): Promise<DaytonaRunChanges>;
   // Recheck ownership after awaited preparation and immediately before each remote write.
   publish(
     execution: Execution,
-    changes: DaytonaAttemptChanges,
+    changes: DaytonaRunChanges,
     requireLease: () => Promise<void>,
     reportPhase?: (phase: PublicationPhase) => Promise<void>,
   ): Promise<Omit<PullRequest, "state"> & { state?: PullRequest["state"] }>;
@@ -100,7 +97,7 @@ export interface Adapters {
   ): Promise<"absent" | "pull_request_exists" | "branch_exists">;
   checkPublicationRetry?(
     execution: Execution,
-    changes: DaytonaAttemptChanges,
+    changes: DaytonaRunChanges,
   ): Promise<PublicationRetryCheck>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
 }

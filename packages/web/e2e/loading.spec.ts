@@ -9,7 +9,7 @@ const fixtureProject = {
   repository: "demo/sample",
   name: "Keep loaded work visible",
   prompt: "Keep loaded work visible",
-  attemptCount: 1,
+  runCount: 1,
   state: "running",
   createdAt: "2026-10-13T00:00:00.000Z",
   updatedAt: "2026-10-13T00:00:00.000Z",

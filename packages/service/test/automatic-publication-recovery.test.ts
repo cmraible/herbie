@@ -52,7 +52,7 @@ async function fixture(t: TestContext) {
       sandboxDeleted: true as const,
     },
   };
-  let attempts = 0,
+  let runs = 0,
     publishes = 0;
   let remote: PullRequest | null = null;
   let check: PublicationRetryCheck = "ready";
@@ -66,8 +66,8 @@ async function fixture(t: TestContext) {
     async reconciliationRepository() {
       return access;
     },
-    async attempt() {
-      attempts++;
+    async run() {
+      runs++;
       return artifact;
     },
     async reconcile() {
@@ -89,21 +89,21 @@ async function fixture(t: TestContext) {
     },
   };
   const row = async () => {
-    const r = await pool.query("SELECT * FROM jobs WHERE project_id=$1", [project.id]);
+    const r = await pool.query("SELECT * FROM project_runs WHERE project_id=$1", [project.id]);
     return r.rows[0]!;
   };
   const due = async () => {
-    await pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE project_id=$1", [
+    await pool.query("UPDATE project_runs SET eligible_at=clock_timestamp() WHERE project_id=$1", [
       project.id,
     ]);
   };
   async function legacy() {
-    const job = await store.claim("old", 30_000, "live");
-    assert.ok(job);
-    await store.saveArtifact(job.id, "old", artifact);
-    await store.beginPublication(job.id, "old");
+    const run = await store.claim("old", 30_000, "live");
+    assert.ok(run);
+    await store.saveArtifact(run.id, "old", artifact);
+    await store.beginPublication(run.id, "old");
     await store.publicationUncertain(
-      job.id,
+      run.id,
       "old",
       "preflight_reconciliation (pull_request_not_found)",
     );
@@ -118,8 +118,8 @@ async function fixture(t: TestContext) {
     row,
     due,
     legacy,
-    get attempts() {
-      return attempts;
+    get runs() {
+      return runs;
     },
     get publishes() {
       return publishes;
@@ -149,7 +149,7 @@ test("persisted backoff uses bounded equal jitter and caps without overflow", ()
   );
 });
 
-test("initial JWT signing failure recovers the saved artifact after credentials are fixed without another attempt", async (t) => {
+test("initial JWT signing failure recovers the saved artifact after credentials are fixed without another run", async (t) => {
   const f = await fixture(t);
   if (!f) return;
   const reconcile = f.adapters.reconcile;
@@ -159,7 +159,7 @@ test("initial JWT signing failure recovers the saved artifact after credentials 
   };
   await runWorkerOnce(f.store, f.adapters, "first");
   assert.equal((await f.store.getProject(f.project.id))?.state, "needs_attention");
-  assert.equal(f.attempts, 1);
+  assert.equal(f.runs, 1);
   assert.match(
     (await f.store.getProject(f.project.id))?.error ?? "",
     /Automatic publication recovery #1 scheduled for/,
@@ -169,13 +169,13 @@ test("initial JWT signing failure recovers the saved artifact after credentials 
   await f.due();
   await runWorkerOnce(new Store(f.pool, () => 0), f.adapters, "restarted");
   assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
-  assert.equal((await f.store.getProject(f.project.id))?.attemptCount, 1);
-  assert.equal(f.attempts, 1);
+  assert.equal((await f.store.getProject(f.project.id))?.runCount, 1);
+  assert.equal(f.runs, 1);
   assert.equal(f.publishes, 1);
   assert.equal((await f.row()).publication_retry_count, 0);
 });
 
-test("legacy missing-PR jobs recover automatically and network failures preserve increasing deadlines across workers", async (t) => {
+test("legacy missing-PR runs recover automatically and network failures preserve increasing deadlines across workers", async (t) => {
   const f = await fixture(t);
   if (!f) return;
   await f.legacy();
@@ -201,9 +201,9 @@ test("legacy missing-PR jobs recover automatically and network failures preserve
   f.adapters.checkPublicationRetry = async () => "ready";
   await f.due();
   await runWorkerOnce(restarted, f.adapters, "fixed");
-  assert.equal(f.attempts, 0);
+  assert.equal(f.runs, 0);
   assert.equal(f.publishes, 1);
-  assert.equal((await f.store.getProject(f.project.id))?.attemptCount, 1);
+  assert.equal((await f.store.getProject(f.project.id))?.runCount, 1);
 });
 
 for (const conflict of ["branch_exists", "base_changed"] as const)
@@ -236,7 +236,7 @@ test("ambiguous successful PR creation is reconciled without duplicate writes", 
   await runWorkerOnce(f.store, f.adapters, "first");
   await f.due();
   await runWorkerOnce(f.store, f.adapters, "recovery");
-  assert.equal(f.attempts, 1);
+  assert.equal(f.runs, 1);
   assert.equal(f.publishes, 1);
   assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
 });
@@ -271,14 +271,14 @@ for (const mode of ["cancel", "lease-loss"] as const)
       if (mode === "cancel") await f.store.control(f.project.id, "owner", "cancel");
       else
         await f.pool.query(
-          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE project_id=$1",
+          "UPDATE project_runs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE project_id=$1",
           [f.project.id],
         );
       return "ready";
     };
     await runWorkerOnce(f.store, f.adapters, "recovery");
     assert.equal(f.publishes, 0);
-    assert.equal(f.attempts, 0);
+    assert.equal(f.runs, 0);
     if (mode === "cancel") {
       assert.equal((await f.store.getProject(f.project.id))?.state, "cancelled");
       await f.due();
@@ -289,11 +289,11 @@ for (const mode of ["cancel", "lease-loss"] as const)
 test("saved ready artifact authorization failure remains eligible for publication recovery", async (t) => {
   const f = await fixture(t);
   if (!f) return;
-  const job = await f.store.claim("old", 30_000, "live");
-  assert.ok(job);
-  await f.store.saveArtifact(job.id, "old", f.artifact);
-  await f.pool.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [
-    job.id,
+  const run = await f.store.claim("old", 30_000, "live");
+  assert.ok(run);
+  await f.store.saveArtifact(run.id, "old", f.artifact);
+  await f.pool.query("UPDATE project_runs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [
+    run.id,
   ]);
   f.adapters.reconciliationRepository = async () => {
     throw new TypeError("auth unavailable");
@@ -301,7 +301,7 @@ test("saved ready artifact authorization failure remains eligible for publicatio
   await runWorkerOnce(f.store, f.adapters, "recovery");
   assert.equal((await f.row()).stage, "publishing");
   assert.equal((await f.row()).publication_retry_count, 1);
-  assert.equal(f.attempts, 0);
+  assert.equal(f.runs, 0);
 });
 
 test("ambiguous branch push without a confirmed PR cannot be replayed or overwrite that branch", async (t) => {
@@ -317,7 +317,7 @@ test("ambiguous branch push without a confirmed PR cannot be replayed or overwri
   await f.due();
   await runWorkerOnce(f.store, f.adapters, "recover");
   assert.equal(writes, 1);
-  assert.equal(f.attempts, 1);
+  assert.equal(f.runs, 1);
   assert.equal((await f.row()).publication_blocked, true);
   await f.due();
   assert.equal(await runWorkerOnce(f.store, f.adapters, "later"), false);
@@ -328,13 +328,13 @@ test("corrupt saved evidence blocks recovery before any remote write", async (t)
   if (!f) return;
   await f.legacy();
   await f.pool.query(
-    "UPDATE jobs SET artifact=jsonb_set(artifact,'{verification,patchSha256}','\"wrong\"') WHERE project_id=$1",
+    "UPDATE project_runs SET artifact=jsonb_set(artifact,'{verification,patchSha256}','\"wrong\"') WHERE project_id=$1",
     [f.project.id],
   );
   await runWorkerOnce(f.store, f.adapters, "recover");
   assert.equal((await f.row()).publication_blocked, true);
   assert.equal(f.publishes, 0);
-  assert.equal(f.attempts, 0);
+  assert.equal(f.runs, 0);
 });
 
 test("identical capped retries update status without flooding the event feed; changed failures remain visible", async (t) => {
@@ -365,7 +365,7 @@ test("identical capped retries update status without flooding the event feed; ch
     (await f.store.getProject(f.project.id))?.error ?? "",
     /recovery #10 scheduled for .*Failure reference:/,
   );
-  assert.equal(f.attempts, 1);
+  assert.equal(f.runs, 1);
   assert.equal(f.publishes, 0);
   f.adapters.reconcile = async () => null;
   f.adapters.checkPublicationRetry = async () => "pull_request_exists";
@@ -416,20 +416,21 @@ for (const recovering of [false, true])
     if (!f) return;
     // Simulate a pre-upgrade artifact by removing the optional field from storage.
     const { pullRequestBody: _body, ...legacy } = f.artifact;
-    const job = await f.store.claim("old", 30_000, "live");
-    assert.ok(job);
-    await f.store.saveArtifact(job.id, "old", legacy);
+    const run = await f.store.claim("old", 30_000, "live");
+    assert.ok(run);
+    await f.store.saveArtifact(run.id, "old", legacy);
     if (recovering) {
-      await f.store.beginPublication(job.id, "old");
-      await f.store.publicationUncertain(job.id, "old", "unknown result");
+      await f.store.beginPublication(run.id, "old");
+      await f.store.publicationUncertain(run.id, "old", "unknown result");
       await f.due();
     } else
-      await f.pool.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [
-        job.id,
-      ]);
+      await f.pool.query(
+        "UPDATE project_runs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
+        [run.id],
+      );
     await runWorkerOnce(f.store, f.adapters, "recovery");
     assert.equal(f.publishes, 1);
-    assert.equal(f.attempts, 0, "saved patches do not launch another run");
+    assert.equal(f.runs, 0, "saved patches do not launch another run");
     assert.equal((await f.row()).publication_blocked, false);
     assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
   });

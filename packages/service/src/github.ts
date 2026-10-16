@@ -880,7 +880,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         };
       } catch (error) {
         logFailure(error, { component: "github-publication-response" });
-        // Lost successful response or duplicate request: read the unique attempt branch.
+        // Lost successful response or duplicate request: read the unique run branch.
         const recovered = await findPullRequest(token, input.repository, input.head);
         if (recovered) return recovered;
         throw error;

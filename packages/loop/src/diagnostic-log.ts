@@ -66,7 +66,7 @@ const omitKey =
 export interface DiagnosticContext {
   component: string;
   projectId?: string;
-  jobId?: string;
+  runId?: string;
   stage?: string;
 }
 export function diagnosticRecord(

@@ -1,13 +1,13 @@
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 import { Daytona } from "@daytona/sdk";
-import { runDaytonaAttempt } from "@herbie/loop/daytona-attempt";
+import { runDaytonaRun } from "@herbie/loop/daytona-run";
 import {
   publishPatch,
   PatchPublicationError,
   PatchHeadChangedError,
 } from "@herbie/loop/publish-patch";
 import {
-  KnownAttemptFailure,
+  KnownRunFailure,
   StaleRepairError,
   PublicationBlockedError,
   type Adapters,
@@ -160,9 +160,9 @@ export function createLiveAdapters(
       return github.authorize(await auth.userToken(userId), repository);
     },
     reconciliationRepository: (repository) => github.reconciliationRepository(repository),
-    async attempt(execution, report) {
+    async run(execution, report) {
       registerDiagnosticSecret(execution.project.prompt);
-      if (!config) throw new KnownAttemptFailure("Live execution is disabled by the operator");
+      if (!config) throw new KnownRunFailure("Live execution is disabled by the operator");
       const openPullRequests = execution.project.pullRequests.filter((pr) => pr.state === "open");
       const project = execution.feedback
         ? `${execution.project.prompt}
@@ -189,7 +189,7 @@ Inspect these branches before choosing your change. Make one small, independentl
         target: config.target,
         requestTimeoutMs: 30_000,
       });
-      const changes = await runDaytonaAttempt(
+      const changes = await runDaytonaRun(
         (params, options) => daytona.create(params, options),
         {
           signal: execution.signal,
@@ -212,7 +212,7 @@ Inspect these branches before choosing your change. Make one small, independentl
     },
     async publish(execution, changes, requireLease, reportPhase) {
       const update = execution.feedback ?? execution.ciRepair;
-      if (!config) throw new KnownAttemptFailure("Live execution is disabled by the operator");
+      if (!config) throw new KnownRunFailure("Live execution is disabled by the operator");
       // Authorize again at publication; a removed user permission must stop new writes.
       await reportPhase?.("authorization");
       const access = await github.authorize(

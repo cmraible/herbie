@@ -83,7 +83,7 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
   const base = `http://127.0.0.1:${address.port}`;
   const headers = { origin: "http://localhost:8787", cookie: `herbie_session=${testSessionToken}` };
   const connect = (id = project.id) =>
-    new WebSocket(`${base}/api/stream?project=${id}`, { headers });
+    new WebSocket(`${base}/api/stream?project=${id}&version=3`, { headers });
   for (const [path, supplied, status] of [
     ["/api/stream", { ...headers, origin: "https://evil.example" }, 403],
     ["/api/stream", { origin: headers.origin }, 401],
@@ -104,31 +104,28 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
       initial.projects.map((g) => g.id),
       [project.id],
     );
-  await worker.appendEvent(project.id, "attempt", "Worker progress");
+  await worker.appendEvent(project.id, "run", "Worker progress");
   await next((m) => m.type === "events" && m.events.some((e) => e.message === "Worker progress"));
   const transcript = JSON.stringify({
     method: "item/commandExecution/outputDelta",
     params: { delta: "output ".repeat(1000) },
   });
-  await worker.appendEvent(project.id, "agent", transcript, project.attempts![0]!.id);
+  await worker.appendEvent(project.id, "agent", transcript, project.runs![0]!.id);
   await next(
     (m) =>
       m.type === "events" &&
       m.events.some(
-        (e) =>
-          e.type === "agent" &&
-          e.message === transcript &&
-          e.attemptId === project.attempts![0]!.id,
+        (e) => e.type === "agent" && e.message === transcript && e.runId === project.runs![0]!.id,
       ),
   );
   const transaction = await workerPool.connect();
   try {
     await transaction.query("BEGIN");
     await transaction.query(
-      "INSERT INTO project_events(project_id,type,message) VALUES ($1,'attempt','Late commit')",
+      "INSERT INTO project_events(project_id,type,message) VALUES ($1,'run','Late commit')",
       [project.id],
     );
-    await worker.appendEvent(project.id, "attempt", "Earlier commit");
+    await worker.appendEvent(project.id, "run", "Earlier commit");
     await next((m) => m.type === "events" && m.events.some((e) => e.message === "Earlier commit"));
     await transaction.query("COMMIT");
     await next((m) => m.type === "events" && m.events.some((e) => e.message === "Late commit"));
@@ -145,7 +142,7 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
     url: "https://github.com/demo/example/pull/42",
   };
   await workerPool.query(
-    "UPDATE jobs SET stage='awaiting_review',branch=$2,pull_request=$3 WHERE project_id=$1",
+    "UPDATE project_runs SET stage='awaiting_review',branch=$2,pull_request=$3 WHERE project_id=$1",
     [project.id, pr.branch, pr],
   );
   await next((m) => m.type === "projects" && m.projects[0]?.pullRequests[0]?.state === "open");
@@ -171,7 +168,7 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
   );
   await disconnected;
   await workerPool.query(
-    "INSERT INTO project_events(project_id,type,message) SELECT $1,'attempt','Offline ' || n FROM generate_series(1,1005) n",
+    "INSERT INTO project_events(project_id,type,message) SELECT $1,'run','Offline ' || n FROM generate_series(1,1005) n",
     [project.id],
   );
   const reconnected = connect();
@@ -183,7 +180,7 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
   );
   revoked = true;
   const closed = once(reconnected, "close");
-  await worker.appendEvent(project.id, "attempt", "After logout");
+  await worker.appendEvent(project.id, "run", "After logout");
   const [code] = await closed;
   assert.equal(code, 1008);
 });

@@ -5,7 +5,7 @@ export function errorReference(message: string): string | null {
 }
 
 export function activityMessage(project: Project, event: ProjectEvent): string | null {
-  const run = project.attempts?.find((attempt) => attempt.id === event.attemptId);
+  const run = project.runs?.find((run) => run.id === event.runId);
   const runNumber = run?.number ?? Number(/Run #(\d+)/.exec(event.message)?.[1] ?? 1);
   const pullRequest = run?.pullRequest ?? project.pullRequests.at(-1) ?? project.pullRequest;
   const prNumber = pullRequest?.number;
@@ -14,7 +14,7 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
     case "queued":
     case "retry":
       return `Run #${runNumber} queued`;
-    case "attempt_started":
+    case "run_started":
       return `Run #${runNumber} started`;
     case "renamed":
       return null;
@@ -28,9 +28,9 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       return "Project resume requested";
     case "cancel":
       return "Project cancelled";
-    case "attempt":
+    case "run":
     case "ci_repair": {
-      const stage = /Attempt stage: ([a-z_]+)/.exec(event.message)?.[1];
+      const stage = /Run stage: ([a-z_]+)/.exec(event.message)?.[1];
       if (stage === "sandbox_creation") return "Preparing the agent's environment";
       if (stage === "repository_clone") return `Cloning ${project.repository}`;
       if (stage === "model_execution") return "Agent started working";
@@ -72,7 +72,7 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
         ? `Agent was interrupted while fixing checks. ${prNumber ? `Pull request #${prNumber}` : "The pull request"} needs your attention`
         : `Agent couldn't fix the failing checks. ${prNumber ? `Pull request #${prNumber}` : "The pull request"} needs your attention`;
     case "recovery_required":
-      if (event.message.startsWith("Worker connection was lost during an attempt"))
+      if (event.message.startsWith("Worker connection was lost during a run"))
         return `Run #${runNumber} was interrupted. Retry to start a new run`;
       return null;
     case "publication_uncertain":
@@ -83,7 +83,7 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       if (workflowPermissionMessage(event.message)) return workflowPermissionMessage(event.message);
       if (event.message.includes("saved artifact lacks matching test and cleanup evidence"))
         return "Run failed. Your patches are saved.";
-      if (event.message.includes("attempt branch exists"))
+      if (event.message.includes("run branch exists"))
         return "Pull request was changed outside Herbie. Agent paused";
       if (event.message.includes("original base"))
         return "Repository history changed. Agent paused";
@@ -110,19 +110,18 @@ export function projectErrorMessage(project: Project): string {
   const error = project.error ?? "";
   const permission = workflowPermissionMessage(error);
   if (permission) return permission;
-  if (error.includes("Worker connection was lost during an attempt"))
-    return `Run #${project.attemptCount} was interrupted. Retry to start a new run`;
+  if (error.includes("Worker connection was lost during a run"))
+    return `Run #${project.runCount} was interrupted. Retry to start a new run`;
   if (error.includes("saved artifact lacks matching test and cleanup evidence"))
     return "Run failed. Your patches are saved.";
   if (error.startsWith("Run failed.")) return error.split(" Reference:")[0];
-  if (error.startsWith("Attempt failed")) return "Run failed. No patches were saved.";
+  if (error.startsWith("Run failed")) return "Run failed. No patches were saved.";
   if (error.includes("Publication remains unconfirmed"))
     return "Preparing the pull request is taking longer than expected. Retrying automatically";
   if (error.includes("CI repair stopped"))
     return "Agent couldn't fix the failing checks. Pull request needs your attention";
   if (error.includes("original base")) return "Repository history changed. Agent paused";
-  if (error.includes("attempt branch exists"))
-    return "Pull request preparation paused. Agent paused";
+  if (error.includes("run branch exists")) return "Pull request preparation paused. Agent paused";
   if (error.startsWith("Live execution is disabled")) return "Live runs aren't configured yet";
   return "This project needs your attention.";
 }

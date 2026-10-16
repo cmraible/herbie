@@ -29,7 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Browser-safe transport shared by the CLI and web. Sessions are never part of job data. */
+/** Browser-safe transport shared by the CLI and web. Sessions are never part of run data. */
 export function createClient(options: { baseUrl?: string; token?: string; origin?: string } = {}) {
   const baseUrl = options.baseUrl?.replace(/\/$/, "") ?? "";
   async function request<T>(
@@ -40,7 +40,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
   ): Promise<T> {
     const headers = new Headers({
       accept: "application/json",
-      "x-herbie-project-version": "2",
+      "x-herbie-project-version": "3",
       "x-herbie-repository-version": "2",
     });
     if (body !== undefined) headers.set("content-type", "application/json");

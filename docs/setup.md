@@ -32,7 +32,7 @@ Open your HTTPS hostname and sign in with GitHub. To run projects, set
 Daytona/OpenAI usage and can publish real PRs.
 
 Rerun the same command after code or configuration changes. Pause projects and let
-active attempts finish before rebuilding or stopping.
+active runs finish before rebuilding or stopping.
 
 ```sh
 docker compose logs -f herbie tunnel  # View logs

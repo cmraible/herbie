@@ -46,7 +46,7 @@ artifact using private Kustomization patches. A new artifact changes the pinned
 Deployment image and therefore triggers a rollout. Git remains read-only; there
 are no image-update commits or mutable container tags driving deployment. Numeric
 versions prevent an older CI run from replacing a newer release. The publishing
-job rechecks main immediately before announcing the artifact.
+run rechecks main immediately before announcing the artifact.
 
 The consumer must supply its private workload configuration as patches for the
 four resource identities in `scripts/build-release-artifact.mjs`. The unpatched
@@ -85,19 +85,19 @@ release check, not a claim that a generic secret scan can prove absence of secre
   probe including process overhead. A database outage must not cause restart churn.
 - SIGTERM closes the listener and stops new claims, then waits for active bounded
   work and cleanup before closing the pool. Allow 40 minutes of termination grace
-  for the roughly 35-minute attempt lifecycle plus publication/database overhead.
+  for the roughly 35-minute run lifecycle plus publication/database overhead.
   This is an operating allowance, not a new global deadline. Never force-delete
   an active coordinator or assume a terminated process proves sandbox cleanup.
 - One steady replica with a rolling strategy using `maxUnavailable: 0` and
-  `maxSurge: 1`, and no autoscaler. During a rollout, both pods may serve HTTP,
-  but a PostgreSQL session advisory lock permits only one background coordinator.
-  The old coordinator drains before releasing ownership to the replacement.
+  `maxSurge: 1`, and no autoscaler. During compatible rollouts, both pods may serve
+  HTTP, but a PostgreSQL session advisory lock permits only one background coordinator.
+  For the project-runs schema migration, stop new submissions and drain the old
+  coordinator before deploying; the old image cannot run against the renamed table.
   During an upgrade from before `maxWip` support, keep new projects at the default
   WIP of 1 until every HTTP replica is upgraded. Clients omit that default field
   for older strict APIs; larger limits require the new API and are never silently
-  downgraded. New clients request version 2 project responses; older clients keep
-  receiving the original shape without the new fields. A database trigger mirrors old coordinators' PR writes into job
-  history throughout the overlap, including publications after migration.
+  downgraded. New clients request version 3 project responses; older clients keep
+  receiving the original shape without the new fields.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
   Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
 - Starting the process runs migrations even when `HERBIE_EXECUTION_ENABLED=false`.
@@ -119,10 +119,10 @@ remain in private infrastructure; removing the Workers runtime does not retire i
 ## Handoff and rollback
 
 Plan the handoff in the private infrastructure repository. Before either starting
-against production or changing DNS, inventory jobs, leases, sandboxes, and uncertain
+against production or changing DNS, inventory runs, leases, sandboxes, and uncertain
 publication; stop new submissions and drain the old coordinator. Confirm it cannot
-restart or run reconciliation. Only then start the new coordinator with execution
-disabled, verify exact revision and database readiness, switch ingress and GitHub
+restart or run reconciliation. Deploy the new image with execution disabled so it
+applies the migration, verify exact revision and database readiness, switch ingress and GitHub
 App callback/setup/webhook URLs, test owner authentication, and explicitly enable
 execution. Do not trigger a paid smoke project without separate authorization.
 

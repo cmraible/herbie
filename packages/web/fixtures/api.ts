@@ -5,7 +5,7 @@ import {
   projectUpdate,
   type Project,
   type ProjectEvent,
-  type Attempt,
+  type Run,
 } from "@herbie/contracts";
 
 const repository = "acme/storefront";
@@ -15,7 +15,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")
 export const previewProjectId = id(1);
 
 function fixtures() {
-  const attempts: Attempt[] = [
+  const runs: Run[] = [
     {
       id: id(101),
       number: 1,
@@ -53,7 +53,7 @@ function fixtures() {
       "Validate email addresses before submitting the signup form. Show clear, actionable errors next to each field, preserve entered values after a failed submission, and add coverage for the common failure cases.",
     maxWip: 1,
     model: "gpt-6-luna",
-    attemptCount: 3,
+    runCount: 3,
     mode: "live",
     state: "awaiting_review",
     stopRequested: null,
@@ -61,9 +61,9 @@ function fixtures() {
     updatedAt: date(15, 18),
     error: null,
     cleanupStatus: "not_required",
-    attempts,
-    pullRequest: attempts[2]!.pullRequest,
-    pullRequests: attempts.flatMap((a) => (a.pullRequest ? [a.pullRequest] : [])),
+    runs,
+    pullRequest: runs[2]!.pullRequest,
+    pullRequests: runs.flatMap((a) => (a.pullRequest ? [a.pullRequest] : [])),
   };
   const projects: Project[] = [
     base,
@@ -74,8 +74,8 @@ function fixtures() {
       prompt:
         "Reduce repeated database queries on the search results page and add a regression test for query count.",
       state: "running",
-      attemptCount: 1,
-      attempts: [
+      runCount: 1,
+      runs: [
         { id: id(201), number: 1, state: "running", createdAt: date(15, 20), pullRequest: null },
       ],
       pullRequest: null,
@@ -88,8 +88,8 @@ function fixtures() {
       prompt:
         "Make the cart drawer accessible by keyboard, including focus restoration when it closes.",
       state: "paused",
-      attemptCount: 1,
-      attempts: [
+      runCount: 1,
+      runs: [
         { id: id(301), number: 1, state: "ready", createdAt: date(14, 30), pullRequest: null },
       ],
       pullRequest: null,
@@ -101,8 +101,8 @@ function fixtures() {
       name: "Refresh the checkout layout",
       prompt: "Simplify the checkout summary and make shipping costs visible before payment.",
       state: "cancelled",
-      attemptCount: 1,
-      attempts: [
+      runCount: 1,
+      runs: [
         { id: id(401), number: 1, state: "cancelled", createdAt: date(13, 30), pullRequest: null },
       ],
       pullRequest: null,
@@ -113,22 +113,22 @@ function fixtures() {
   const events: ProjectEvent[] = [];
   const log = (
     projectId: string,
-    attemptId: string | null,
+    runId: string | null,
     type: string,
     message: string,
     createdAt = new Date().toISOString(),
-  ) => events.push({ id: ++sequence, projectId, attemptId, type, message, createdAt });
+  ) => events.push({ id: ++sequence, projectId, runId, type, message, createdAt });
   log(base.id, null, "queued", "Run #1 queued", date(12, 45));
-  for (const a of attempts) {
+  for (const a of runs) {
     const hour = 12 + a.number;
-    log(base.id, a.id, "attempt_started", `Run #${a.number} started`, date(hour));
-    log(base.id, a.id, "attempt", "Attempt stage: repository_clone", date(hour, 2));
-    log(base.id, a.id, "attempt", "Attempt stage: model_execution", date(hour, 3));
+    log(base.id, a.id, "run_started", `Run #${a.number} started`, date(hour));
+    log(base.id, a.id, "run", "Run stage: repository_clone", date(hour, 2));
+    log(base.id, a.id, "run", "Run stage: model_execution", date(hour, 3));
     if (a.number === 2) {
       log(
         base.id,
         a.id,
-        "attempt",
+        "run",
         "Added coverage for expired invitations and duplicate email addresses.",
         date(hour, 6),
       );
@@ -140,8 +140,8 @@ function fixtures() {
         date(hour, 9),
       );
     } else {
-      log(base.id, a.id, "attempt", "Project completed in sandbox preview", date(hour, 7));
-      log(base.id, a.id, "attempt", "Publication phase: state_persistence", date(hour, 12));
+      log(base.id, a.id, "run", "Project completed in sandbox preview", date(hour, 7));
+      log(base.id, a.id, "run", "Publication phase: state_persistence", date(hour, 12));
       log(
         base.id,
         a.id,
@@ -162,16 +162,16 @@ function fixtures() {
     }
   }
   for (const g of projects.slice(1)) {
-    log(g.id, g.attempts![0]!.id, "attempt_started", "Run #1 started", g.attempts![0]!.createdAt);
+    log(g.id, g.runs![0]!.id, "run_started", "Run #1 started", g.runs![0]!.createdAt);
     log(
       g.id,
-      g.attempts![0]!.id,
-      "attempt",
+      g.runs![0]!.id,
+      "run",
       g.state === "running"
-        ? "Attempt stage: model_execution"
+        ? "Run stage: model_execution"
         : g.state === "paused"
           ? "Project completed in sandbox preview"
-          : "Attempt stage: sandbox_deletion",
+          : "Run stage: sandbox_deletion",
       date(15, 25),
     );
   }
@@ -216,8 +216,8 @@ export function fixtureApi(): Plugin {
               ownerId: "local-preview",
               mode: "live",
               state: "queued",
-              attemptCount: 0,
-              attempts: [],
+              runCount: 0,
+              runs: [],
               pullRequest: null,
               pullRequests: [],
               stopRequested: null,
@@ -249,8 +249,8 @@ export function fixtureApi(): Plugin {
           else if (action === "resume" || action === "retry") project.state = "queued";
           else if (action === "cancel") {
             project.state = "cancelled";
-            for (const attempt of project.attempts ?? [])
-              if (!["completed", "failed"].includes(attempt.state)) attempt.state = "cancelled";
+            for (const run of project.runs ?? [])
+              if (!["completed", "failed"].includes(run.state)) run.state = "cancelled";
           } else return send({ error: "Not available in this preview" }, 404);
           project.updatedAt = new Date().toISOString();
           log(

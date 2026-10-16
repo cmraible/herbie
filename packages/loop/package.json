@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./daytona-attempt": "./dist/daytona-attempt.js",
+    "./daytona-run": "./dist/daytona-run.js",
     "./publish-patch": "./dist/publish-patch.js",
     "./diagnostic-log": "./dist/diagnostic-log.js"
   },

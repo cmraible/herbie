@@ -54,6 +54,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
     origin,
     "content-type": "application/json",
     "idempotency-key": randomUUID(),
+    "x-herbie-project-version": "3",
   };
   const input = { repository: "demo/example", prompt: "Do not execute this project" };
   for (let request = 0; request < 2; request++) {
@@ -91,7 +92,7 @@ test("execution-disabled HTTP blocks creation and resume before authorization wh
   }
   assert.equal(authorizationCalls, 0);
   assert.equal(await store.claim("disabled-http-test", 30_000, "demo"), null);
-  const status = await fetch(`${base}/api/projects/${project.id}`, { headers: { cookie } });
+  const status = await fetch(`${base}/api/projects/${project.id}`, { headers });
   assert.equal(projectSchema.parse(await status.json()).state, "paused");
   assert.equal(
     (await fetch(`${base}/api/projects/${project.id}/events`, { headers: { cookie } })).status,

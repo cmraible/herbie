@@ -28,7 +28,7 @@ async function fakeCodex(t: TestContext) {
   return { directory, record, env: { ...process.env, PATH: directory, CODEX_TEST_RECORD: record } };
 }
 
-test("runs one Codex attempt with the repository and project, exposing both output streams", async (t) => {
+test("runs one Codex run with the repository and project, exposing both output streams", async (t) => {
   const { env, record, directory } = await fakeCodex(t);
   const repo = join(directory, "my project");
   await mkdir(repo);

@@ -18,16 +18,13 @@ test("nested errors keep useful stacks and command metadata while redacting cred
     headers: { authorization: "Bearer secret-header" },
     env: { OPENAI_API_KEY: "secret-env" },
   });
-  const error = new AggregateError(
-    [new Error("attempt setup failed", { cause })],
-    "operation failed",
-  );
+  const error = new AggregateError([new Error("run setup failed", { cause })], "operation failed");
   const record = diagnosticRecord(
     error,
     {
-      component: "attempt",
+      component: "run",
       projectId: "fixture-project",
-      jobId: "fixture-job",
+      runId: "fixture-run",
       stage: "repository_clone",
     },
     "fixture-reference",

@@ -18,14 +18,14 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     prompt: "Push updates",
     mode: "live",
     state: "awaiting_review",
-    attemptCount: 1,
+    runCount: 1,
     createdAt: "2026-10-15T00:00:00Z",
     updatedAt: "2026-10-15T00:00:00Z",
     stopRequested: null,
     error: null,
     pullRequest: pr,
     pullRequests: [pr],
-    attempts: [
+    runs: [
       {
         id,
         number: 1,
@@ -38,9 +38,9 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   const event = {
     id: 1,
     projectId: id,
-    attemptId: id,
-    type: "attempt",
-    message: "Attempt stage: model_execution",
+    runId: id,
+    type: "run",
+    message: "Run stage: model_execution",
     createdAt: project.createdAt,
   };
   const events = [event];
@@ -131,7 +131,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   ).toHaveLength(4);
   project.name = "Merged project";
   pr.state = "merged";
-  project.attempts[0]!.state = "completed";
+  project.runs[0]!.state = "completed";
   stream!.send(JSON.stringify({ type: "projects", projects: [project] }));
   await expect(page.getByRole("link", { name: "Merged project" })).toBeVisible();
   await expect(page.locator(".pr-metadata .status-merged")).toBeVisible();

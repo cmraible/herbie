@@ -11,7 +11,7 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
       repository: "fixture/project",
       name: "Retry fixture",
       prompt: "Finish the task",
-      attemptCount: 1,
+      runCount: 1,
       state: workflow ? "needs_attention" : scenario,
       createdAt: "2026-10-14T00:00:00Z",
       updatedAt: "2026-10-14T00:00:00Z",
@@ -19,8 +19,8 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
       stopRequested: null,
       pullRequest: null,
       error: (workflow
-        ? "Automatic publication recovery stopped: workflow_permission_missing (.github/workflows/ci-deploy.yml). Saved work retained; no new model attempt. Failure reference: db3a91ad-09c8-44ea-a2d8-f002570936cf"
-        : "Synthetic attempt failure") as string | null,
+        ? "Automatic publication recovery stopped: workflow_permission_missing (.github/workflows/ci-deploy.yml). Saved work retained; no new model run. Failure reference: db3a91ad-09c8-44ea-a2d8-f002570936cf"
+        : "Synthetic run failure") as string | null,
     };
     let retries = 0;
     const json = (body: unknown) => ({
@@ -44,7 +44,7 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
       return r.fulfill(json(project));
     });
     await page.goto("/");
-    await expect(page.getByText("Synthetic attempt failure")).toHaveCount(0);
+    await expect(page.getByText("Synthetic run failure")).toHaveCount(0);
     await page.getByRole("button", { name: /Retry fixture/ }).click();
     const details = page.getByRole("region", { name: "Selected project" });
     if (workflow) {
@@ -63,7 +63,7 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
     await expect(details.getByRole("button", { name: retryLabel, exact: true })).toBeEnabled();
     await details.getByRole("button", { name: retryLabel, exact: true }).click();
     await expect(details.getByText("Queued", { exact: true })).toBeVisible();
-    await expect(details.getByText("Synthetic attempt failure")).toHaveCount(0);
+    await expect(details.getByText("Synthetic run failure")).toHaveCount(0);
     await expect(details.getByRole("button", { name: retryLabel, exact: true })).toHaveCount(0);
     await page.reload();
     await expect(details.getByText("Queued", { exact: true })).toBeVisible();
@@ -86,7 +86,7 @@ for (const canRetry of [true, false])
       repository: "fixture/project",
       name: "Repair fixture",
       prompt: "Fix tests",
-      attemptCount: 1,
+      runCount: 1,
       state: "awaiting_review",
       createdAt: "2026-10-14T00:00:00Z",
       updatedAt: "2026-10-14T00:00:00Z",
@@ -95,7 +95,7 @@ for (const canRetry of [true, false])
       error: null,
       pullRequest: pr,
       pullRequests: [pr],
-      attempts: [
+      runs: [
         {
           id: randomUUID(),
           number: 1,
@@ -122,8 +122,8 @@ for (const canRetry of [true, false])
       retries++;
       project = {
         ...project,
-        attempts: project.attempts.map((attempt) => ({
-          ...attempt,
+        runs: project.runs.map((run) => ({
+          ...run,
           ciRepair: { id: randomUUID(), state: "waiting", canRetry: false },
         })),
       };
