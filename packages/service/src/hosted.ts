@@ -5,6 +5,7 @@ import type { Server } from "node:http";
 import { pathToFileURL } from "node:url";
 import { createRuntime } from "./runtime.js";
 import { createApiServer } from "./http.js";
+import { createModelLister } from "./models.js";
 import { runExclusiveWorker } from "./worker.js";
 import type { Auth } from "./auth.js";
 
@@ -19,6 +20,7 @@ export type HostedRuntime = Pick<Runtime, "store" | "adapters"> & {
     executionEnabled: boolean;
     deploymentId?: string;
     imageRevision?: string;
+    openaiApiKey?: string;
   };
 };
 export type HostedService = { server: Server; close: () => Promise<void> };
@@ -31,6 +33,7 @@ export async function startHostedService(
   const { config, store, auth, adapters, github } = injected ?? (await createRuntime(startup));
   startup?.begin("http-listen");
   const server = createApiServer({
+    listModels: config.openaiApiKey ? createModelLister(config.openaiApiKey) : undefined,
     store,
     auth,
     adapters,
