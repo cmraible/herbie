@@ -30,6 +30,8 @@ function fixtures() {
       createdAt: date(15),
       pullRequest: {
         number: 148,
+        draft: false,
+        checksPassed: true,
         branch: "fix/signup-error-messages",
         state: "open",
         url: "https://github.com/acme/storefront/pull/148",

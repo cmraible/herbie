@@ -14,6 +14,7 @@ import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
 import { errorReference, goalErrorMessage, workflowPermissionMessage } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
+import { goalReadyForReview } from "./attempts.js";
 
 const api = createClient();
 const terminal = new Set(["completed", "cancelled", "failed"]);
@@ -47,7 +48,13 @@ function initialDraft() {
   }
 }
 function Badge({ goal }: { goal: Goal }) {
-  return <span className={`badge status-${goal.state}`}>{labels[goal.state]}</span>;
+  return (
+    <span className={`badge status-${goal.state}`}>
+      {goal.state === "awaiting_review" && !goalReadyForReview(goal)
+        ? "Waiting for checks"
+        : labels[goal.state]}
+    </span>
+  );
 }
 
 export function App() {
@@ -616,7 +623,7 @@ export function App() {
                       </div>
                       <div className="status-awaiting_review">
                         <dt>Ready for review</dt>
-                        <dd>{goals.filter((item) => item.state === "awaiting_review").length}</dd>
+                        <dd>{goals.filter(goalReadyForReview).length}</dd>
                       </div>
                       <div className="status-needs_attention">
                         <dt>Needs attention</dt>

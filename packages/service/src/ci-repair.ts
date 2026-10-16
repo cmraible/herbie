@@ -32,7 +32,10 @@ export async function runCiRepairOnce(
       const ready = await adapters.markReady?.(execution, failure.head, () =>
         store.beginReadiness(job.id),
       );
-      if (ready) await store.confirmReadiness(job.id, failure.pullRequest.url);
+      if (ready) {
+        await adapters.requestReview?.(execution);
+        await store.confirmReadiness(job.id, failure.pullRequest.url);
+      }
       return true;
     }
     id = await store.startCiRepair(job.id, failure.head, workerId);

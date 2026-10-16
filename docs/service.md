@@ -36,7 +36,7 @@ Daytona sandboxes; GitHub write credentials stay on the Herbie host.
   in flight may finish; existing branches and PRs remain.
 - Failed attempts stop for attention. CI repairs update the same PR, with at most
   three repair sessions per PR. Failed repairs stop further automatic repair.
-- Passing CI can mark a draft PR ready for review; Herbie does not merge it.
+- Passing CI can mark a draft PR ready for review and request review from the project owner; Herbie does not merge it. Review requests retry after failures without re-requesting users who are already requested or have reviewed.
   Missing checks or unsupported ruleset-required workflows leave it as a draft.
 
 Signed webhooks trigger PR/CI reconciliation; a ten-minute poll covers missed events.

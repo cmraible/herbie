@@ -258,7 +258,10 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
           await store.cancelReadiness(job.id);
         if (state === "ready") {
           const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
-          if (pr) await store.confirmReadiness(job.id, pr.url);
+          if (pr) {
+            await adapters.requestReview?.(await executionFor(adapters, job, true));
+            await store.confirmReadiness(job.id, pr.url);
+          }
         }
       } catch (error) {
         logFailure(error, {

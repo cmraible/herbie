@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Goal, GoalEvent } from "@herbie/contracts";
-import { attemptLabels, groupAttempts } from "./attempts.js";
+import { attemptLabels, groupAttempts, reviewLabel } from "./attempts.js";
 import { activityMessage, errorReference } from "./activity-message.js";
 
 export function AttemptHistory({
@@ -27,7 +27,9 @@ export function AttemptHistory({
           ? "Merged"
           : attempt.pullRequest?.state === "closed"
             ? "Closed"
-            : attemptLabels[attempt.state],
+            : attempt.state === "awaiting_review"
+              ? reviewLabel(attempt.pullRequest)
+              : attemptLabels[attempt.state],
       color:
         attempt.pullRequest?.state === "merged"
           ? "merged"
