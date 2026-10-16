@@ -18,7 +18,8 @@ In YOLO mode, skip all code review: launch no review subagents, request no PR re
 ## Prepare the changes
 
 1. Read applicable repository instructions. Inspect staged, unstaged, and untracked changes, branch commits, remotes, and any existing PR. Establish the intended base branch and the full diff being shipped. If there is no diff to ship and no open PR to continue, report that and stop. Preserve concurrent or unrelated work; ask only when scope or target is genuinely ambiguous.
-2. When continuing a selected existing PR, switch to its head branch while preserving local changes; use that branch for the remaining workflow. Run the repository's relevant local checks and fix failures caused by the change. If on the base branch or detached HEAD, create and switch to a feature branch using repository conventions before committing. Commit the intended changes on the feature branch.
+2. When continuing a selected existing PR, switch to its head branch while preserving local changes; use that branch for the remaining workflow. If on the base branch or detached HEAD, create and switch to a feature branch using repository conventions before committing. Commit the intended changes on the feature branch.
+3. Always fetch the latest `main` from the base repository's remote and rebase the feature branch onto that fetched remote-tracking branch before running local checks or code review, in both normal and YOLO modes. Preserve unrelated local changes and resolve any rebase conflicts first. Run the repository's relevant local checks on the rebased changes, fix failures caused by the change, and commit any fixes.
 
 ## Review locally
 
