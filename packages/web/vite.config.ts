@@ -16,7 +16,12 @@ export default defineConfig(({ mode }) => ({
             "/api": {
               target: "http://127.0.0.1:8787",
               changeOrigin: true,
+              ws: true,
               configure(proxy) {
+                proxy.on("proxyReqWs", (outgoing, incoming) => {
+                  if (incoming.headers.origin === "http://127.0.0.1:5173")
+                    outgoing.setHeader("origin", "http://127.0.0.1:8787");
+                });
                 proxy.on("proxyReq", (outgoing, incoming) => {
                   if (incoming.headers.origin === "http://127.0.0.1:5173")
                     outgoing.setHeader("origin", "http://127.0.0.1:8787");

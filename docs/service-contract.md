@@ -4,6 +4,7 @@ HTTP JSON on the same origin as web. Contracts in @herbie/contracts (Zod, source
 
 - GET /api/session -> Session; GET /api/repositories -> Repository[]
 - POST /api/auth/install/start (signed-in browser) -> GitHub App installation URL; GitHub returns to `/api/auth/installation/callback` with one-use state and an untrusted installation ID that the service verifies against the signed-in user's installations.
+- WebSocket /api/stream?goal=<uuid> authenticates the browser session cookie and exact Origin. Pushes `{type:"goals",goals:Goal[]}` snapshots (version 2, owned only) and `{type:"events",goalId,events:GoalEvent[]}` batches for an optional owned goal. Connections replay the current snapshot and all event pages; clients deduplicate event IDs after reconnect. PostgreSQL commit notifications carry changes between API and worker processes. Session checks, ping/pong heartbeats, and bounded output queues close expired or unhealthy connections.
 - GET /api/goals -> Goal[] (owned only)
 - POST /api/goals (GoalInput, Idempotency-Key header UUID) -> Goal, 201 or 200 on replay
 - GET /api/goals/:id -> Goal; GET /api/goals/:id/events?after=0 -> GoalEvent[]

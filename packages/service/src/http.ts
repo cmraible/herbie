@@ -1,3 +1,4 @@
+import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -98,7 +99,7 @@ export function createApiServer(options: ApiOptions) {
     const styleNonce = randomBytes(16).toString("base64");
     response.setHeader(
       "content-security-policy",
-      `default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      `default-src 'self'; style-src 'self' 'nonce-${styleNonce}'; img-src 'self' data:; script-src 'self'; connect-src 'self' ${origin.replace(/^http/, "ws")}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
     const url = new URL(request.url ?? "/", origin);
     const method = request.method ?? "GET";
@@ -491,7 +492,7 @@ export function createApiServer(options: ApiOptions) {
     });
     response.end(method === "HEAD" ? undefined : data);
   }
-  return createServer((request, response) => {
+  const server = createServer((request, response) => {
     void handle(request, response).catch((error) => {
       const errorId = logFailure(error, { component: "http-request" });
       if (response.headersSent) {
@@ -513,4 +514,6 @@ export function createApiServer(options: ApiOptions) {
       else json(response, 500, { error: `Request failed. Reference: ${errorId}` });
     });
   });
+  attachRealtime(server, store, auth, origin, (request) => cookie(request, "herbie_session"));
+  return server;
 }

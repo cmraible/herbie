@@ -101,3 +101,27 @@ ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('r
 ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;
 
 ALTER TABLE goal_events ADD COLUMN IF NOT EXISTS job_id uuid REFERENCES jobs(id);
+
+-- Transactional notifications cross API/worker process boundaries. Only IDs leave
+-- the database; each WebSocket reads data through the existing owner-scoped store.
+CREATE OR REPLACE FUNCTION notify_goal_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_TABLE_NAME='goals' THEN
+    PERFORM pg_notify('herbie_changes', NEW.id::text);
+  ELSIF TG_TABLE_NAME='goal_events' THEN
+    PERFORM pg_notify('herbie_changes', NEW.goal_id::text || ':' || NEW.id::text);
+  ELSE
+    PERFORM pg_notify('herbie_changes', NEW.goal_id::text);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS notify_goal_change ON goals;
+CREATE TRIGGER notify_goal_change AFTER INSERT OR UPDATE ON goals
+  FOR EACH ROW EXECUTE FUNCTION notify_goal_change();
+DROP TRIGGER IF EXISTS notify_goal_change ON jobs;
+CREATE TRIGGER notify_goal_change AFTER INSERT OR UPDATE OF stage, pull_request ON jobs
+  FOR EACH ROW EXECUTE FUNCTION notify_goal_change();
+DROP TRIGGER IF EXISTS notify_goal_change ON goal_events;
+CREATE TRIGGER notify_goal_change AFTER INSERT ON goal_events
+  FOR EACH ROW EXECUTE FUNCTION notify_goal_change();
