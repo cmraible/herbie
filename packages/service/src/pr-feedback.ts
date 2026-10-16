@@ -23,7 +23,7 @@ export async function runFeedbackOnce(
       attemptId: job.attemptId,
       repository: await adapters.authorize(job.goal.ownerId, job.goal.repository),
       signal: controller.signal,
-      onActivity: (message) => store.appendEvent(job.goal.id, "agent_activity", message, job.id),
+      onActivity: (message) => store.appendEvent(job.goal.id, "agent", message, job.id),
     };
     const current = await adapters.reconcile(execution);
     if (!current || current.state !== "open" || !current.headSha) return true;

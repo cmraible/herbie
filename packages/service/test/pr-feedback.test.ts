@@ -82,6 +82,12 @@ for (const outcome of [
       feedback: async () => context,
       attempt: async (execution) => {
         attempts++;
+        await execution.onActivity?.(
+          JSON.stringify({
+            method: "item/agentMessage/delta",
+            params: { delta: "Reviewing feedback" },
+          }),
+        );
         assert.equal(execution.feedback?.item.id, item.id);
         assert.equal(execution.branch, job.branch);
         if (outcome === "failure") throw new Error("Agent failed");
@@ -165,6 +171,14 @@ for (const outcome of [
       attempts,
       ["ci-busy", "ci-failed", "paused", "closed", "bot"].includes(outcome) ? 0 : 1,
     );
+    if (attempts)
+      assert.ok(
+        (
+          await store.pool.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='agent'", [
+            goal.id,
+          ])
+        ).rowCount,
+      );
     assert.equal(pushes, ["update", "reply-failed"].includes(outcome) ? 1 : 0);
     assert.equal(replies, ["reply", "update"].includes(outcome) ? 1 : 0);
     if (pushes)
