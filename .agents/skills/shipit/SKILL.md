@@ -19,7 +19,13 @@ In YOLO mode, skip all code review: launch no review subagents, request no PR re
 
 1. Read applicable repository instructions. Inspect staged, unstaged, and untracked changes, branch commits, remotes, and any existing PR. Establish the intended base branch and the full diff being shipped. If there is no diff to ship and no open PR to continue, report that and stop. Preserve concurrent or unrelated work; ask only when scope or target is genuinely ambiguous.
 2. When continuing a selected existing PR, switch to its head branch while preserving local changes; use that branch for the remaining workflow. If on the base branch or detached HEAD, create and switch to a feature branch using repository conventions before committing. Commit the intended changes on the feature branch.
-3. Always fetch the latest `main` from the base repository's remote and rebase the feature branch onto that fetched remote-tracking branch before running local checks or code review, in both normal and YOLO modes. Preserve unrelated local changes and resolve any rebase conflicts first. Run the repository's relevant local checks on the rebased changes, fix failures caused by the change, and commit any fixes.
+3. Always fetch the latest `main` from the base repository's remote and rebase the feature branch onto that fetched remote-tracking branch before running local checks or code review, in both normal and YOLO modes. Preserve unrelated local changes and resolve any rebase conflicts first. Validate the rebased changes using the verification policy below, fix failures caused by the change, and commit any fixes.
+
+## Verify locally
+
+Default to `pnpm verify` for the initial local validation in both normal and YOLO modes. If host Node or pnpm is unavailable, run the same entry point with `bash scripts/verify.sh`. It supplies the toolchain, disposable PostgreSQL, and check ordering through Docker; use [the verification guide](../../../docs/github-actions.md) for prerequisites and failure logs. Resolve missing prerequisites before retrying, or report the verification gap when the environment or user constraints prevent a full run.
+
+After a full pass, validate small review or CI repairs with focused checks covering the affected behavior and existing regression cases, plus relevant lint and formatting checks. Rerun `pnpm verify` when dependencies, shared runtime, database schema, verification infrastructure, or conflict resolution broaden the impact, or when the affected scope is uncertain. Record which revision passed full verification and which later changes received focused checks. Required GitHub CI must pass on the final pushed head.
 
 ## Review locally
 
