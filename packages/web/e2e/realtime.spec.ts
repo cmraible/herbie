@@ -86,4 +86,9 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   await page.waitForTimeout(2500);
   expect(goalReads).toBe(1);
   expect(eventReads).toBe(1);
+  await page.route("**/api/session", (route) =>
+    route.fulfill({ status: 401, ...json({ error: "Login required" }) }),
+  );
+  stream!.close({ code: 1006 });
+  await expect(page.getByRole("button", { name: /Continue with GitHub/ })).toBeVisible();
 });

@@ -365,7 +365,7 @@ export function App() {
           socket.close();
         }
       };
-      socket.onclose = (event) => {
+      socket.onclose = async (event) => {
         if (disposed) return;
         if (event.code === 1008) {
           setSession(null);
@@ -373,6 +373,18 @@ export function App() {
           return;
         }
         setReconnecting(true);
+        // Browsers hide HTTP 401 upgrade responses behind close code 1006.
+        try {
+          await api.session();
+        } catch (failure) {
+          if (disposed) return;
+          if (failure instanceof ApiError && failure.status === 401) {
+            setSession(null);
+            setSessionState("signed-out");
+            return;
+          }
+        }
+        if (disposed) return;
         timer = setTimeout(connect, delay + (Math.random() * delay) / 2);
         delay = Math.min(delay * 2, 30_000);
       };
