@@ -1,5 +1,9 @@
 # Herbie
 
+`GET /api/version` returns JSON with the running `version` and `commitSha` without
+authentication. The SHA comes from deployment metadata, falling back to the local
+Git checkout; it is `null` when neither is available.
+
 Herbie runs ongoing coding projects through a durable service. The React web UI and
 CLI use the same authenticated API; a separate worker continues after either client
 exits. Postgres owns projects, attempts, jobs, captured artifacts, PRs and events.

@@ -1,6 +1,7 @@
 import { createReasoningEffortLister } from "./reasoning-efforts.js";
 import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
+import { runningVersion } from "./version.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
@@ -85,6 +86,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 export function createApiServer(options: ApiOptions) {
   const listReasoningEfforts = options.listReasoningEfforts ?? createReasoningEffortLister();
   const { store, auth, adapters } = options;
+  const version = runningVersion(options.deploymentId, options.imageRevision);
   const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
   function requireExecution() {
@@ -155,6 +157,10 @@ export function createApiServer(options: ApiOptions) {
       response.setHeader("cache-control", "no-store");
       response.writeHead(result.status);
       response.end(Buffer.from(await result.arrayBuffer()));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/version") {
+      json(response, 200, version);
       return;
     }
     // Process liveness must not restart healthy workers during a database outage.
