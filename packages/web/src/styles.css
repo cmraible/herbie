@@ -423,52 +423,49 @@ h2 {
   font-size: 18px;
 }
 .run-result {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  border: 1px solid #3b4940;
-  border-radius: 8px;
-  background: #151d18;
+  padding: 24px;
+  border: 1px solid #35443b;
+  border-radius: 12px;
+  background: #141a16;
 }
-.run-result > div {
-  flex: 1 1 220px;
+.pr-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.pr-heading {
+  flex: 1;
   min-width: 0;
 }
 .run-result-label {
-  margin-right: 8px;
-  color: #b0bdb4;
-  font-size: 13px;
+  display: block;
+  margin-bottom: 6px;
+  color: #a5b3aa;
+  font-size: 12px;
+  font-weight: 500;
 }
-.run-result strong {
-  overflow-wrap: anywhere;
+.pr-title {
+  margin: 0;
   font-size: 18px;
-}
-.run-result p {
-  margin: 8px 0;
-  color: #b0bdb4;
-  font-size: 13px;
-}
-.run-result code {
-  font-size: 11px;
-  color: #aaa;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.25px;
   overflow-wrap: anywhere;
 }
 .run-result-link {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
+  min-width: 44px;
   min-height: 44px;
-  padding: 8px 12px;
   border-radius: 6px;
-  color: #101510;
-  background: #e1eee5;
+  color: #a5b3aa;
   text-decoration: none;
-  font-size: 13px;
-  font-weight: 600;
 }
 .run-result-link:hover {
-  background: #fff;
+  color: #edf2ee;
+  background: #222c25;
 }
 .activity {
   margin-top: 24px;
@@ -781,7 +778,24 @@ textarea::placeholder {
 .pr-metadata {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 16px;
+  color: #a5b3aa;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pr-state-open {
+  color: #8edca5;
+}
+.pr-state-merged {
+  color: #c4a5ef;
+}
+.pr-state-closed {
+  color: #ff9b9b;
+}
+.pr-state-draft {
+  color: #c2c9c4;
 }
 .pr-additions {
   color: #8edca5;
@@ -790,6 +804,113 @@ textarea::placeholder {
   color: #ff9b9b;
 }
 .pr-description {
-  white-space: pre-wrap;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #303a33;
+  color: #c2ccc5;
+  font-size: 13px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
+}
+.pr-description > :first-child {
+  margin-top: 0;
+}
+.pr-description > :last-child {
+  margin-bottom: 0;
+}
+.pr-description :is(h1, h2, h3, h4, h5, h6) {
+  margin: 24px 0 8px;
+  color: #edf2ee;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.pr-description :is(h1, h2) {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #303a33;
+  font-size: 16px;
+}
+.pr-description :is(p, ul, ol, pre, blockquote, table) {
+  margin: 12px 0;
+}
+.pr-description :is(ul, ol) {
+  padding-left: 22px;
+}
+.pr-description li + li {
+  margin-top: 6px;
+}
+.pr-description code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #222c25;
+  font-size: 12px;
+}
+.pr-description pre {
+  padding: 14px;
+  border: 1px solid #303a33;
+  border-radius: 8px;
+  background: #0e1410;
+  overflow-x: auto;
+}
+.pr-description pre code {
+  padding: 0;
+  background: none;
+}
+.pr-description .diff-addition {
+  color: #8edca5;
+}
+.pr-description .diff-deletion {
+  color: #ff9b9b;
+}
+.pr-description .diff-hunk {
+  color: #9ecbff;
+}
+.pr-description blockquote {
+  padding-left: 14px;
+  border-left: 2px solid #63866e;
+  color: #a5b3aa;
+}
+.pr-description img {
+  max-width: 100%;
+}
+.pr-description table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.pr-description :is(th, td) {
+  padding: 8px 12px;
+  border: 1px solid #35443b;
+}
+.pr-description a {
+  color: #a5e0b8;
+  text-underline-offset: 3px;
+}
+.pr-branch {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid #303a33;
+  color: #a5b3aa;
+  font-size: 12px;
+}
+.pr-branch summary {
+  display: list-item;
+  width: fit-content;
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+.pr-branch summary:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.pr-branch code {
+  display: block;
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 540px) {
+  .run-result {
+    padding: 16px;
+  }
 }

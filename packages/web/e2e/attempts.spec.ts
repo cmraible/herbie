@@ -16,7 +16,7 @@ for (const [draft, checksPassed, label] of [
       ...(number === 2
         ? {
             title: "Improve project details",
-            body: "Show PR context.\nKeep review in Herbie.",
+            body: "## Summary\n\nShow PR context.\nKeep review in Herbie.\n\n```diff\n- old behavior\n+ improved behavior\n```\n\n## Evidence\n\n- **Verified:** `pnpm test`\n- [Review notes](https://example.com/notes)\n\n<script>alert(1)</script>",
             additions: 42,
             deletions: 0,
             changedFiles: 3,
@@ -24,7 +24,7 @@ for (const [draft, checksPassed, label] of [
             checksPassed,
           }
         : {}),
-      branch: `branch-${number}`,
+      branch: `herbie/${"long-branch-segment-".repeat(8)}${number}`,
       url: `https://demo.invalid/pr/${number}`,
       state: number === 1 ? "merged" : "open",
     });
@@ -87,6 +87,21 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByText("Show PR context.", { exact: false })).toContainText(
       "Keep review in Herbie.",
     );
+    await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+    await expect(page.locator(".pr-description pre code")).toContainText("+ improved behavior");
+    await expect(page.getByText("+ improved behavior", { exact: true })).toHaveCSS(
+      "color",
+      "rgb(142, 220, 165)",
+    );
+    await expect(page.getByText("- old behavior", { exact: true })).toHaveCSS(
+      "color",
+      "rgb(255, 155, 155)",
+    );
+    await expect(page.locator(".pr-description strong")).toHaveText("Verified:");
+    await expect(page.locator(".pr-description script")).toHaveCount(0);
+    await expect(page.locator(".pr-branch code")).not.toBeVisible();
+    await page.getByText("Source branch", { exact: true }).click();
+    await expect(page.locator(".pr-branch code")).toBeVisible();
     await expect(page.getByLabel("42 additions", { exact: true })).toBeVisible();
     await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
     await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
@@ -104,6 +119,8 @@ for (const [draft, checksPassed, label] of [
     await expect(two.locator(".badge")).toHaveClass(/status-awaiting_review/);
     await expect(two.locator(".badge")).toHaveCSS("color", "rgb(112, 201, 152)");
     await expect.poll(() => page.getByRole("button", { pressed: true }).count()).toBe(1);
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await two.click();
     await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
     await expect(page.getByRole("button", { name: "Goal history" })).toHaveCount(0);
     await expect(page.getByText("Goal renamed", { exact: true })).toHaveCount(0);
