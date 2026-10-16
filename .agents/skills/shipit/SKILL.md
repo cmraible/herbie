@@ -1,6 +1,6 @@
 ---
 name: shipit
-description: Ship current local changes through local review, a pull request, and auto-merge after CI. Use for end-to-end shipping requests, including "ship it yolo" or standalone "yolo" and variations; YOLO skips code review. A request only to open or review a PR does not authorize merging.
+description: Ship current local changes through local review, a pull request, and a verified merge after CI. Use for end-to-end shipping requests, including "ship it yolo" or standalone "yolo" and variations; YOLO skips code review. A request only to open or review a PR does not authorize merging.
 ---
 
 # Ship it
@@ -13,7 +13,7 @@ Before starting work, record `ship_started_at` in UTC from the triggering user m
 
 Use normal mode by default. An explicit shipping instruction containing "yolo" (case-insensitive, including variations such as "YOLO ship it" or standalone "yolo") authorizes this workflow in YOLO mode. Mentions in quoted text, documentation, or requests to edit this skill are not invocations.
 
-In YOLO mode, skip all code review: launch no review subagents, request no PR review, and skip every local review gate and re-review cycle below, including after fixes or conflict resolution. Use the locally checked commit wherever the workflow refers to a reviewed commit. Keep local checks, CI repair, head-SHA checks, auto-merge, and merge verification. Required repository approvals and branch protections still apply. Report that review was skipped by request.
+In YOLO mode, skip all code review: launch no review subagents, request no PR review, and skip every local review gate and re-review cycle below, including after fixes or conflict resolution. Use the locally checked commit wherever the workflow refers to a reviewed commit. Keep local checks, CI repair, head-SHA checks, and merge verification. Required repository approvals and branch protections still apply. Report that review was skipped by request.
 
 ## Prepare the changes
 
@@ -27,15 +27,21 @@ Before pushing or opening a PR, launch a local code review subagent with fresh c
 
 Verify each finding against the code, make the smallest correct fix, run relevant checks, and commit. Send the updated full diff to another fresh-context review subagent after any changes. Review is complete when the current head has been reviewed and all actionable findings are addressed; document evidence for findings that do not apply. A disputed blocking finding needs reviewer agreement or user direction. If subagents are unavailable, report that blocker.
 
-## Open the PR and enable auto-merge
+## Open the PR and watch the merge
 
-Push the reviewed head and reuse the branch's open PR, or create one following repository title/body conventions. Mark it ready and attach its URL to the chat when the app supports it. Confirm repository protections gate merging on all relevant CI checks; wait for any uncovered checks to appear and pass before enabling auto-merge. Confirm the remote head matches the locally reviewed commit, then immediately enable auto-merge using the repository's preferred allowed method and a head-SHA guard when supported, so it merges as soon as required CI and branch protections permit. Respect merge queues and required approvals; never bypass protections with admin overrides. Local review replaces the skill's PR-review wait, but does not satisfy a repository-required approval. If auto-merge is unavailable, report the limitation rather than changing repository settings.
+Push the reviewed head and reuse the branch's open PR, or create one following repository title/body conventions. Mark it ready and attach its URL to the chat when the app supports it. Run the deterministic watcher with the exact reviewed commit and original start timestamp:
+
+```sh
+node scripts/ship-watch.mjs --repo OWNER/REPO --pr NUMBER --head REVIEWED_SHA --started-at "$ship_started_at"
+```
+
+The watcher requires Herbie's protected `All tests passed` aggregate and every other required check to pass before requesting a squash merge with a head-SHA guard. It respects GitHub approvals and merge queues, handles already-mergeable PRs directly, and confirms the actual merge. Local review does not satisfy a repository-required approval. Keep the process running between tool calls; consume its JSON progress and terminal result instead of rebuilding a polling loop. Continue inspecting actionable PR feedback while it runs. To change the default 30-minute window without check or merge progress, pass `--timeout SECONDS`.
 
 ## Monitor CI and verify the merge
 
-Poll in bounded intervals, keeping the user informed of meaningful progress. Inspect CI failures and any incoming actionable PR feedback. For a failure or finding that needs changes, disable auto-merge while repairing, make the smallest correct fix, run relevant checks, commit, and repeat fresh-context local review before pushing. Reply to PR feedback with the fix and validation when applicable. Confirm the new remote head was reviewed locally and re-enable auto-merge. Apply the same review cycle after conflict resolution or an unexpected head change.
+The watcher exits with check names and links on failure, or a specific blocker for a changed head, draft, closure, conflict, timeout, or API error. Stop the watcher before making repairs or addressing actionable feedback; disable any existing auto-merge while repairing. Make the smallest correct fix, run relevant checks, commit, and repeat fresh-context local review before pushing. Reply to PR feedback with the fix and validation when applicable. Restart the watcher with the new reviewed SHA and the original start timestamp. Apply the same review cycle after conflict resolution or an unexpected head change.
 
-Stop and report the blocker if credentials or permissions are missing, feedback requires a product decision or scope expansion, or the same failure persists after three repair attempts. By default, after 30 minutes with no CI or merge progress, leave the PR open and report what is pending and whether auto-merge remains enabled; honor a user-specified waiting window. Never turn a timeout or missing result into approval.
+Stop and report the blocker if credentials or permissions are missing, feedback requires a product decision or scope expansion, or the same failure persists after three repair attempts. On timeout, leave the PR open and report pending checks and whether a merge was already requested (a queue request may remain active). Never turn a timeout or missing result into approval.
 
 Verify the PR actually merged before claiming success; enabling auto-merge or entering a merge queue is not completion. Report its URL, merge commit, and a brief summary of local review and validation. If blocked, report the PR URL, completed work, and the specific next action needed. Leave branch deletion and other cleanup to repository policy or an explicit user request.
 
