@@ -1,11 +1,11 @@
 ---
 name: shipit
-description: Ship current local changes through local review, a pull request, and a verified merge after CI. Use for end-to-end shipping requests, including "ship it yolo" or standalone "yolo" and variations; YOLO skips code review. A request only to open or review a PR does not authorize merging.
+description: Ship current local changes through local review, a pull request, a verified merge after CI, and production deployment verification. Use for end-to-end shipping requests, including "ship it yolo" or standalone "yolo" and variations; YOLO skips code review. A request only to open or review a PR does not authorize merging.
 ---
 
 # Ship it
 
-Carry the current work through to a verified merge. A user request to run `$shipit` authorizes committing, pushing, creating or updating the PR, replying to review feedback, making scoped fixes, and merging once the gates below pass. Preserve any narrower user constraints. Automatic skill selection alone does not grant that authorization.
+Carry the current work through to a verified production deployment. A user request to run `$shipit` authorizes committing, pushing, creating or updating the PR, replying to review feedback, making scoped fixes, and merging once the gates below pass. Preserve any narrower user constraints. Automatic skill selection alone does not grant that authorization.
 
 Before starting work, record `ship_started_at` in UTC from the triggering user message's receipt timestamp. If unavailable, capture the current time immediately and label the eventual duration approximate. Preserve this timestamp across retries, waits, and resumed turns for the same shipping run, in both normal and YOLO modes.
 
@@ -13,7 +13,7 @@ Before starting work, record `ship_started_at` in UTC from the triggering user m
 
 Use normal mode by default. An explicit shipping instruction containing "yolo" (case-insensitive, including variations such as "YOLO ship it" or standalone "yolo") authorizes this workflow in YOLO mode. Mentions in quoted text, documentation, or requests to edit this skill are not invocations.
 
-In YOLO mode, skip all code review: launch no review subagents, request no PR review, and skip every local review gate and re-review cycle below, including after fixes or conflict resolution. Use the locally checked commit wherever the workflow refers to a reviewed commit. Keep local checks, CI repair, head-SHA checks, and merge verification. Required repository approvals and branch protections still apply. Report that review was skipped by request.
+In YOLO mode, skip all code review: launch no review subagents, request no PR review, and skip every local review gate and re-review cycle below, including after fixes or conflict resolution. Use the locally checked commit wherever the workflow refers to a reviewed commit. Keep local checks, CI repair, head-SHA checks, merge verification, and production deployment verification. Required repository approvals and branch protections still apply. Report that review was skipped by request.
 
 ## Prepare the changes
 
@@ -51,6 +51,14 @@ Base advancement alone leaves an unchanged head's local validation and review va
 
 Stop and report the blocker if credentials or permissions are missing, feedback requires a product decision or scope expansion, or the same failure persists after three repair attempts. On timeout, leave the PR open and report pending checks and whether a merge was already requested (a queue request may remain active). Never turn a timeout or missing result into approval.
 
-Verify the PR actually merged before claiming success; enabling auto-merge or entering a merge queue is not completion. Report its URL, merge commit, and a brief summary of local review and validation. If blocked, report the PR URL, completed work, and the specific next action needed. Leave branch deletion and other cleanup to repository policy or an explicit user request.
+Verify the PR actually merged before claiming success; enabling auto-merge or entering a merge queue is not completion. Then verify production deployment below before claiming shipping is complete. If blocked, report the PR URL, completed work, and the specific next action needed. Leave branch deletion and other cleanup to repository policy or an explicit user request.
 
 After verifying the merge, calculate total wall-clock time as the PR's actual merge timestamp (`mergedAt`) minus `ship_started_at`, including review, fixes, CI, and queue waits. Use the merge timestamp rather than the time polling detected it. Include the duration in the final output, for example: `Time from ship-it request to merge into main: 8m 42s` (use the actual base branch name). If either timestamp is unavailable, report timing as unavailable rather than inventing a duration.
+
+## Wait for production deployment
+
+After merge verification, poll `https://herbie.raible.dev/api/version` every 5 seconds with a bounded request timeout and caching disabled. Compare the JSON response's `commitSha` to the PR's actual merge commit SHA, not its pre-merge head or the `version` string. Production is verified when the SHAs match, or Git ancestry confirms the merge commit is an ancestor of the deployed commit (a newer deployment includes this PR).
+
+Continue waiting through stale SHAs, request failures, and malformed responses; none confirms deployment. Keep the user informed of meaningful progress. After 30 minutes without verification, or a user-specified waiting window, report that the PR merged but production deployment remains unverified, including the expected SHA, last observed SHA or request error, and the next action needed. A timeout is not shipping success.
+
+On verification, report the PR URL, merge commit, deployed commit, a brief summary of local review and validation, and the request-to-merge duration above. Also report request-to-production-verification duration using the time the endpoint confirmed deployment; this is an observation time, not the exact deployment timestamp. Apply this gate in both normal and YOLO modes.
