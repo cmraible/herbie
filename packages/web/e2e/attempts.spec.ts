@@ -93,8 +93,9 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
     await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
     await expect(
-      page.getByRole("heading", { name: "#2 · Improve project details", exact: true }),
+      page.getByRole("heading", { name: "Improve project details · #2", exact: true }),
     ).toBeVisible();
+    await expect(page.locator(".pr-number")).toHaveCSS("color", "rgb(165, 179, 170)");
     await expect(page.getByLabel("Breadcrumb").getByText("Run 2", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Run 2", exact: true })).toHaveCount(0);
     await expect(page.getByText("Show PR context.", { exact: false })).toContainText(
