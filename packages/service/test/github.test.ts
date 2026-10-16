@@ -334,6 +334,16 @@ test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t
   assert.notEqual(moved?.patchSha, before?.patchSha);
 });
 
+test("reaction tokens request Issues write without broadening ordinary tokens", async (t) => {
+  const { github, requests } = await githubFixture(t);
+  await github.installationToken(11, "alice/project", "react");
+  const tokenRequest = requests.find((request) => request.path.endsWith("/access_tokens"));
+  assert.deepEqual(tokenRequest?.body, {
+    repositories: ["project"],
+    permissions: { contents: "read", pull_requests: "write", issues: "write" },
+  });
+});
+
 test("review reconciliation uses only repository-scoped read permission after user login expires", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
   fixture.pr = true;

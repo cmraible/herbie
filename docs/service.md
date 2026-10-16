@@ -7,8 +7,9 @@ For local installation, follow [setup](setup.md). For hosted deployment, see the
 
 Install the App on a **public repository** where you have push access. Configure:
 
-- **Permissions:** Contents, Pull requests, and Workflows read/write; Checks, Commit statuses,
-  Actions, Issues, and Metadata read. Existing installations must approve all updated permissions.
+- **Permissions:** Contents, Pull requests, and Workflows read/write; Actions, Checks, and
+  Commit statuses read; Issues write; Metadata read. Existing installations must approve all
+  updated permissions.
 - **Events:** Pull request, Pull request review, Pull request review comment, Issue comment,
   Check run, Check suite, and Status.
 - **Redirect on update:** Enabled. Accept permission changes on existing installations.
@@ -47,6 +48,11 @@ conversation context but never trigger attempts. Edits to feedback receive a new
 decision; duplicate deliveries and line movements do not. Existing feedback on
 tracked open PRs is considered on the first poll after upgrading.
 
+Herbie adds an 👀 reaction when it starts processing a human conversation or inline
+comment, before starting the agent. Submitted reviews do not support reactions.
+Reaction failures are logged without blocking the response. Enable **Issues write**
+permission and approve the installation update for conversation-comment reactions.
+
 Code updates require successful local verification and confirmed sandbox deletion.
 Feedback and CI repair sessions do not run concurrently on the same PR. Paused or
 cancelled projects do not process feedback. Feedback failures or expired leases block
@@ -57,9 +63,9 @@ manual recovery; uncertain pushes or replies are never automatically replayed.
 Completed decisions and replies are recorded in project events and saved artifacts.
 
 Enable the new event subscriptions in the GitHub App settings. GitHub requires
-Issues read permission to subscribe to [Issue comment events](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment);
-existing installations must accept that permission update. PR comment API writes
-use the existing Pull requests write permission.
+Issues permission to subscribe to [Issue comment events](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment);
+existing installations must accept that permission update. Conversation-comment reactions
+use Issues write; inline-comment reactions use the existing Pull requests write permission.
 
 Signed webhooks trigger PR/CI/feedback reconciliation; a ten-minute server poll covers missed events.
 The browser receives project, PR, and run-event updates over `/api/stream` WebSockets

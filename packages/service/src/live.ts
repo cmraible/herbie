@@ -55,6 +55,20 @@ export function createLiveAdapters(
             );
             return github.feedback(token, execution.repository.repository, pr.number);
           },
+          async acknowledgeFeedback(execution: Execution, requireLease: () => Promise<void>) {
+            const item = execution.feedback?.item;
+            if (!item || item.bot || item.kind === "review") return;
+            const access = await github.authorize(
+              await auth.userToken(execution.project.ownerId),
+              execution.repository.repository,
+            );
+            const token = await github.installationToken(
+              access.installationId,
+              access.repository,
+              item.kind === "inline" ? "write" : "react",
+            );
+            await github.acknowledgeFeedback(token, access.repository, item, requireLease);
+          },
           async replyToFeedback(
             execution: Execution,
             body: string,
