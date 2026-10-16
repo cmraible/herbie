@@ -120,7 +120,7 @@ test("worker persists a private redacted run diagnostic and a safe public refere
           "install progress\n".repeat(2000) +
           "herbie-runtime-failure step=node_installation exit=28",
         exitCode: 28,
-        stderr: "useful synthetic failure",
+        stderr: "useful synthetic failure\u0000details\ud800",
         authorization: "hidden-fixture-token",
       }),
     ],

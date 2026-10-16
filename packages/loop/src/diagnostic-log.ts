@@ -86,7 +86,7 @@ export function diagnosticRecord(
     property: PropertyDescriptor,
     depth: number,
   ): void => {
-    const safeKey = redactDiagnostic(key).slice(0, 80);
+    const safeKey = redactDiagnostic(key).replace(/\0/g, "[NUL]").slice(0, 80).toWellFormed();
     if (sensitiveKey.test(key) || omitKey.test(key)) {
       out[safeKey] = "[REDACTED]";
       return;
@@ -114,11 +114,12 @@ export function diagnosticRecord(
     if (++nodes > 200) return "[node limit]";
     if (Buffer.isBuffer(value)) return clean(value.toString("utf8"), depth, tail);
     if (typeof value === "string") {
-      const redacted = redactDiagnostic(value);
+      const redacted = redactDiagnostic(value).replace(/\0/g, "[NUL]").toWellFormed();
       const limit = Math.min(2000, Math.max(0, remaining));
       remaining -= Math.min(limit, redacted.length);
       return redacted.length > limit
-        ? (tail && limit > 0 ? redacted.slice(-limit) : redacted.slice(0, limit)) + " [truncated]"
+        ? (tail && limit > 0 ? redacted.slice(-limit) : redacted.slice(0, limit)).toWellFormed() +
+            " [truncated]"
         : redacted;
     }
     if (value === null || typeof value === "boolean" || typeof value === "number") return value;
