@@ -26,7 +26,6 @@ export function apiEvents(events: ProjectEvent[], version?: ApiVersion): unknown
         : event.type === "run_started"
           ? "attempt_started"
           : event.type,
-    message: event.message.replace(/\bRun\b/g, "Attempt"),
     attemptId: runId,
   }));
 }
