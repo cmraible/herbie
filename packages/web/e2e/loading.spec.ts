@@ -246,23 +246,15 @@ test("signed-out and sign-in states only appear after their responses", async ({
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
 });
 
-test("poll failures keep the last goal and details on screen", async ({ page }) => {
-  let requests = 0;
+test("stream failures keep the last goal and details on screen", async ({ page }) => {
   await routeSignedIn(page);
-  await page.unroute("**/api/goals");
-  await page.route("**/api/goals", (route) => {
-    if (route.request().method() !== "GET") return route.continue();
-    requests++;
-    return requests === 1
-      ? json(route, [fixtureGoal])
-      : json(route, { error: "temporary goals outage" }, 503);
-  });
+  await page.routeWebSocket("**/api/stream**", (socket) => socket.close({ code: 1012 }));
   await page.goto("/");
   await page.getByRole("button", { name: /Keep loaded work visible/ }).click();
   await expect(page.getByRole("heading", { name: "Keep loaded work visible" })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Showing the latest saved progress.", {
-    timeout: 6000,
-  });
+  await expect(
+    page.getByText("Reconnecting to live updates. Displayed progress may be out of date."),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Keep loaded work visible" })).toBeVisible();
   await expect(page.getByText("No projects yet")).toHaveCount(0);
 });
