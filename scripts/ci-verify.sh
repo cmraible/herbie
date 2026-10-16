@@ -136,7 +136,8 @@ run_unit_tests() {
   run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
-  run_step build pnpm build
+  # Tests run source through tsx; only loop's package exports require dist files.
+  run_step build pnpm --filter @herbie/loop... build
   run_unit_tests
 }
 start_web_preview() {
