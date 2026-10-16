@@ -8,7 +8,8 @@ For local installation, follow [setup](setup.md). For hosted deployment, see the
 Install the App on a **public repository** where you have push access. Configure:
 
 - **Permissions:** Contents and Pull requests read/write; Checks, Commit statuses,
-  Actions, and Metadata read.
+  Actions, and Metadata read. Workflows read/write is also required to publish changes
+  to `.github/workflows/`.
 - **Events:** Pull request, Check run, Check suite, and Status.
 - **Redirect on update:** Enabled. Accept permission changes on existing installations.
 

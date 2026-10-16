@@ -77,6 +77,7 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
         ? null
         : "Preparing the pull request is taking longer than expected. Retrying automatically";
     case "publication_blocked":
+      if (workflowPermissionMessage(event.message)) return workflowPermissionMessage(event.message);
       if (event.message.includes("saved artifact lacks matching test and cleanup evidence"))
         return "Run failed. Your patches are saved.";
       if (event.message.includes("attempt branch exists"))
@@ -100,4 +101,35 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
     default:
       return null;
   }
+}
+
+export function goalErrorMessage(goal: Goal): string {
+  const error = goal.error ?? "";
+  const permission = workflowPermissionMessage(error);
+  if (permission) return permission;
+  if (error.includes("Worker connection was lost during an attempt"))
+    return `Run #${goal.attemptCount} was interrupted. Retry to start a new run`;
+  if (error.includes("saved artifact lacks matching test and cleanup evidence"))
+    return "Run failed. Your patches are saved.";
+  if (error.startsWith("Run failed.")) return error.split(" Reference:")[0];
+  if (error.startsWith("Attempt failed")) return "Run failed. No patches were saved.";
+  if (error.includes("Publication remains unconfirmed"))
+    return "Preparing the pull request is taking longer than expected. Retrying automatically";
+  if (error.includes("CI repair stopped"))
+    return "Agent couldn't fix the failing checks. Pull request needs your attention";
+  if (error.includes("original base")) return "Repository history changed. Agent paused";
+  if (error.includes("attempt branch exists"))
+    return "Pull request preparation paused. Agent paused";
+  if (error.startsWith("Live execution is disabled")) return "Live runs aren't configured yet";
+  return "This project needs your attention.";
+}
+
+export function workflowPermissionMessage(error: string): string | null {
+  if (!error.startsWith("Automatic publication recovery stopped: workflow_permission_missing"))
+    return null;
+  const path =
+    /workflow_permission_missing \((\.github\/workflows\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,200}\.ya?ml)\)/.exec(
+      error,
+    )?.[1];
+  return `GitHub permission required. Herbie couldn't push changes to ${path ?? "a workflow file"}. Its GitHub App needs Workflows: Read and write permission. Your patches are saved. Automatic retries are paused. Update the app's installation permissions, then retry publication.`;
 }

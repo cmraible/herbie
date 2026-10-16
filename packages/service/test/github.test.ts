@@ -22,6 +22,7 @@ export async function githubFixture(t: TestContext) {
     statuses: "read",
     actions: "read",
     pullRequests: "write",
+    workflows: undefined as string | undefined,
     installationId: 11,
     installationToken: "ghs_fixture",
     pr: false,
@@ -67,6 +68,7 @@ export async function githubFixture(t: TestContext) {
                 checks: fixture.checks,
                 statuses: fixture.statuses,
                 actions: fixture.actions,
+                workflows: fixture.workflows,
               },
             },
           ],
@@ -83,6 +85,7 @@ export async function githubFixture(t: TestContext) {
             checks: fixture.checks,
             statuses: fixture.statuses,
             actions: fixture.actions,
+            workflows: fixture.workflows,
           },
         }),
       );
@@ -895,3 +898,22 @@ for (const permission of ["checks", "statuses", "actions"] as const) {
     assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "ready");
   });
 }
+
+test("publication tokens pick up newly granted workflows permission without requiring it for ordinary patches", async (t) => {
+  const { github, fixture, requests } = await githubFixture(t);
+  await github.installationToken(11, "alice/project", "write", false, true);
+  fixture.workflows = "write";
+  await github.installationToken(11, "alice/project", "write", false, true);
+  await github.installationToken(11, "alice/project", "read", false, true);
+  assert.deepEqual(
+    requests.filter((r) => r.path === "/app/installations/11/access_tokens").map((r) => r.body),
+    [
+      { repositories: ["project"], permissions: { contents: "write", pull_requests: "write" } },
+      {
+        repositories: ["project"],
+        permissions: { contents: "write", pull_requests: "write", workflows: "write" },
+      },
+      { repositories: ["project"], permissions: { contents: "read", pull_requests: "read" } },
+    ],
+  );
+});
