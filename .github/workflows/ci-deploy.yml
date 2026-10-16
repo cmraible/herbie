@@ -35,7 +35,8 @@ jobs:
 
   verify:
     name: Verify
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.markdown-only == 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -234,7 +235,7 @@ jobs:
           for check in CHANGES BUILD UNIT CLI BROWSER CONTAINER; do
             result_var="${check}_RESULT"
             result="${!result_var}"
-            if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(UNIT|CLI|BROWSER)$ ]]; then
+            if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(BUILD|UNIT|CLI|BROWSER)$ ]]; then
               continue
             fi
             if [[ "$result" != success ]]; then
