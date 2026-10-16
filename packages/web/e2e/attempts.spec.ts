@@ -116,8 +116,9 @@ for (const [draft, checksPassed, label] of [
       "https://demo.invalid/pr/1",
     );
     await expect(one.locator(".badge")).toHaveCSS("color", "rgb(196, 165, 239)");
-    await expect(two.locator(".badge")).toHaveClass(/status-awaiting_review/);
-    await expect(two.locator(".badge")).toHaveCSS("color", "rgb(112, 201, 152)");
+    const color = label === "Waiting for checks" ? "rgb(229, 199, 107)" : "rgb(112, 201, 152)";
+    await expect(two.locator(".badge")).toHaveCSS("color", color);
+    await expect(page.locator(".detail-heading .badge")).toHaveCSS("color", color);
     await expect.poll(() => page.getByRole("button", { pressed: true }).count()).toBe(1);
     await page.setViewportSize({ width: 1440, height: 1100 });
     await two.click();

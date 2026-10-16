@@ -251,6 +251,9 @@ h2 {
 .status-failed {
   --status-color: #e47d75;
 }
+.status-waiting_for_checks {
+  --status-color: #e5c76b;
+}
 .status-queued {
   --status-color: #8eb6ec;
 }

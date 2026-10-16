@@ -64,7 +64,10 @@ export function AttemptHistory({
           ? "merged"
           : attempt.pullRequest?.state === "closed"
             ? "cancelled"
-            : attempt.state,
+            : attempt.state === "awaiting_review" &&
+                reviewLabel(attempt.pullRequest) === "Waiting for checks"
+              ? "waiting_for_checks"
+              : attempt.state,
       events: attempt.events,
       pullRequests: attempt.pullRequest ? [attempt.pullRequest] : [],
     })),

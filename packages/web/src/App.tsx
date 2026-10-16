@@ -49,11 +49,10 @@ function initialDraft() {
   }
 }
 function Badge({ goal }: { goal: Goal }) {
+  const waitingForChecks = goal.state === "awaiting_review" && !goalReadyForReview(goal);
   return (
-    <span className={`badge status-${goal.state}`}>
-      {goal.state === "awaiting_review" && !goalReadyForReview(goal)
-        ? "Waiting for checks"
-        : labels[goal.state]}
+    <span className={`badge status-${waitingForChecks ? "waiting_for_checks" : goal.state}`}>
+      {waitingForChecks ? "Waiting for checks" : labels[goal.state]}
     </span>
   );
 }
