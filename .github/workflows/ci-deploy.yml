@@ -55,7 +55,7 @@ jobs:
           run_install: false
           cache: true
           cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Check lint, formatting, build, and types
         run: bash scripts/ci-verify.sh build
       - name: Save failure evidence
@@ -101,7 +101,7 @@ jobs:
           run_install: false
           cache: true
           cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Run all unit and database integration tests
         run: bash scripts/ci-verify.sh unit
       - name: Save failure evidence
@@ -134,7 +134,7 @@ jobs:
           run_install: false
           cache: true
           cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - name: Build and verify CLI flows
         run: bash scripts/ci-verify.sh cli
       - name: Save failure evidence
@@ -180,7 +180,7 @@ jobs:
           run_install: false
           cache: true
           cache_dependency_path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/.cache/ms-playwright
