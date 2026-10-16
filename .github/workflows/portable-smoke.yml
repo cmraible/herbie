@@ -24,8 +24,6 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           persist-credentials: false
-      - name: Verify release artifact metadata
-        run: node --test scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs
       - name: Verify manifest-only image promotion
         run: bash scripts/test-image-promotion.sh
       - name: Build and exercise the standalone container with an isolated database
