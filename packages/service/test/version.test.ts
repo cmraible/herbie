@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import test from "node:test";
 import { Pool } from "pg";
 import { Store } from "../src/store.js";
-import { createAuth } from "../src/auth.js";
-import { PgAuthStore } from "../src/auth-store.js";
+import { testAuth } from "./test-auth.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { createApiServer } from "../src/http.js";
 import { runningVersion } from "../src/version.js";
 
 test("version falls back to the local Git checkout", () => {
+  if (!existsSync(new URL("../../../.git", import.meta.url))) {
+    assert.equal(runningVersion().commitSha, null);
+    return;
+  }
   assert.equal(
     runningVersion().commitSha,
     execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
@@ -22,10 +26,7 @@ test("version is public JSON and needs no database connection", async (t) => {
   const commitSha = "a".repeat(40);
   const server = createApiServer({
     store: new Store(pool),
-    auth: createAuth(
-      { mode: "demo", publicUrl, credentialKey: Buffer.alloc(32, 7).toString("base64") },
-      new PgAuthStore(pool),
-    ),
+    auth: testAuth(),
     adapters: createDemoAdapters(),
     publicUrl,
     deploymentId: commitSha,
