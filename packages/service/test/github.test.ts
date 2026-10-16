@@ -23,6 +23,7 @@ export async function githubFixture(t: TestContext) {
     actions: "read",
     pullRequests: "write",
     workflows: "write" as string | undefined,
+    outdatedInstallation: false,
     installationId: 11,
     installationToken: "ghs_fixture",
     pr: false,
@@ -60,6 +61,9 @@ export async function githubFixture(t: TestContext) {
       res.end(
         JSON.stringify({
           installations: [
+            ...(fixture.outdatedInstallation
+              ? [{ id: 12, permissions: { contents: "write" } }]
+              : []),
             {
               id: fixture.installationId,
               permissions: {
@@ -896,10 +900,10 @@ for (const permission of [
   test(`installation setup and authorization require ${permission} access`, async (t) => {
     const { github, fixture } = await githubFixture(t);
     fixture[permission] = "";
-    await assert.rejects(
-      github.repositories("ghu_fixture"),
-      (error) => error instanceof GithubError && error.code === "github_permissions_required",
-    );
+    assert.deepEqual(await github.discoverRepositories("ghu_fixture"), {
+      repositories: [],
+      permissionsRequired: true,
+    });
     assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "permissions");
     await assert.rejects(
       github.authorize("ghu_fixture", "alice/project"),
@@ -930,4 +934,13 @@ test("publication tokens require workflows permission while read tokens stay res
       { repositories: ["project"], permissions: { contents: "read", pull_requests: "read" } },
     ],
   );
+});
+
+test("an outdated installation prompts for updates without blocking another approved installation", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.outdatedInstallation = true;
+  const discovery = await github.discoverRepositories("ghu_fixture");
+  assert.equal(discovery.permissionsRequired, true);
+  assert.equal(discovery.repositories[0]?.fullName, "alice/project");
+  assert.equal((await github.authorize("ghu_fixture", "alice/project")).installationId, 11);
 });

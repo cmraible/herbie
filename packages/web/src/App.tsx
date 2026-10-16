@@ -214,9 +214,10 @@ export function App() {
     setRepositoryError(null);
     async function discover() {
       try {
-        const list = sortRepositories(await api.repositories());
+        const discovery = await api.discoverRepositories();
+        const list = sortRepositories(discovery.repositories);
         if (!alive) return;
-        setPermissionsRequired(false);
+        setPermissionsRequired(discovery.permissionsRequired);
         setInstallationNotice((current) => (current === "permissions" ? null : current));
         setRepositories(list);
         setRepositoriesResolved(true);

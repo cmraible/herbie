@@ -9,6 +9,7 @@ import {
   eventSchema,
   sessionSchema,
   repositorySchema,
+  repositoryDiscoverySchema,
   authStartSchema,
   installationStartSchema,
   authPollSchema,
@@ -37,7 +38,11 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     body?: unknown,
     requestId?: string,
   ): Promise<T> {
-    const headers = new Headers({ accept: "application/json", "x-herbie-goal-version": "2" });
+    const headers = new Headers({
+      accept: "application/json",
+      "x-herbie-goal-version": "2",
+      "x-herbie-repository-version": "2",
+    });
     if (body !== undefined) headers.set("content-type", "application/json");
     if (body !== undefined && options.origin) headers.set("origin", options.origin);
     if (options.token) headers.set("authorization", `Bearer ${options.token}`);
@@ -68,6 +73,16 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     }
     return schema.parse(data);
   }
+  const discoverRepositories = () =>
+    request(
+      "/api/repositories",
+      z.union([
+        repositoryDiscoverySchema,
+        z
+          .array(repositorySchema)
+          .transform((repositories) => ({ repositories, permissionsRequired: false })),
+      ]),
+    );
   const goalPath = (id: string) => `/api/goals/${z.uuid().parse(id)}`;
   return {
     health: () =>
@@ -80,7 +95,8 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
         }),
       ),
     session: () => request("/api/session", sessionSchema),
-    repositories: () => request("/api/repositories", z.array(repositorySchema)),
+    discoverRepositories,
+    repositories: async () => (await discoverRepositories()).repositories,
     goals: () => request("/api/goals", z.array(goalSchema)),
     goal: (id: string) => request(goalPath(id), goalSchema),
     start: (input: GoalInput, requestId: string) => {

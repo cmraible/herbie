@@ -131,3 +131,20 @@ test("repository permission failures preserve the code for the in-app update pro
     },
   );
 });
+
+test("repository discovery retains the update prompt alongside usable repositories", async () => {
+  const repositories = [{ fullName: "alice/project", defaultBranch: "main", installationId: 11 }];
+  await withServer(
+    (request, response) => {
+      assert.equal(request.headers["x-herbie-repository-version"], "2");
+      response.end(JSON.stringify({ repositories, permissionsRequired: true }));
+    },
+    async (client) => {
+      assert.deepEqual(await client.discoverRepositories(), {
+        repositories,
+        permissionsRequired: true,
+      });
+      assert.deepEqual(await client.repositories(), repositories);
+    },
+  );
+});

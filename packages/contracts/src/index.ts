@@ -133,5 +133,10 @@ export type Goal = z.infer<typeof goalSchema>;
 export type GoalInput = z.input<typeof goalInput>;
 export type GoalEvent = z.infer<typeof eventSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export const repositoryDiscoverySchema = z.object({
+  repositories: z.array(repositorySchema),
+  permissionsRequired: z.boolean(),
+});
+export type RepositoryDiscovery = z.infer<typeof repositoryDiscoverySchema>;
 export type Repository = z.infer<typeof repositorySchema>;
 export type GoalAction = z.infer<typeof actionSchema>;

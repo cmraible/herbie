@@ -1,7 +1,11 @@
 import { registerDiagnosticSecret, logFailure } from "./diagnostic-log.js";
 import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { githubPermissionsMessage, type Repository } from "@herbie/contracts";
+import {
+  githubPermissionsMessage,
+  type RepositoryDiscovery,
+  type Repository,
+} from "@herbie/contracts";
 import type { PullRequest, RepositoryAccess, CiStatus } from "./adapters.js";
 
 export interface GithubConfig {
@@ -156,15 +160,18 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     const unsigned = `${Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ iat: now - 60, exp: now + 540, iss: config.appId })).toString("base64url")}`;
     return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(config.privateKey, "base64url")}`;
   }
-  async function repositories(token: string): Promise<Repository[]> {
+  async function discoverRepositories(token: string): Promise<RepositoryDiscovery> {
+    let permissionsRequired = false;
     const result: Repository[] = [];
     for (let page = 1; page <= 100; page++) {
       const installations = z
         .object({ installations: z.array(installationSchema) })
         .parse(await request(`/user/installations?per_page=100&page=${page}`, token)).installations;
       for (const installation of installations) {
-        if (!requiredPermissions(installation))
-          throw new GithubError(403, githubPermissionsMessage, "github_permissions_required");
+        if (!requiredPermissions(installation)) {
+          permissionsRequired = true;
+          continue;
+        }
         for (let repoPage = 1; repoPage <= 100; repoPage++) {
           const repos = z
             .object({ repositories: z.array(repositorySchema) })
@@ -185,9 +192,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           if (repoPage === 100) throw new Error("Repository listing exceeds supported limit");
         }
       }
-      if (installations.length < 100) return result;
+      if (installations.length < 100) return { repositories: result, permissionsRequired };
     }
     throw new Error("Installation listing exceeds supported limit");
+  }
+  async function repositories(token: string): Promise<Repository[]> {
+    return (await discoverRepositories(token)).repositories;
   }
   async function authorize(token: string, repository: string): Promise<RepositoryAccess> {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400, "Invalid repository");
@@ -631,6 +641,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
   }
   return {
     ciStatus,
+    discoverRepositories,
     repositories,
     authorize,
     findPullRequest,

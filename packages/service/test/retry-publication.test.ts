@@ -668,3 +668,18 @@ test("repository discovery exposes the required-permissions code to signed-in cl
     code: "github_permissions_required",
   });
 });
+
+test("repository discovery reports permission updates while preserving legacy repository lists", async (t) => {
+  const setup = await fixture(t);
+  if (!setup) return;
+  const repositories = [{ fullName: "alice/project", defaultBranch: "main", installationId: 11 }];
+  setup.adapters.repositories = async () => repositories;
+  setup.adapters.discoverRepositories = async () => ({ repositories, permissionsRequired: true });
+  const headers = await setup.session();
+  const current = await fetch(setup.base + "/api/repositories", {
+    headers: { ...headers, "x-herbie-repository-version": "2" },
+  });
+  assert.deepEqual(await current.json(), { repositories, permissionsRequired: true });
+  const legacy = await fetch(setup.base + "/api/repositories", { headers });
+  assert.deepEqual(await legacy.json(), repositories);
+});

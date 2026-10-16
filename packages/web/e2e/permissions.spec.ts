@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { githubPermissionsMessage } from "@herbie/contracts";
 
 test("an existing installation prompts for required permissions and recovers after approval", async ({
   page,
@@ -16,8 +15,7 @@ test("an existing installation prompts for required permissions and recovers aft
       approved
         ? json([{ fullName: "fixture/project", defaultBranch: "main", installationId: 11 }])
         : {
-            status: 403,
-            ...json({ error: githubPermissionsMessage, code: "github_permissions_required" }),
+            ...json({ repositories: [], permissionsRequired: true }),
           },
     ),
   );

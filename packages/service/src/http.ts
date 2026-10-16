@@ -336,7 +336,12 @@ export function createApiServer(options: ApiOptions) {
         return;
       }
       if (method === "GET" && url.pathname === "/api/repositories") {
-        json(response, 200, await adapters.repositories(userId));
+        if (request.headers["x-herbie-repository-version"] === "2") {
+          const discovery = adapters.discoverRepositories
+            ? await adapters.discoverRepositories(userId)
+            : { repositories: await adapters.repositories(userId), permissionsRequired: false };
+          json(response, 200, discovery);
+        } else json(response, 200, await adapters.repositories(userId));
         return;
       }
       if (method === "GET" && url.pathname === "/api/goals") {
