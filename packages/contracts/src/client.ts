@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  reasoningEffort,
   projectUpdate,
   type ProjectUpdate,
   projectPromptEdit,
@@ -96,12 +97,17 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       ),
     session: () => request("/api/session", sessionSchema),
     models: () => request("/api/models", z.array(z.string().min(1).max(200))),
+    reasoningEfforts: (model: string) =>
+      request(
+        `/api/reasoning-efforts?model=${encodeURIComponent(model)}`,
+        z.array(reasoningEffort),
+      ),
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
     projects: () => request("/api/projects", z.array(projectSchema)),
     project: (id: string) => request(projectPath(id), projectSchema),
     start: (input: ProjectInput, requestId: string) => {
-      const { maxWip, model, ...project } = projectInput.parse(input);
+      const { maxWip, model, reasoningEffort, ...project } = projectInput.parse(input);
       // The default must remain acceptable to older strict APIs during rolling upgrades.
       return request(
         "/api/projects",
@@ -110,6 +116,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
           ...project,
           ...(maxWip === 1 ? {} : { maxWip }),
           ...(model === "gpt-6-luna" ? {} : { model }),
+          ...(reasoningEffort === "low" ? {} : { reasoningEffort }),
         },
         requestId,
       );

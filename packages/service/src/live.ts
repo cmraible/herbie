@@ -212,6 +212,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           project,
           branch: (execution.feedback ?? execution.ciRepair) ? execution.branch : undefined,
           model: execution.project.model,
+          reasoningEffort: execution.project.reasoningEffort,
           commit: (execution.feedback ?? execution.ciRepair)?.head,
           feedback: !!execution.feedback,
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),

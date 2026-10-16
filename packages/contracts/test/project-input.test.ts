@@ -39,3 +39,12 @@ test("models default for existing projects and can be configured or updated", as
     assert.equal(projectUpdate.safeParse({ model }).success, false);
   }
 });
+
+test("reasoning effort defaults for legacy projects and supports updates", async () => {
+  const { projectUpdate } = await import("../src/index.js");
+  const input = { repository: "demo/example", prompt: "Fix arithmetic" };
+  assert.equal(projectInput.parse(input).reasoningEffort, "low");
+  assert.equal(projectInput.parse({ ...input, reasoningEffort: "high" }).reasoningEffort, "high");
+  assert.deepEqual(projectUpdate.parse({ reasoningEffort: "high" }), { reasoningEffort: "high" });
+  assert.equal(projectUpdate.safeParse({ reasoningEffort: "" }).success, false);
+});

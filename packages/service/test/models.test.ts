@@ -81,3 +81,33 @@ for (const outcome of ["success", "failure", "unconfigured"] as const) {
     else assert.ok(!JSON.stringify(body).includes("secret upstream"));
   });
 }
+
+test("reasoning discovery authenticates, requires a model, and returns model-specific options", async (t) => {
+  let selected: string | undefined;
+  const server = createApiServer({
+    store: {} as Store,
+    auth: testAuth(),
+    adapters: createDemoAdapters(),
+    publicUrl: "http://localhost:8787",
+    listReasoningEfforts: async (model) => {
+      selected = model;
+      if (model === "broken") throw new Error("secret upstream error");
+      return ["low", "high"];
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const url = `http://127.0.0.1:${address.port}/api/reasoning-efforts`;
+  assert.equal((await fetch(`${url}?model=example`)).status, 401);
+  assert.equal(selected, undefined);
+  const headers = { authorization: `Bearer ${testSessionToken}` };
+  assert.equal((await fetch(url, { headers })).status, 400);
+  const response = await fetch(`${url}?model=example`, { headers });
+  assert.deepEqual(await response.json(), ["low", "high"]);
+  assert.equal(selected, "example");
+  const failure = await fetch(`${url}?model=broken`, { headers });
+  assert.equal(failure.status, 502);
+  assert.ok(!(await failure.text()).includes("secret upstream"));
+});

@@ -53,6 +53,7 @@ function fixtures() {
       "Validate email addresses before submitting the signup form. Show clear, actionable errors next to each field, preserve entered values after a failed submission, and add coverage for the common failure cases.",
     maxWip: 1,
     model: "gpt-6-luna",
+    reasoningEffort: "low",
     attemptCount: 3,
     mode: "live",
     state: "awaiting_review",
@@ -196,6 +197,7 @@ export function fixtureApi(): Plugin {
           if (url.pathname === "/api/health") return send({ mode: "live" });
           if (url.pathname === "/api/session")
             return send({ mode: "live", user: { id: "local-preview", login: "chris" } });
+          if (url.pathname === "/api/reasoning-efforts") return send(["low", "medium", "high"]);
           if (url.pathname === "/api/models") return send(["gpt-6-luna", "gpt-6-astra"]);
           if (url.pathname === "/api/repositories")
             return send([{ fullName: repository, defaultBranch: "main", installationId: 1 }]);

@@ -1260,3 +1260,21 @@ integration("project models persist and participate in idempotency", async () =>
     /Idempotency key/,
   );
 });
+
+integration(
+  "project reasoning effort persists, updates, and participates in idempotency",
+  async () => {
+    const request = { ...input(), reasoningEffort: "high" };
+    const key = randomUUID();
+    const { project } = await store.createProject("owner", request, "demo", key);
+    assert.equal(project.reasoningEffort, "high");
+    assert.equal((await store.getProject(project.id))?.reasoningEffort, "high");
+    assert.equal((await store.createProject("owner", request, "demo", key)).created, false);
+    await assert.rejects(
+      store.createProject("owner", { ...request, reasoningEffort: "low" }, "demo", key),
+      /Idempotency key/,
+    );
+    const updated = await store.updateProject(project.id, "owner", { reasoningEffort: "medium" });
+    assert.equal(updated.reasoningEffort, "medium");
+  },
+);

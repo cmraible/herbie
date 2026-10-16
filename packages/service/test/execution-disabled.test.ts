@@ -28,6 +28,7 @@ test("live adapters without approved execution configuration cannot start an att
       attemptCount: 0,
       maxWip: 1,
       model: "gpt-6-luna",
+      reasoningEffort: "low",
       pullRequests: [],
       state: "queued",
       cleanupStatus: "not_required",

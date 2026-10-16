@@ -1,3 +1,4 @@
+import { ReasoningSelect } from "./ReasoningSelect";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createClient, ApiError } from "@herbie/contracts/client";
 import {
@@ -121,6 +122,7 @@ export function App() {
               prompt: project.prompt,
               maxWip: String(project.maxWip),
               model: project.model,
+              reasoningEffort: project.reasoningEffort,
             },
       );
   }, [editing, project]);
@@ -490,6 +492,7 @@ export function App() {
         name: projectEdit.name,
         prompt: projectEdit.prompt,
         model: projectEdit.model,
+        reasoningEffort: projectEdit.reasoningEffort,
         maxWip: Number(projectEdit.maxWip),
       });
       setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
@@ -1029,6 +1032,12 @@ export function App() {
                     value={formDraft.model}
                     onChange={(model) => editForm({ model })}
                   />
+                  <ReasoningSelect
+                    model={formDraft.model}
+                    disabled={busy}
+                    value={formDraft.reasoningEffort}
+                    onChange={(reasoningEffort) => editForm({ reasoningEffort })}
+                  />
                   <label>
                     Maximum work in progress
                     <input
@@ -1044,8 +1053,8 @@ export function App() {
                   </label>
                   {editing && (
                     <p className="subtle-note">
-                      Prompt and model changes apply to future runs. Existing work will finish
-                      before a lower work limit takes effect.
+                      Prompt, model, and reasoning changes apply to future runs. Existing work will
+                      finish before a lower work limit takes effect.
                     </p>
                   )}
                   {formError && (
