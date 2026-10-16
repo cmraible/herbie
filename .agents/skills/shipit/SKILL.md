@@ -57,8 +57,14 @@ After verifying the merge, calculate total wall-clock time as the PR's actual me
 
 ## Wait for production deployment
 
-After merge verification, poll `https://herbie.raible.dev/api/version` every 5 seconds with a bounded request timeout and caching disabled. Compare the JSON response's `commitSha` to the PR's actual merge commit SHA, not its pre-merge head or the `version` string. Production is verified when the SHAs match, or Git ancestry confirms the merge commit is an ancestor of the deployed commit (a newer deployment includes this PR).
+After merge verification, run the deployment watcher with the actual merge commit SHA and original start timestamp:
 
-Continue waiting through stale SHAs, request failures, and malformed responses; none confirms deployment. Keep the user informed of meaningful progress. After 30 minutes without verification, or a user-specified waiting window, report that the PR merged but production deployment remains unverified, including the expected SHA, last observed SHA or request error, and the next action needed. A timeout is not shipping success.
+```sh
+node scripts/deploy-watch.mjs --repo OWNER/REPO --commit MERGE_SHA --started-at "$ship_started_at"
+```
 
-On verification, report the PR URL, merge commit, deployed commit, a brief summary of local review and validation, and the request-to-merge duration above. Also report request-to-production-verification duration using the time the endpoint confirmed deployment; this is an observation time, not the exact deployment timestamp. Apply this gate in both normal and YOLO modes.
+It polls `https://herbie.raible.dev/api/version` every 5 seconds with bounded requests and caching disabled. It confirms the response's `commitSha` matches the merge or GitHub ancestry proves a newer deployed commit includes it. Keep it running between tool calls and consume its JSON progress and terminal result. Use `--timeout SECONDS` for a user-specified waiting window, or `--url URL` for an explicitly selected deployment target.
+
+The watcher retries stale SHAs, request failures, malformed responses, and failed ancestry lookups. Keep the user informed of meaningful progress. Its default timeout is 30 minutes. On `deployment_timeout`, report that the PR merged but production remains unverified, including the expected SHA, last observed SHA or request error, and the next action needed. A timeout is not shipping success.
+
+On `deployed`, report the PR URL, merge commit, deployed commit, a brief summary of local review and validation, and the request-to-merge duration above. Also report request-to-production-verification duration from the watcher's `verifiedAt` and `durationSeconds`; this is an observation time, not the exact deployment timestamp. Apply this gate in both normal and YOLO modes.
