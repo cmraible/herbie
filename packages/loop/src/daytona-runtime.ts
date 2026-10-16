@@ -6,6 +6,9 @@ export const installDaytonaRuntime = String.raw`set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update
 apt-get -qq install -y --no-install-recommends ca-certificates curl xz-utils git >/dev/null
+curl --fail --silent --show-error --max-time 50 -o /tmp/install-docker.sh https://get.docker.com
+VERSION=28.3.3 sh /tmp/install-docker.sh
+rm /tmp/install-docker.sh
 mkdir -p /opt/herbie-tools
 cd /opt/herbie-tools
 curl --fail --silent --show-error --max-time 50 -o node.tar.xz https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz
@@ -29,6 +32,19 @@ rm node.tar.xz codex.tgz python.tar.gz
 export const configureDaytonaRuntime = String.raw`set -eu
 id -u compat >/dev/null 2>&1 || useradd -m -s /bin/bash compat
 test "$(id -u compat)" -ne 0
+command -v docker >/dev/null
+command -v dockerd >/dev/null
+groupadd -f docker
+usermod -aG docker compat
+if ! docker info >/dev/null 2>&1; then
+  nohup dockerd --group docker >/tmp/herbie-docker.log 2>&1 </dev/null &
+fi
+for attempt in $(seq 1 20); do
+  if runuser -u compat -- docker info >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+runuser -u compat -- docker info
+runuser -u compat -- docker compose version
 mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
 model = "gpt-6-luna"
