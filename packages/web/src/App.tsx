@@ -448,6 +448,14 @@ export function App() {
 
   return (
     <div className="app">
+      {sessionState === "signed-in" && (
+        <header className="app-header">
+          <a className="wordmark" href="#" aria-label="Herbie home">
+            Herbie<span aria-hidden="true">.</span>
+          </a>
+          <span>Coding workspace</span>
+        </header>
+      )}
       {error && (
         <div className="error-banner" role="alert">
           {error}
@@ -521,7 +529,9 @@ export function App() {
                 ) : (
                   <h1>{creating ? "New project" : editing ? "Edit project" : "Projects"}</h1>
                 )}
-                {!creating && !selected && <p>Work that keeps moving.</p>}
+                {!creating && !selected && (
+                  <p>Track progress, review results, and decide what’s next.</p>
+                )}
               </div>
               {!creating && !editing && !selected && (
                 <div className="heading-actions">
@@ -574,6 +584,31 @@ export function App() {
                 )}
                 {!selected && goals.length > 0 && (
                   <>
+                    <dl className="goal-summary" aria-label="Project overview">
+                      <div>
+                        <dt>In progress</dt>
+                        <dd>
+                          {
+                            goals.filter((item) => ["queued", "running"].includes(item.state))
+                              .length
+                          }
+                        </dd>
+                      </div>
+                      <div className="status-awaiting_review">
+                        <dt>Ready for review</dt>
+                        <dd>{goals.filter((item) => item.state === "awaiting_review").length}</dd>
+                      </div>
+                      <div className="status-needs_attention">
+                        <dt>Needs attention</dt>
+                        <dd>
+                          {
+                            goals.filter((item) =>
+                              ["failed", "needs_attention"].includes(item.state),
+                            ).length
+                          }
+                        </dd>
+                      </div>
+                    </dl>
                     <section className="goal-list" aria-label="Projects" aria-busy={!goalsLoaded}>
                       {visibleGoals.map((item) => (
                         <button
@@ -581,11 +616,14 @@ export function App() {
                           key={item.id}
                           onClick={() => navigateToScreen(item.id)}
                         >
-                          <span className="goal-row-title">{item.name}</span>
+                          <span className="goal-row-heading">
+                            <span className="goal-row-title">{item.name}</span>
+                            <Badge goal={item} />
+                          </span>
                           <span className="goal-row-meta">
-                            <span className={`status-dot status-${item.state}`} />
-                            {labels[item.state]} <span>·</span> {item.repository} <span>·</span>{" "}
-                            {time(item.createdAt)}
+                            {item.repository} <span>·</span> {item.attemptCount}{" "}
+                            {item.attemptCount === 1 ? "run" : "runs"} <span>·</span> Updated{" "}
+                            {time(item.updatedAt)}
                           </span>
                         </button>
                       ))}
@@ -593,6 +631,7 @@ export function App() {
                     {finishedCount > 0 && (
                       <button
                         className="finished-toggle"
+                        aria-expanded={showFinished}
                         onClick={() => setShowFinished((value) => !value)}
                       >
                         {showFinished ? "Hide" : "Show"} completed and cancelled ({finishedCount})
@@ -679,8 +718,8 @@ export function App() {
                     <p className="goal-brief">{goal.prompt}</p>
 
                     <p className="goal-meta">
-                      {goal.attemptCount} runs <span>·</span> Max parallel runs {goal.maxWip}{" "}
-                      <span>·</span> Created {time(goal.createdAt)}
+                      {goal.attemptCount} {goal.attemptCount === 1 ? "run" : "runs"} <span>·</span>{" "}
+                      Max parallel runs {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}
                     </p>
                     {goal.error && (
                       <div className="status-message" role="alert">
