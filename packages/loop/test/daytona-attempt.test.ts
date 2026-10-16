@@ -161,7 +161,12 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     undefined,
     22 * 60,
   ]);
-  assert.equal(sandbox.process.executeCommand.mock.calls[0].arguments[3], 30);
+  assert.equal(sandbox.process.executeCommand.mock.calls[0].arguments[3], 60);
+  const setup = sandbox.process.executeCommand.mock.calls[0].arguments[0];
+  assert.match(setup, /usermod -aG docker compat/);
+  assert.match(setup, /nohup dockerd --group docker/);
+  assert.match(setup, /runuser -u compat -- docker info/);
+  assert.match(setup, /runuser -u compat -- docker compose version/);
   assert.equal(sandbox.fs.downloadFileStream.mock.calls[0].arguments[0], `${root}/changes.json`);
   assert.equal(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].timeout, 30);
   assert.ok(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].signal.aborted);
@@ -522,14 +527,15 @@ test("provisions a bounded Ubuntu runtime with default networking when no snapsh
   assert.deepEqual(params, {
     name: params.name,
     image: "ubuntu:22.04",
-    resources: { cpu: 1, memory: 1, disk: 3 },
+    resources: { cpu: 2, memory: 4, disk: 10 },
     secrets: request.secrets,
     outboundProxyUrl: request.outboundProxyUrl,
     ttlMinutes: 35,
   });
   const [setup, cwd, , timeout] = sandbox.process.executeCommand.mock.calls[0].arguments;
   assert.equal(cwd, undefined);
-  assert.equal(timeout, 240);
+  assert.equal(timeout, 300);
+  assert.match(setup, /VERSION=28\.3\.3 sh \/tmp\/install-docker\.sh/);
   assert.match(setup, /node-v24\.19\.0-linux-x64/);
   assert.match(setup, /codex-0\.159\.2-linux-x64/);
   assert.match(setup, /sha256sum -c/);

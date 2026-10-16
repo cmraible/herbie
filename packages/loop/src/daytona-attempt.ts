@@ -192,7 +192,7 @@ export async function runDaytonaAttempt(
         name,
         ...(request.snapshot
           ? { snapshot: request.snapshot }
-          : { image: "ubuntu:22.04", resources: { cpu: 1, memory: 1, disk: 3 } }),
+          : { image: "ubuntu:22.04", resources: { cpu: 2, memory: 4, disk: 10 } }),
         ...(request.domainAllowList ? { domainAllowList: request.domainAllowList } : {}),
         secrets: request.secrets,
         outboundProxyUrl: request.outboundProxyUrl,
@@ -245,7 +245,7 @@ export async function runDaytonaAttempt(
       (request.snapshot ? "" : installDaytonaRuntime) + configureDaytonaRuntime,
       undefined,
       undefined,
-      request.snapshot ? 30 : 240,
+      request.snapshot ? 60 : 300,
     );
     if (preflight.exitCode !== 0)
       throw new AttemptCommandError(preflight.exitCode, preflight.result);
