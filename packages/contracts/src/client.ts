@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   reasoningEffort,
+  environmentLimits,
   projectUpdate,
   type ProjectUpdate,
   projectPromptEdit,
@@ -96,6 +97,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
         }),
       ),
     session: () => request("/api/session", sessionSchema),
+    environmentLimits: () => request("/api/environment-limits", environmentLimits),
     models: () => request("/api/models", z.array(z.string().min(1).max(200))),
     reasoningEfforts: (model: string) =>
       request(
@@ -107,13 +109,14 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     projects: () => request("/api/projects", z.array(projectSchema)),
     project: (id: string) => request(projectPath(id), projectSchema),
     start: (input: ProjectInput, requestId: string) => {
-      const { maxWip, model, reasoningEffort, ...project } = projectInput.parse(input);
+      const { maxWip, model, reasoningEffort, resources, ...project } = projectInput.parse(input);
       // The default must remain acceptable to older strict APIs during rolling upgrades.
       return request(
         "/api/projects",
         projectSchema,
         {
           ...project,
+          ...(resources === null ? {} : { resources }),
           ...(maxWip === 1 ? {} : { maxWip }),
           ...(model === "gpt-6-luna" ? {} : { model }),
           ...(reasoningEffort === "low" ? {} : { reasoningEffort }),

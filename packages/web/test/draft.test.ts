@@ -10,6 +10,7 @@ test("a new project needs only a repository and prompt", () => {
     maxWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
+    resources: null,
   });
 });
 
@@ -32,6 +33,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     maxWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
+    resources: null,
   });
 });
 
@@ -54,4 +56,13 @@ test("old drafts default reasoning effort and new selections survive restoration
     prompt: "Fix arithmetic",
   });
   assert.equal(parseDraft(restored).reasoningEffort, "high");
+});
+
+test("custom environment resources survive draft restoration", () => {
+  const draft = {
+    ...newDraft("demo/example"),
+    prompt: "Optimize verification",
+    resources: { cpu: 4, memory: 8, disk: 10 },
+  };
+  assert.deepEqual(parseDraft(draftSchema.parse(draft)).resources, draft.resources);
 });

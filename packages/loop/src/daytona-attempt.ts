@@ -42,18 +42,19 @@ export interface DaytonaAttemptArtifact {
   localChecksPassed?: true;
 }
 
-type AttemptSandbox = Pick<Sandbox, "id" | "delete"> & {
-  git: Pick<Sandbox["git"], "clone">;
-  fs: {
-    createFolder: Sandbox["fs"]["createFolder"];
-    uploadFile(file: Buffer, path: string, timeout: number): Promise<void>;
-    downloadFileStream(
-      path: string,
-      options: { timeout: number; signal: AbortSignal },
-    ): Promise<Readable>;
+type AttemptSandbox = Pick<Sandbox, "id" | "delete"> &
+  Partial<Pick<Sandbox, "cpu" | "memory" | "disk">> & {
+    git: Pick<Sandbox["git"], "clone">;
+    fs: {
+      createFolder: Sandbox["fs"]["createFolder"];
+      uploadFile(file: Buffer, path: string, timeout: number): Promise<void>;
+      downloadFileStream(
+        path: string,
+        options: { timeout: number; signal: AbortSignal },
+      ): Promise<Readable>;
+    };
+    process: Pick<Sandbox["process"], "executeCommand">;
   };
-  process: Pick<Sandbox["process"], "executeCommand">;
-};
 type CreateSandbox = (
   params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams,
   options: { timeout: number },
@@ -61,6 +62,7 @@ type CreateSandbox = (
 type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyUrl"> & {
   signal?: AbortSignal;
   snapshot?: string;
+  resources?: { cpu: number; memory: number; disk: number };
   domainAllowList?: string;
   repoUrl: string;
   branch?: string;
@@ -140,6 +142,15 @@ export async function runDaytonaAttempt(
   report: (message: string) => void | Promise<void>,
   runtimeDirectory = new URL(".", import.meta.url),
 ): Promise<DaytonaAttemptChanges> {
+  if (request.snapshot && request.resources)
+    throw new Error(
+      "Custom resources require an image-based environment; snapshot resizing is unavailable.",
+    );
+  if (
+    request.resources &&
+    Object.values(request.resources).some((value) => !Number.isSafeInteger(value) || value < 1)
+  )
+    throw new Error("Environment resources must be positive whole numbers");
   let stage: AttemptStage = "sandbox_creation";
   const emit = async (message: string, sink = report): Promise<void> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -192,7 +203,10 @@ export async function runDaytonaAttempt(
         name,
         ...(request.snapshot
           ? { snapshot: request.snapshot }
-          : { image: "ubuntu:22.04", resources: { cpu: 2, memory: 4, disk: 10 } }),
+          : {
+              image: "ubuntu:22.04",
+              resources: request.resources ?? { cpu: 2, memory: 4, disk: 10 },
+            }),
         ...(request.domainAllowList ? { domainAllowList: request.domainAllowList } : {}),
         secrets: request.secrets,
         outboundProxyUrl: request.outboundProxyUrl,
@@ -240,6 +254,17 @@ export async function runDaytonaAttempt(
   try {
     request.signal?.throwIfAborted();
     await emit(`Created sandbox ${sandbox.id}`);
+    if (request.resources) {
+      for (const key of ["cpu", "memory", "disk"] as const) {
+        if (sandbox[key] !== request.resources[key])
+          throw new Error(
+            `Daytona did not allocate the requested ${key}: expected ${request.resources[key]}, received ${sandbox[key]}`,
+          );
+      }
+      await emit(
+        `Environment resources: ${sandbox.cpu} CPUs, ${sandbox.memory} GiB memory, ${sandbox.disk} GiB disk`,
+      );
+    }
     await begin("runtime_preparation");
     const preflight = await sandbox.process.executeCommand(
       (request.snapshot ? "" : installDaytonaRuntime) + configureDaytonaRuntime,

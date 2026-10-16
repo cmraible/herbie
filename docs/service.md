@@ -108,3 +108,9 @@ Pause projects and let active attempts finish before restarting. Keep the databa
 Run `pnpm verify`. It provisions disposable databases and test services without paid
 model or Daytona calls. See [CI verification](github-actions.md) for requirements
 and logs; live integrations still need a separate smoke test.
+
+## Project environment resources
+
+Project creation and editing accept `resources: { cpu, memory, disk }` (whole CPU cores and GiB), or `null` to use environment defaults. Settings apply to future runs, including repairs and feedback work. The authenticated `/api/environment-limits` endpoint discovers Daytona bounds using the existing API key's `read:limits` permission and caches them for one minute. Custom resources require image-based creation; a configured `HERBIE_DAYTONA_SNAPSHOT` retains its own sizing and rejects overrides. Multiple eligible CPU regions require an explicit `DAYTONA_TARGET`.
+
+Increasing resources changes Daytona consumption and does not extend the agent's execution deadline. The worker checks allocated CPU, memory, and disk before running repository code, and cleans up an environment whose allocation does not match the request.

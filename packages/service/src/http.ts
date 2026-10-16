@@ -1,3 +1,4 @@
+import { EnvironmentLimitsError, validateEnvironmentResources } from "./environment-limits.js";
 import { createReasoningEffortLister } from "./reasoning-efforts.js";
 import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -375,6 +376,35 @@ export function createApiServer(options: ApiOptions) {
         }
         return;
       }
+      async function loadEnvironmentLimits() {
+        if (!adapters.environmentLimits)
+          throw new HttpError(503, "Environment discovery is unavailable");
+        try {
+          return await adapters.environmentLimits();
+        } catch (error) {
+          throw new HttpError(
+            502,
+            error instanceof EnvironmentLimitsError
+              ? error.message
+              : "Could not load environment limits. Check Daytona access and retry.",
+          );
+        }
+      }
+      if (method === "GET" && url.pathname === "/api/environment-limits") {
+        json(response, 200, await loadEnvironmentLimits());
+        return;
+      }
+      async function validateResources(
+        resources: import("@herbie/contracts").EnvironmentResources | null | undefined,
+      ) {
+        if (!resources) return;
+        const limits = await loadEnvironmentLimits();
+        try {
+          validateEnvironmentResources(resources, limits);
+        } catch (error) {
+          throw new HttpError(400, (error as Error).message);
+        }
+      }
       if (method === "GET" && url.pathname === "/api/models") {
         if (!options.listModels) throw new HttpError(503, "Model discovery is unavailable");
         let models: string[];
@@ -402,6 +432,7 @@ export function createApiServer(options: ApiOptions) {
       if (method === "POST" && url.pathname === "/api/projects") {
         requireExecution();
         const input = projectInput.parse(await readJson(request));
+        await validateResources(input.resources);
         const key = z.string().uuid().parse(request.headers["idempotency-key"]);
         await adapters.authorize(userId, input.repository);
         const result = await store.createProject(userId, input, adapters.mode, key);
@@ -416,10 +447,9 @@ export function createApiServer(options: ApiOptions) {
         const project = await store.getProject(id, userId);
         if (!project) throw new HttpError(404, "Project not found");
         if (method === "POST" && !projectPath[2]) {
-          projectJson(
-            200,
-            await store.updateProject(id, userId, projectUpdate.parse(await readJson(request))),
-          );
+          const input = projectUpdate.parse(await readJson(request));
+          await validateResources(input.resources);
+          projectJson(200, await store.updateProject(id, userId, input));
           return;
         }
         if (method === "GET" && !projectPath[2]) {

@@ -995,3 +995,24 @@ textarea::placeholder {
     margin: 4px 0 0;
   }
 }
+
+.environment-settings {
+  min-width: 0;
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+}
+.environment-settings legend {
+  font-size: 13px;
+  color: #ddd;
+}
+.environment-resources-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 480px) {
+  .environment-resources-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,3 +1,4 @@
+import { EnvironmentSettings } from "./EnvironmentSettings.js";
 import { ReasoningSelect } from "./ReasoningSelect";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createClient, ApiError } from "@herbie/contracts/client";
@@ -121,6 +122,7 @@ export function App() {
               name: project.name,
               prompt: project.prompt,
               maxWip: String(project.maxWip),
+              resources: project.resources,
               model: project.model,
               reasoningEffort: project.reasoningEffort,
             },
@@ -491,6 +493,7 @@ export function App() {
       const result = await api.update(projectEdit.id, {
         name: projectEdit.name,
         prompt: projectEdit.prompt,
+        resources: projectEdit.resources,
         model: projectEdit.model,
         reasoningEffort: projectEdit.reasoningEffort,
         maxWip: Number(projectEdit.maxWip),
@@ -1031,6 +1034,11 @@ export function App() {
                     value={formDraft.model}
                     onChange={(model) => editForm({ model })}
                   />
+                  <EnvironmentSettings
+                    disabled={busy}
+                    value={formDraft.resources}
+                    onChange={(resources) => editForm({ resources })}
+                  />
                   <ReasoningSelect
                     model={formDraft.model}
                     disabled={busy}
@@ -1052,8 +1060,8 @@ export function App() {
                   </label>
                   {editing && (
                     <p className="subtle-note">
-                      Prompt, model, and reasoning changes apply to future runs. Existing work will
-                      finish before a lower work limit takes effect.
+                      Instructions, environment, model, and reasoning changes apply to future runs.
+                      Existing work will finish before a lower work limit takes effect.
                     </p>
                   )}
                   {formError && (

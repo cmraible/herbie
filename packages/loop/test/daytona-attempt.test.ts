@@ -1013,3 +1013,38 @@ for (const outcome of [
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
+
+test("custom resources are passed and verified before execution", async (t) => {
+  const { create, sandbox, run, reports } = await fixture(t);
+  const resources = { cpu: 4, memory: 8, disk: 10 };
+  Object.assign(sandbox, resources);
+  await run({ snapshot: undefined, resources });
+  assert.deepEqual(
+    (create.mock.calls[0].arguments[0] as { resources: typeof resources }).resources,
+    resources,
+  );
+  assert.ok(reports.includes("Environment resources: 4 CPUs, 8 GiB memory, 10 GiB disk"));
+});
+test("custom snapshot sizing is rejected before allocation", async (t) => {
+  const { create, run } = await fixture(t);
+  await assert.rejects(
+    run({ resources: { cpu: 4, memory: 8, disk: 10 } }),
+    /image-based environment/,
+  );
+  assert.equal(create.mock.callCount(), 0);
+});
+test("an environment that ignores custom sizing is deleted without starting the agent", async (t) => {
+  const { sandbox, run } = await fixture(t);
+  Object.assign(sandbox, { cpu: 1, memory: 1, disk: 3 });
+  await assert.rejects(
+    run({ snapshot: undefined, resources: { cpu: 4, memory: 8, disk: 10 } }),
+    (error: unknown) => {
+      assert.ok(error instanceof DaytonaAttemptError);
+      assert.equal(error.cleanup, "confirmed");
+      assert.match(String(error.errors[0].cause), /did not allocate the requested cpu/);
+      return true;
+    },
+  );
+  assert.equal(sandbox.process.executeCommand.mock.callCount(), 0);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});

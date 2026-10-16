@@ -1,4 +1,9 @@
-import type { Project, Repository, RepositoryDiscovery } from "@herbie/contracts";
+import type {
+  EnvironmentResources,
+  Project,
+  Repository,
+  RepositoryDiscovery,
+} from "@herbie/contracts";
 import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
 
 export interface RepositoryAccess {
@@ -66,6 +71,8 @@ export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
+  environmentLimits?(): Promise<Record<keyof EnvironmentResources, number | null>>;
+
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
   acknowledgeFeedback?(execution: Execution, requireLease: () => Promise<void>): Promise<void>;
   replyToFeedback?(
