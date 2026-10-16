@@ -146,8 +146,10 @@ export function AttemptHistory({
               <div className="pr-header">
                 <div className="pr-heading">
                   <h2 id="run-title" className="pr-title">
-                    #{pr.number}
-                    {pr.title ? ` · ${pr.title}` : ""}
+                    {pr.title}
+                    <span className="pr-number">
+                      {pr.title ? " · " : ""}#{pr.number}
+                    </span>
                   </h2>
                 </div>
                 <a

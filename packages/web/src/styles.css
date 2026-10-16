@@ -458,6 +458,11 @@ h2 {
   letter-spacing: -0.25px;
   overflow-wrap: anywhere;
 }
+.pr-number {
+  color: #a5b3aa;
+  font-size: 0.75em;
+  font-weight: 400;
+}
 .run-result-link {
   display: inline-flex;
   gap: 8px;
