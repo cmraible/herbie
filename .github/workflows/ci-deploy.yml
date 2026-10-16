@@ -120,19 +120,6 @@ jobs:
     concurrency:
       group: herbie-cli-${{ github.ref }}
       cancel-in-progress: true
-    services:
-      postgres:
-        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
-        env:
-          POSTGRES_USER: herbie
-          POSTGRES_PASSWORD: herbie-local-only
-          POSTGRES_DB: herbie
-        ports: ["55432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U herbie"
-          --health-interval 2s --health-timeout 2s --health-retries 15
-    env:
-      HERBIE_TEST_DATABASE_URL: postgresql://herbie:herbie-local-only@127.0.0.1:55432/herbie
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
