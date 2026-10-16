@@ -607,7 +607,7 @@ export function App() {
                             <span aria-current="page">
                               {selectedRun === "project-activity"
                                 ? "Project activity"
-                                : `Run ${goal.attempts?.find((attempt) => attempt.id === selectedRun)?.number ?? "details"}`}
+                                : `Run ${project.attempts?.find((attempt) => attempt.id === selectedRun)?.number ?? "details"}`}
                             </span>
                           </>
                         ) : (
