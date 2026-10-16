@@ -90,6 +90,12 @@ for (const outcome of [
         "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
         [job.id, originalHead, originalBase, originalPatch],
       );
+      await store.reconcilePullRequestHead(job.id, {
+        headSha: originalHead,
+        draft: false,
+        checksPassed: true,
+      });
+      let draft = false;
       const adapters: Adapters = {
         ...demo,
         mode: "live",
@@ -99,11 +105,21 @@ for (const outcome of [
           headSha: "b".repeat(40),
           baseSha: originalBase,
           patchSha: "f".repeat(64),
+          draft,
+          checksPassed: false,
         }),
       };
       await reconcileReviews(store, adapters);
+      const paused = await store.getGoal(goal.id);
+      assert.equal(paused?.state, "paused");
+      assert.equal(paused?.attempts?.[0]?.pullRequest?.checksPassed, false);
+      assert.equal(paused?.pullRequest?.checksPassed, false);
+      draft = true;
       await reconcileReviews(store, adapters);
-      assert.equal((await store.getGoal(goal.id))?.state, "paused");
+      const refreshed = await store.getGoal(goal.id);
+      assert.equal(refreshed?.attempts?.[0]?.pullRequest?.draft, true);
+      assert.equal(refreshed?.pullRequest?.draft, true);
+      assert.equal(refreshed?.pullRequest?.headSha, originalHead);
       assert.equal(
         (
           await store.pool.query(

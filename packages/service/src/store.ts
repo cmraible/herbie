@@ -1318,8 +1318,8 @@ export class Store {
         ...(current.baseSha ? { baseSha: current.baseSha } : {}),
         ...(current.patchSha ? { patchSha: current.patchSha } : {}),
       };
-      const updateTrackedPullRequest = async () => {
-        const value = JSON.stringify(tracked);
+      const updateTrackedPullRequest = async (fields: Partial<PullRequest> = tracked) => {
+        const value = JSON.stringify(fields);
         await client.query("UPDATE jobs SET pull_request=pull_request || $2::jsonb WHERE id=$1", [
           jobId,
           value,
@@ -1338,6 +1338,12 @@ export class Store {
           await updateTrackedPullRequest();
         return false;
       }
+      // Refresh displayed readiness even when external changes pause further work.
+      // Keep the tracked head unchanged so the external-change guard still applies.
+      await updateTrackedPullRequest({
+        ...pullRequestMetadataSchema.parse(current),
+        checksPassed: current.checksPassed === true,
+      });
       if (!["queued", "running", "awaiting_review"].includes(goal.state)) return false;
       if (pr.patchSha && current.patchSha && pr.patchSha === current.patchSha) {
         await updateTrackedPullRequest();
