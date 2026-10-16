@@ -1,8 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
-for (const state of ["failed", "needs_attention"])
-  test(`Retry recovers a ${state} goal and persists after reload`, async ({ page }) => {
+for (const scenario of ["failed", "needs_attention", "workflow_permission_missing"])
+  test(`Retry recovers ${scenario} and persists after reload`, async ({ page }) => {
+    const workflow = scenario === "workflow_permission_missing";
+    const retryLabel = workflow ? "Retry publication" : "Retry";
     let goal = {
       id: randomUUID(),
       ownerId: "fixture",
@@ -10,13 +12,15 @@ for (const state of ["failed", "needs_attention"])
       name: "Retry fixture",
       prompt: "Finish the task",
       attemptCount: 1,
-      state,
+      state: workflow ? "needs_attention" : scenario,
       createdAt: "2026-10-14T00:00:00Z",
       updatedAt: "2026-10-14T00:00:00Z",
       mode: "live",
       stopRequested: null,
       pullRequest: null,
-      error: "Synthetic attempt failure" as string | null,
+      error: (workflow
+        ? "Automatic publication recovery stopped: workflow_permission_missing (.github/workflows/ci-deploy.yml). Saved work retained; no new model attempt. Failure reference: db3a91ad-09c8-44ea-a2d8-f002570936cf"
+        : "Synthetic attempt failure") as string | null,
     };
     let retries = 0;
     const json = (body: unknown) => ({
@@ -29,7 +33,7 @@ for (const state of ["failed", "needs_attention"])
     );
     await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
     await page.route("**/api/goals/*/events**", (r) => r.fulfill(json([])));
-    await page.route("**/api/goals/*/retry", async (r) => {
+    await page.route(`**/api/goals/*/${workflow ? "retry-publication" : "retry"}`, async (r) => {
       retries++;
       if (retries === 1)
         return r.fulfill({
@@ -43,15 +47,24 @@ for (const state of ["failed", "needs_attention"])
     await expect(page.getByText("Synthetic attempt failure")).toHaveCount(0);
     await page.getByRole("button", { name: /Retry fixture/ }).click();
     const details = page.getByRole("region", { name: "Selected project" });
-    await details.getByRole("button", { name: "Retry", exact: true }).click();
+    if (workflow) {
+      await expect(details.getByRole("alert")).toContainText("Workflows: Read and write");
+      await expect(details.getByRole("alert")).toContainText(".github/workflows/ci-deploy.yml");
+      await expect(details.getByRole("alert")).not.toContainText("Retrying automatically");
+      await details.getByText("Error reference", { exact: true }).click();
+      await expect(
+        details.getByText("db3a91ad-09c8-44ea-a2d8-f002570936cf", { exact: true }),
+      ).toBeVisible();
+    }
+    await details.getByRole("button", { name: retryLabel, exact: true }).click();
     await expect(
       page.getByRole("alert").filter({ hasText: "Temporarily unavailable" }),
     ).toBeVisible();
-    await expect(details.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
-    await details.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(details.getByRole("button", { name: retryLabel, exact: true })).toBeEnabled();
+    await details.getByRole("button", { name: retryLabel, exact: true }).click();
     await expect(details.getByText("Queued", { exact: true })).toBeVisible();
     await expect(details.getByText("Synthetic attempt failure")).toHaveCount(0);
-    await expect(details.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: retryLabel, exact: true })).toHaveCount(0);
     await page.reload();
     await expect(details.getByText("Queued", { exact: true })).toBeVisible();
     expect(retries).toBe(2);

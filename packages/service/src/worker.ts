@@ -210,12 +210,11 @@ export async function runWorkerOnce(
       if (publishing && error instanceof PublicationBlockedError) {
         await store.blockPublication(job.id, workerId, error.message);
       } else if (publishing) {
-        await store.publicationUncertain(
-          job.id,
-          workerId,
-          publicationDiagnosticMessage(publicationDiagnostic(error, publicationPhase)),
-          errorId,
-        );
+        const diagnostic = publicationDiagnostic(error, publicationPhase);
+        const reason = publicationDiagnosticMessage(diagnostic);
+        if (diagnostic.cause === "workflow_permission_missing")
+          await store.blockPublication(job.id, workerId, reason, errorId);
+        else await store.publicationUncertain(job.id, workerId, reason, errorId);
       } else
         await store.fail(
           job.id,

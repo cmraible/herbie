@@ -814,7 +814,12 @@ export class Store {
         await addEvent(client, goal.id, "publication_uncertain", message, jobId);
     });
   }
-  async blockPublication(jobId: string, workerId: string, reason: string): Promise<void> {
+  async blockPublication(
+    jobId: string,
+    workerId: string,
+    reason: string,
+    diagnosticReference?: string,
+  ): Promise<void> {
     await this.transaction(async (client) => {
       const { row, goal } = await lockJob(client, jobId, workerId);
       if (row.stage !== "publishing") throw conflict("Only publication may be blocked");
@@ -822,7 +827,7 @@ export class Store {
         "UPDATE jobs SET publication_blocked=true,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
         [jobId],
       );
-      const message = `Automatic publication recovery stopped: ${reason}. Saved work retained; no new model attempt. Resolve the safety conflict before retrying publication.`;
+      const message = `Automatic publication recovery stopped: ${reason}. Saved work retained; no new model attempt. Resolve the blocking issue before retrying publication.${diagnosticReference ? ` Failure reference: ${diagnosticReference}` : ""}`;
       await client.query(
         "UPDATE goals SET state='needs_attention',error=$2,updated_at=clock_timestamp() WHERE id=$1",
         [goal.id, message],

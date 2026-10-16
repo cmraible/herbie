@@ -11,7 +11,7 @@ import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
-import { errorReference } from "./activity-message.js";
+import { errorReference, goalErrorMessage, workflowPermissionMessage } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 
 const api = createClient();
@@ -48,24 +48,6 @@ function initialDraft() {
 function Badge({ goal }: { goal: Goal }) {
   return <span className={`badge status-${goal.state}`}>{labels[goal.state]}</span>;
 }
-function goalErrorMessage(goal: Goal): string {
-  const error = goal.error ?? "";
-  if (error.includes("Worker connection was lost during an attempt"))
-    return `Run #${goal.attemptCount} was interrupted. Retry to start a new run`;
-  if (error.includes("saved artifact lacks matching test and cleanup evidence"))
-    return "Run failed. Your patches are saved.";
-  if (error.startsWith("Run failed.")) return error.split(" Reference:")[0];
-  if (error.startsWith("Attempt failed")) return "Run failed. No patches were saved.";
-  if (error.includes("Publication remains unconfirmed"))
-    return "Preparing the pull request is taking longer than expected. Retrying automatically";
-  if (error.includes("CI repair stopped"))
-    return "Agent couldn't fix the failing checks. Pull request needs your attention";
-  if (error.includes("original base")) return "Repository history changed. Agent paused";
-  if (error.includes("attempt branch exists"))
-    return "Pull request preparation paused. Agent paused";
-  if (error.startsWith("Live execution is disabled")) return "Live runs aren't configured yet";
-  return "This project needs your attention.";
-}
 
 export function App() {
   const [revision, setRevision] = useState<string | null>(null);
@@ -100,6 +82,7 @@ export function App() {
   const [formError, setFormError] = useState<string | null>(null);
   const [installationNotice, setInstallationNotice] = useState<string | null>(null);
   const goal = goals.find((item) => item.id === selected) ?? null;
+  const workflowPermissionError = workflowPermissionMessage(goal?.error ?? "");
   const formDraft = editing ? goalEdit : draft;
   useEffect(() => {
     setFormError(null);
@@ -437,7 +420,11 @@ export function App() {
     setError(null);
     try {
       const result =
-        action === "retry" ? await api.retry(goal.id) : await api.action(goal.id, action);
+        action === "retry"
+          ? workflowPermissionError
+            ? await api.retryPublication(goal.id)
+            : await api.retry(goal.id)
+          : await api.action(goal.id, action);
       setGoals((current) => current.map((item) => (item.id === result.id ? result : item)));
     } catch (failure) {
       setError(message(failure));
@@ -734,7 +721,11 @@ export function App() {
                     )}
                     {["failed", "needs_attention"].includes(goal.state) && (
                       <div className="status-message">
-                        <span>Retry resumes saved work when possible, or starts a new run.</span>
+                        <span>
+                          {workflowPermissionError
+                            ? "After updating permissions, retry publishing your saved patches."
+                            : "Retry resumes saved work when possible, or starts a new run."}
+                        </span>
                         <button
                           className="primary"
                           disabled={busy}
@@ -742,7 +733,11 @@ export function App() {
                             void control("retry");
                           }}
                         >
-                          {busy ? "Retrying…" : "Retry"}
+                          {busy
+                            ? "Retrying…"
+                            : workflowPermissionError
+                              ? "Retry publication"
+                              : "Retry"}
                         </button>
                       </div>
                     )}
