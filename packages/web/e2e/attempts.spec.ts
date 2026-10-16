@@ -8,6 +8,16 @@ test("run selection defaults to latest and keeps statuses, PRs and activity sepa
 }) => {
   const pr = (number: number) => ({
     number,
+    ...(number === 2
+      ? {
+          title: "Improve project details",
+          body: "Show PR context.\nKeep review in Herbie.",
+          additions: 42,
+          deletions: 0,
+          changedFiles: 3,
+          draft: true,
+        }
+      : {}),
     branch: `branch-${number}`,
     url: `https://demo.invalid/pr/${number}`,
     state: number === 1 ? "merged" : "open",
@@ -63,6 +73,14 @@ test("run selection defaults to latest and keeps statuses, PRs and activity sepa
   await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
   await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
+  await expect(page.getByText("#2 · Improve project details", { exact: true })).toBeVisible();
+  await expect(page.getByText("Show PR context.", { exact: false })).toContainText(
+    "Keep review in Herbie.",
+  );
+  await expect(page.getByLabel("42 additions", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
+  await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await one.focus();
   await page.keyboard.press("Enter");
   await expect(one).toHaveAttribute("aria-pressed", "true");

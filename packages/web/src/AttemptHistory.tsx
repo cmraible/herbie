@@ -91,12 +91,37 @@ export function AttemptHistory({
               <div className="run-result" key={pr.branch}>
                 <div>
                   <span className="run-result-label">Pull request</span>
-                  <strong>#{pr.number}</strong>
-                  <p>
-                    {pr.state === "open"
-                      ? "Open on GitHub to inspect the patches and checks."
-                      : `This pull request was ${pr.state}.`}
+                  <strong>
+                    #{pr.number}
+                    {pr.title ? ` · ${pr.title}` : ""}
+                  </strong>
+                  <p className="pr-metadata">
+                    <span>
+                      {pr.state === "open"
+                        ? pr.draft
+                          ? "Draft"
+                          : "Open"
+                        : pr.state === "merged"
+                          ? "Merged"
+                          : "Closed"}
+                    </span>
+                    {pr.changedFiles !== undefined && (
+                      <span>
+                        {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"} changed
+                      </span>
+                    )}
+                    {pr.additions !== undefined && (
+                      <span className="pr-additions" aria-label={`${pr.additions} additions`}>
+                        +{pr.additions}
+                      </span>
+                    )}
+                    {pr.deletions !== undefined && (
+                      <span className="pr-deletions" aria-label={`${pr.deletions} deletions`}>
+                        −{pr.deletions}
+                      </span>
+                    )}
                   </p>
+                  {pr.body && <p className="pr-description">{pr.body}</p>}
                   <code>{pr.branch}</code>
                 </div>
                 <a className="run-result-link" href={pr.url} target="_blank" rel="noreferrer">

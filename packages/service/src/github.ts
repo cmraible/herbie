@@ -62,6 +62,12 @@ const appSchema = z.object({
   slug: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/),
 });
 const pullSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().nullable().optional(),
+  draft: z.boolean().optional(),
+  additions: z.number().int().nonnegative().optional(),
+  deletions: z.number().int().nonnegative().optional(),
+  changed_files: z.number().int().nonnegative().optional(),
   number: z.number().int(),
   html_url: z.string().url(),
   state: z.enum(["open", "closed"]),
@@ -234,12 +240,19 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           token,
         ),
       );
-    const pr = list.find((item) => item.head.ref === branch);
-    if (!pr) return null;
+    const match = list.find((item) => item.head.ref === branch);
+    if (!match) return null;
+    const pr = pullSchema.parse(await request(`/repos/${repository}/pulls/${match.number}`, token));
     if (!pr.html_url.startsWith(`https://github.com/${repository}/pull/`))
       throw new Error("Unexpected GitHub pull request URL");
     const patchSha = await pullRequestPatchSha(token, repository, pr.number);
     return {
+      title: pr.title,
+      body: pr.body,
+      draft: pr.draft,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changed_files,
       url: pr.html_url,
       number: pr.number,
       branch,
@@ -813,6 +826,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         );
         const patchSha = await pullRequestPatchSha(token, input.repository, pr.number);
         return {
+          title: pr.title,
+          body: pr.body,
+          draft: pr.draft,
+          additions: pr.additions,
+          deletions: pr.deletions,
+          changedFiles: pr.changed_files,
           url: pr.html_url,
           number: pr.number,
           branch: input.head,

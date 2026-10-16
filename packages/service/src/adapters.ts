@@ -27,15 +27,7 @@ export type CiStatus =
       head: string;
       pullRequest: { number: number; url: string };
     };
-export interface PullRequest {
-  url: string;
-  number: number;
-  branch: string;
-  state: "open" | "closed" | "merged";
-  headSha?: string;
-  baseSha?: string;
-  patchSha?: string;
-}
+export type PullRequest = NonNullable<Goal["pullRequest"]>;
 export type PublicationPhase =
   | "preflight_reconciliation"
   | "authorization"
