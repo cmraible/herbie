@@ -416,7 +416,7 @@ test(
     assert.deepEqual(paramsFor("thread/start"), {
       cwd: sandbox.git.clone.mock.calls[0].arguments[1],
       ephemeral: true,
-      model: "gpt-6-luna",
+      model: request.model,
       modelProvider: "daytona_openai",
     });
     assert.ok(JSON.stringify(paramsFor("turn/start")).includes("externalSandbox"));
