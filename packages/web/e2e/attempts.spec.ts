@@ -67,7 +67,7 @@ test("run selection defaults to latest and keeps statuses, PRs and activity sepa
   await page.setViewportSize({ width: 796, height: 824 });
   await page.goto(`/#${goalId}`);
   const one = page.getByRole("button", { name: "Run 1 Merged" });
-  const two = page.getByRole("button", { name: "Run 2 Waiting for checks" });
+  const two = page.getByRole("button", { name: "Run 2 Ready for review" });
   await expect(two).toHaveAttribute("aria-pressed", "true");
   await expect(one).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
