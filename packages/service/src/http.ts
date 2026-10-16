@@ -32,6 +32,7 @@ interface ApiOptions {
   imageRevision?: string;
   verifyWebhook?: (body: Buffer, signature: string) => boolean;
   webDirectory?: string;
+  listModels?: () => Promise<string[]>;
 }
 class HttpError extends Error {
   constructor(
@@ -353,6 +354,17 @@ export function createApiServer(options: ApiOptions) {
           `herbie_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`,
         );
         json(response, 200, { ok: true });
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/models") {
+        if (!options.listModels) throw new HttpError(503, "Model discovery is unavailable");
+        let models: string[];
+        try {
+          models = await options.listModels();
+        } catch {
+          throw new HttpError(502, "Could not load models. You can enter a custom model or retry.");
+        }
+        json(response, 200, models);
         return;
       }
       if (method === "GET" && url.pathname === "/api/repositories") {

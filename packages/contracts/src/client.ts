@@ -95,6 +95,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
         }),
       ),
     session: () => request("/api/session", sessionSchema),
+    models: () => request("/api/models", z.array(z.string().min(1).max(200))),
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
     projects: () => request("/api/projects", z.array(projectSchema)),

@@ -18,6 +18,7 @@ import {
   projectErrorMessage,
   workflowPermissionMessage,
 } from "./activity-message.js";
+import { ModelSelect } from "./ModelSelect.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 import { projectReadyForReview } from "./attempts.js";
 
@@ -1023,16 +1024,11 @@ export function App() {
                       onChange={(event) => editForm({ prompt: event.target.value })}
                     />
                   </label>
-                  <label>
-                    Model
-                    <input
-                      disabled={busy}
-                      required
-                      maxLength={200}
-                      value={formDraft.model}
-                      onChange={(event) => editForm({ model: event.target.value })}
-                    />
-                  </label>
+                  <ModelSelect
+                    disabled={busy}
+                    value={formDraft.model}
+                    onChange={(model) => editForm({ model })}
+                  />
                   <label>
                     Maximum work in progress
                     <input

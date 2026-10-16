@@ -446,4 +446,6 @@ internals. Treat transcript contents as private project data: tool output can
 include repository contents and sensitive values. No transcript bodies are sent
 to operational logs.
 
-Set a project’s model in the create/edit form, with `herbie start --model MODEL`, or with `herbie edit PROJECT_ID --model MODEL`. The default is `gpt-6-luna`. Changes apply to future runs, including feedback and CI repairs.
+Choose a project’s model from the searchable dropdown in the create/edit form (or enter a custom model ID), with `herbie start --model MODEL`, or with `herbie edit PROJECT_ID --model MODEL`. The default is `gpt-6-luna`. Changes apply to future runs, including feedback and CI repairs.
+
+Model suggestions come from OpenAI using the service’s `OPENAI_API_KEY` and are cached for five minutes. The picker filters known specialized variants and retired models; the API does not expose full coding-tool compatibility metadata. If discovery is unavailable, the saved model and custom entry remain usable.

@@ -196,6 +196,7 @@ export function fixtureApi(): Plugin {
           if (url.pathname === "/api/health") return send({ mode: "live" });
           if (url.pathname === "/api/session")
             return send({ mode: "live", user: { id: "local-preview", login: "chris" } });
+          if (url.pathname === "/api/models") return send(["gpt-6-luna", "gpt-6-astra"]);
           if (url.pathname === "/api/repositories")
             return send([{ fullName: repository, defaultBranch: "main", installationId: 1 }]);
           let body: unknown = {};
