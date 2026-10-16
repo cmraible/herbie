@@ -149,3 +149,8 @@ export const repositoryDiscoverySchema = z.object({
 export type RepositoryDiscovery = z.infer<typeof repositoryDiscoverySchema>;
 export type Repository = z.infer<typeof repositorySchema>;
 export type GoalAction = z.infer<typeof actionSchema>;
+
+export const streamMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("goals"), goals: z.array(goalSchema) }),
+  z.object({ type: z.literal("events"), goalId: z.string().uuid(), events: z.array(eventSchema) }),
+]);

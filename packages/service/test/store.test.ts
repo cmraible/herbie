@@ -1025,6 +1025,7 @@ integration(
   async () => {
     const { goal } = await store.createGoal("owner", input(), "demo", randomUUID());
     const first = await publishNext(1);
+    await store.pool.query("DROP TRIGGER IF EXISTS notify_goal_change ON jobs");
     await store.pool.query("ALTER TABLE jobs DROP COLUMN pull_request");
     await store.pool.query("ALTER TABLE goals DROP COLUMN max_wip");
     await store.migrate();

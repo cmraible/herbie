@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createClient, ApiError } from "@herbie/contracts/client";
 import {
   githubPermissionsMessage,
+  streamMessageSchema,
   type Goal,
   type GoalEvent,
   type GoalAction,
@@ -66,6 +67,8 @@ export function App() {
   const [healthState, setHealthState] = useState<"pending" | "ready" | "error">("pending");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupRefresh, setStartupRefresh] = useState(0);
+  const streamRevision = useRef(0);
+  const [reconnecting, setReconnecting] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoaded, setGoalsLoaded] = useState(false);
   const [goalsError, setGoalsError] = useState<string | null>(null);
@@ -181,9 +184,10 @@ export function App() {
     setGoalsError(null);
     async function refresh() {
       try {
+        const revision = streamRevision.current;
         const list = await api.goals();
         if (!alive) return;
-        setGoals(list);
+        if (revision === streamRevision.current) setGoals(list);
         setGoalsLoaded(true);
         setGoalsError(null);
       } catch (failure) {
@@ -196,17 +200,14 @@ export function App() {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 2000);
+
     return () => {
       alive = false;
-      clearInterval(timer);
     };
   }, [session, goalsRefresh]);
 
   // Repository discovery can require GitHub API calls. Refresh on sign-in or an
-  // explicit request, independently from cheap, durable goal-state polling.
+  // explicit request, independently from the live goal stream.
   useEffect(() => {
     if (!session) {
       setRepositories([]);
@@ -323,14 +324,78 @@ export function App() {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 1500);
+
     return () => {
       alive = false;
-      clearInterval(timer);
     };
   }, [selected, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let disposed = false;
+    let socket: WebSocket;
+    let timer: ReturnType<typeof setTimeout>;
+    let delay = 500;
+    function connect() {
+      const url = new URL("/api/stream", location.href);
+      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      if (selected) url.searchParams.set("goal", selected);
+      socket = new WebSocket(url);
+      socket.onmessage = (event) => {
+        if (disposed) return;
+        try {
+          const update = streamMessageSchema.parse(JSON.parse(event.data));
+          delay = 500;
+          setReconnecting(false);
+          if (update.type === "goals") {
+            streamRevision.current++;
+            setGoals(update.goals);
+            setGoalsLoaded(true);
+            setGoalsError(null);
+          } else if (update.goalId === selected) {
+            setEvents((current) =>
+              [
+                ...new Map([...current, ...update.events].map((item) => [item.id, item])).values(),
+              ].sort((a, b) => a.id - b.id),
+            );
+            setEventsState("loaded");
+            setEventsError(null);
+          }
+        } catch {
+          socket.close();
+        }
+      };
+      socket.onclose = async (event) => {
+        if (disposed) return;
+        if (event.code === 1008) {
+          setSession(null);
+          setSessionState("signed-out");
+          return;
+        }
+        setReconnecting(true);
+        // Browsers hide HTTP 401 upgrade responses behind close code 1006.
+        try {
+          await api.session();
+        } catch (failure) {
+          if (disposed) return;
+          if (failure instanceof ApiError && failure.status === 401) {
+            setSession(null);
+            setSessionState("signed-out");
+            return;
+          }
+        }
+        if (disposed) return;
+        timer = setTimeout(connect, delay + (Math.random() * delay) / 2);
+        delay = Math.min(delay * 2, 30_000);
+      };
+    }
+    connect();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      socket.close();
+    };
+  }, [session, selected]);
 
   function navigateToScreen(id: string, replace = false) {
     if (replace) history.replaceState(null, "", `#${id}`);
@@ -585,6 +650,11 @@ export function App() {
                 {startupError ?? "Herbie could not connect."}
                 <button onClick={() => setStartupRefresh((value) => value + 1)}>Retry</button>
               </div>
+            )}
+            {reconnecting && (
+              <p className="subtle-note" role="status">
+                Reconnecting to live updates. Displayed progress may be out of date.
+              </p>
             )}
             {!goalsLoaded && !goalsError && (
               <p className="subtle-note" role="status">
