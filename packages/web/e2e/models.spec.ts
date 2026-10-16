@@ -35,7 +35,7 @@ for (const discoveryFails of [false, true]) {
       await picker.fill("custom-model");
       await page.getByRole("option", { name: "Use custom model “custom-model”" }).click();
       await expect(page.getByText("custom-model", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await page.getByRole("button", { name: "Retry models", exact: true }).click();
     }
     await picker.fill("astra");
     await page.getByRole("option", { name: "gpt-6-astra", exact: true }).click();

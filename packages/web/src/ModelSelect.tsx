@@ -73,7 +73,7 @@ export function ModelSelect({
               disabled={disabled || loading}
               onClick={() => setRefresh((value) => value + 1)}
             >
-              Retry
+              Retry models
             </button>
           </>
         ) : (
