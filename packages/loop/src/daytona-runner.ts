@@ -1,3 +1,4 @@
+import type { DaytonaAttemptArtifact } from "./daytona-attempt.js";
 import { parseFeedbackDecision } from "./feedback-decision.js";
 import { sandboxFailureOutput, registerDiagnosticSecret } from "./diagnostic-log.js";
 import { appendFileSync } from "node:fs";
@@ -115,7 +116,7 @@ Explain the specific change you actually made, why you chose it, and how it help
       pullRequestBody,
       pullRequestTitle,
       patchBase64: patch.toString("base64"),
-    }),
+    } satisfies DaytonaAttemptArtifact),
   );
   process.stdout.write("herbie-attempt-completed\n");
 } catch (error) {

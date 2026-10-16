@@ -10,8 +10,13 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, mock, type TestContext } from "node:test";
-import { DaytonaAttemptError, runDaytonaAttempt } from "../src/daytona-attempt.js";
+import {
+  DAYTONA_RUNTIME_FILES,
+  DaytonaAttemptError,
+  runDaytonaAttempt,
+} from "../src/daytona-attempt.js";
 import { createArithmeticFixture } from "./fixtures/arithmetic.js";
+import { createAttemptArtifact } from "./fixtures/attempt-artifact.js";
 
 type Create = Parameters<typeof runDaytonaAttempt>[0];
 type Sandbox = Awaited<ReturnType<Create>>;
@@ -26,15 +31,6 @@ const request = {
   commit: "0123456789abcdef",
   project: "Fix addition; $(do-not-execute) `nor-this` 'quoted'\nsecond line",
 };
-const runtimeNames = [
-  "codex-initialize",
-  "codex-thread",
-  "codex-turn",
-  "codex-process",
-  "daytona-runner",
-  "feedback-decision",
-  "diagnostic-log",
-];
 const pullRequestTitle = "Fix addition totals";
 const pullRequestBody =
   "Fixed addition to sum both operands so totals are correct. Verified with arithmetic tests.";
@@ -56,18 +52,18 @@ const completedChanges = {
   },
 };
 const artifact = Buffer.from(
-  JSON.stringify({
-    pullRequestTitle,
-    pullRequestBody,
-    baseCommit: changes.baseCommit,
-    patchBase64: changes.patch.toString("base64"),
-  }),
+  JSON.stringify(
+    createAttemptArtifact({
+      baseCommit: changes.baseCommit,
+      patchBase64: changes.patch.toString("base64"),
+    }),
+  ),
 );
 const runtime = await Promise.all(
-  runtimeNames.map(async (name) => ({
-    name: `${name}.js`,
+  DAYTONA_RUNTIME_FILES.map(async (name) => ({
+    name,
     code: stripTypeScriptTypes(
-      await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8"),
+      await readFile(new URL(`../src/${name.replace(/\.js$/, ".ts")}`, import.meta.url), "utf8"),
     ),
   })),
 );
@@ -145,7 +141,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.deepEqual(
     uploads.map(([, path]) => path),
     [
-      ...runtimeNames.map((name) => `${root}/${name}.js`),
+      ...DAYTONA_RUNTIME_FILES.map((name) => `${root}/${name}`),
       `${root}/package.json`,
       `${root}/attempt.json`,
     ],
@@ -848,12 +844,12 @@ test("attempts for the same project retain their own agent-authored titles and d
     sandbox.fs.downloadFileStream.mock.mockImplementation(async () =>
       Readable.from([
         Buffer.from(
-          JSON.stringify({
-            baseCommit: changes.baseCommit,
-            patchBase64: changes.patch.toString("base64"),
-            pullRequestTitle: body,
-            pullRequestBody: body,
-          }),
+          JSON.stringify(
+            createAttemptArtifact({
+              pullRequestTitle: body,
+              pullRequestBody: body,
+            }),
+          ),
         ),
       ]),
     );

@@ -8,13 +8,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { mock, test, type TestContext } from "node:test";
-import { runDaytonaAttempt } from "../src/daytona-attempt.js";
+import { DAYTONA_RUNTIME_FILES, runDaytonaAttempt } from "../src/daytona-attempt.js";
 import {
   PatchPublicationError,
   PatchHeadChangedError,
   publishPatch,
 } from "../src/publish-patch.js";
 import { createArithmeticFixture, runArithmeticTests } from "./fixtures/arithmetic.js";
+import { createAttemptArtifact } from "./fixtures/attempt-artifact.js";
 
 const git = async (cwd: string, ...args: string[]) =>
   (await promisify(execFile)("git", args, { cwd, timeout: 30_000 })).stdout.trim();
@@ -49,16 +50,8 @@ async function fixture(t: TestContext, extraFiles = false) {
   const patch = await readFile(patchFile);
   const runtime = join(directory, "runtime");
   await mkdir(runtime);
-  for (const name of [
-    "codex-initialize",
-    "codex-thread",
-    "codex-turn",
-    "codex-process",
-    "daytona-runner",
-    "feedback-decision",
-    "diagnostic-log",
-  ]) {
-    await writeFile(join(runtime, `${name}.js`), "");
+  for (const name of DAYTONA_RUNTIME_FILES) {
+    await writeFile(join(runtime, name), "");
   }
   const changes = await runDaytonaAttempt(
     async () => ({
@@ -71,12 +64,13 @@ async function fixture(t: TestContext, extraFiles = false) {
         downloadFileStream: async () =>
           Readable.from([
             Buffer.from(
-              JSON.stringify({
-                pullRequestTitle: "Fix addition totals",
-                pullRequestBody: "Tested arithmetic fix",
-                baseCommit,
-                patchBase64: patch.toString("base64"),
-              }),
+              JSON.stringify(
+                createAttemptArtifact({
+                  pullRequestBody: "Tested arithmetic fix",
+                  baseCommit,
+                  patchBase64: patch.toString("base64"),
+                }),
+              ),
             ),
           ]),
       },
