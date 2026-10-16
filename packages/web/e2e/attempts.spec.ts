@@ -3,7 +3,7 @@ const goalId = "00000000-0000-4000-8000-000000000001";
 const first = "00000000-0000-4000-8000-000000000002";
 const second = "00000000-0000-4000-8000-000000000003";
 
-test("attempt accordion shows independent statuses, PRs and events with one panel open", async ({
+test("run selection defaults to latest and keeps statuses, PRs and activity separate", async ({
   page,
 }) => {
   const pr = (number: number) => ({
@@ -58,29 +58,31 @@ test("attempt accordion shows independent statuses, PRs and events with one pane
   await page.goto(`/#${goalId}`);
   const one = page.getByRole("button", { name: "Run 1 Merged" });
   const two = page.getByRole("button", { name: "Run 2 Ready for review" });
-  await two.click();
-  await expect(two).toHaveAttribute("aria-expanded", "true");
-  await expect(one).toHaveAttribute("aria-expanded", "false");
+  await expect(two).toHaveAttribute("aria-pressed", "true");
+  await expect(one).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
   await expect(page.getByText("Run #1 started", { exact: true })).not.toBeVisible();
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveCount(1);
   await one.focus();
   await page.keyboard.press("Enter");
-  await expect(one).toHaveAttribute("aria-expanded", "true");
-  await expect(two).toHaveAttribute("aria-expanded", "false");
+  await expect(one).toHaveAttribute("aria-pressed", "true");
+  await expect(two).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText("Pull request #1 merged")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
     "href",
     "https://demo.invalid/pr/1",
   );
   await expect(one.locator(".badge")).toHaveClass(/status-completed/);
   await expect(two.locator(".badge")).toHaveClass(/status-awaiting_review/);
-  await expect.poll(() => page.getByRole("button", { expanded: true }).count()).toBe(1);
+  await expect.poll(() => page.getByRole("button", { pressed: true }).count()).toBe(1);
   await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
   await expect(page.getByRole("button", { name: "Goal history" })).toHaveCount(0);
   await expect(page.getByText("Goal renamed", { exact: true })).toHaveCount(0);
   await one.click();
-  await expect(page.getByRole("button", { expanded: true })).toHaveCount(0);
+  await expect(one).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Project activity", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Project activity" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /on GitHub/ })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   await two.click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

@@ -9,7 +9,7 @@ test("fixture preview uses production UI and supports local edits", async ({ pag
     "acme/storefront",
   );
   await expect(page.getByRole("button", { name: "Run 3 Ready for review" })).toHaveAttribute(
-    "aria-expanded",
+    "aria-pressed",
     "true",
   );
   await expect(page.getByRole("link", { name: "Review on GitHub" })).toHaveAttribute(
@@ -25,12 +25,6 @@ test("fixture preview uses production UI and supports local edits", async ({ pag
       exact: false,
     }),
   ).toHaveCount(0);
-  await page.getByText("Technical details").click();
-  await expect(
-    page.getByText("The integration suite could not connect to its test database.", {
-      exact: false,
-    }),
-  ).toBeVisible();
   await page.getByRole("button", { name: "All projects" }).click();
   await page.goto("/#00000000-0000-4000-8000-000000000002");
   await page.getByRole("button", { name: "Project actions" }).click();

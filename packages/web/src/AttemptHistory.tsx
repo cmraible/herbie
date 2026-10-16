@@ -16,21 +16,9 @@ export function AttemptHistory({
   eventsError: string | null;
   time: (value: string) => string;
 }) {
-  const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
+  const [selected, setSelected] = useState<string | null>(null);
   const { attempts, history } = groupAttempts(goal, events);
   const groups = [
-    ...(history.length
-      ? [
-          {
-            id: "project-activity",
-            title: "Project activity",
-            status: "",
-            color: "",
-            events: history,
-            pullRequests: [],
-          },
-        ]
-      : []),
     ...attempts.map((attempt) => ({
       id: attempt.id,
       title: `Run ${attempt.number}`,
@@ -49,8 +37,20 @@ export function AttemptHistory({
       events: attempt.events,
       pullRequests: attempt.pullRequest ? [attempt.pullRequest] : [],
     })),
+    ...(history.length
+      ? [
+          {
+            id: "project-activity",
+            title: "Project activity",
+            status: "",
+            color: "",
+            events: history,
+            pullRequests: [],
+          },
+        ]
+      : []),
   ];
-  const open = expanded === undefined ? groups[0]?.id : expanded;
+  const group = groups.find((item) => item.id === selected) ?? groups[0];
   return (
     <section className="attempts" aria-label="Runs">
       <h3>Runs</h3>
@@ -64,33 +64,43 @@ export function AttemptHistory({
           Activity could not refresh; showing the latest events.
         </p>
       )}
-      {groups.map((group) => (
-        <section className="attempt" key={group.id}>
-          <h4>
-            <button
-              className="attempt-toggle"
-              aria-expanded={open === group.id}
-              aria-controls={`attempt-${group.id}`}
-              onClick={() => setExpanded(open === group.id ? null : group.id)}
-            >
-              <span>{group.title}</span>
+      {group ? (
+        <div className="run-layout">
+          <nav className="run-list" aria-label="Run history">
+            {groups.map((item) => (
+              <button
+                key={item.id}
+                className="run-select"
+                aria-pressed={group.id === item.id}
+                aria-controls="run-detail"
+                onClick={() => setSelected(item.id)}
+              >
+                <span>{item.title}</span>
+                {item.status && <span className={`badge status-${item.color}`}>{item.status}</span>}
+              </button>
+            ))}
+          </nav>
+          <section id="run-detail" className="run-panel" aria-labelledby="run-title">
+            <div className="run-panel-heading">
+              <h4 id="run-title">{group.title}</h4>
               {group.status && (
                 <span className={`badge status-${group.color}`}>{group.status}</span>
               )}
-              <span className="attempt-chevron" aria-hidden="true">
-                {open === group.id ? "−" : "+"}
-              </span>
-            </button>
-          </h4>
-          <div id={`attempt-${group.id}`} hidden={open !== group.id} className="attempt-body">
+            </div>
             {group.pullRequests.map((pr) => (
-              <div className="pr-card" key={pr.branch}>
-                <strong>Pull request #{pr.number}</strong>
-                <span>
-                  {pr.state === "open" ? "Ready for your review." : `Pull request ${pr.state}.`}
-                </span>
-                <a href={pr.url} target="_blank" rel="noreferrer">
-                  Review on GitHub ↗
+              <div className="run-result" key={pr.branch}>
+                <div>
+                  <span className="run-result-label">Pull request</span>
+                  <strong>#{pr.number}</strong>
+                  <p>
+                    {pr.state === "open"
+                      ? "Open on GitHub to inspect the patches and checks."
+                      : `This pull request was ${pr.state}.`}
+                  </p>
+                  <code>{pr.branch}</code>
+                </div>
+                <a className="run-result-link" href={pr.url} target="_blank" rel="noreferrer">
+                  {pr.state === "open" ? "Review on GitHub" : "View on GitHub"} ↗
                 </a>
               </div>
             ))}
@@ -120,7 +130,7 @@ export function AttemptHistory({
                             text
                           )}
                         </span>
-                        <time>{time(event.createdAt)}</time>
+                        <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
                         {errorReference(event.message) && (
                           <details>
                             <summary>Error reference</summary>
@@ -133,9 +143,15 @@ export function AttemptHistory({
                 </ol>
               )}
             </section>
-          </div>
-        </section>
-      ))}
+          </section>
+        </div>
+      ) : (
+        <p className="subtle-note">
+          {eventsState === "loading"
+            ? "Loading runs…"
+            : "No runs yet. Activity will appear here when the agent starts."}
+        </p>
+      )}
     </section>
   );
 }
