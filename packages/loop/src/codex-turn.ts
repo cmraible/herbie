@@ -19,11 +19,13 @@ export function runCodexTurn(
     signal,
     interruptTimeoutMs = 5_000,
     disposableDaytona = false,
+    onActivity,
   }: {
     timeoutMs?: number;
     signal?: AbortSignal;
     interruptTimeoutMs?: number;
     disposableDaytona?: boolean;
+    onActivity?: (message: Record<string, unknown>) => void;
   } = {},
 ): Promise<void> {
   if (signal?.aborted) return Promise.reject(new Error("Codex turn cancelled"));
@@ -83,6 +85,12 @@ export function runCodexTurn(
       try {
         const message: unknown = JSON.parse(line);
         if (!isObject(message)) throw new Error();
+        if (
+          typeof message.method === "string" &&
+          isObject(message.params) &&
+          message.params.threadId === threadId
+        )
+          onActivity?.(message);
         if (message.id === 2 && turnId === undefined) {
           if ("error" in message || !isObject(message.result) || !isObject(message.result.turn))
             throw new Error();

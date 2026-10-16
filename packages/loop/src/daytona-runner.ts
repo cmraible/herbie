@@ -1,4 +1,5 @@
 import { sandboxFailureOutput, registerDiagnosticSecret } from "./diagnostic-log.js";
+import { appendFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -44,6 +45,11 @@ Explain the specific change you actually made, why you chose it, and how it help
     goal,
     turnTimeoutMs: 20 * 60_000,
     disposableDaytona: true,
+    onActivity: (message) =>
+      appendFileSync(
+        new URL("./transcript.jsonl", import.meta.url),
+        JSON.stringify(message) + "\n",
+      ),
   });
   let verifiedTree: string | undefined;
   if (verifyLocally) {

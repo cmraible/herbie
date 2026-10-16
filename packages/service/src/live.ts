@@ -146,6 +146,7 @@ Inspect these branches before choosing your change. Make one small, independentl
         (params, options) => daytona.create(params, options),
         {
           signal: execution.signal,
+          onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,
           goal,
           commit: execution.ciRepair?.head,

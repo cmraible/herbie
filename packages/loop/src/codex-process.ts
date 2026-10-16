@@ -11,6 +11,7 @@ type AttemptOptions = ProcessOptions & {
   cwd: string;
   goal: string;
   turnTimeoutMs?: number;
+  onActivity?: (message: Record<string, unknown>) => void;
   interruptTimeoutMs?: number;
   // Only the runner inside an externally isolated, disposable Daytona sandbox enables this.
   disposableDaytona?: boolean;
@@ -156,6 +157,7 @@ async function runCodexProcess(
             timeoutMs: options.turnTimeoutMs,
             interruptTimeoutMs: options.interruptTimeoutMs,
             disposableDaytona: options.disposableDaytona,
+            onActivity: options.onActivity,
           }),
         ]);
       } finally {

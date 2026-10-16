@@ -914,3 +914,24 @@ textarea::placeholder {
     padding: 16px;
   }
 }
+
+.agent-transcript {
+  min-width: 0;
+  margin-block: 1.5rem;
+}
+.agent-transcript article {
+  padding-block: 0.75rem;
+  border-bottom: 1px solid #333;
+}
+.agent-transcript pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  max-height: 32rem;
+  overflow: auto;
+}
+.agent-transcript summary {
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}

@@ -105,6 +105,19 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
     );
   await worker.appendEvent(goal.id, "attempt", "Worker progress");
   await next((m) => m.type === "events" && m.events.some((e) => e.message === "Worker progress"));
+  const transcript = JSON.stringify({
+    method: "item/commandExecution/outputDelta",
+    params: { delta: "output ".repeat(1000) },
+  });
+  await worker.appendEvent(goal.id, "agent", transcript, goal.attempts![0]!.id);
+  await next(
+    (m) =>
+      m.type === "events" &&
+      m.events.some(
+        (e) =>
+          e.type === "agent" && e.message === transcript && e.attemptId === goal.attempts![0]!.id,
+      ),
+  );
   const transaction = await workerPool.connect();
   try {
     await transaction.query("BEGIN");
@@ -161,6 +174,10 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
   const reconnected = connect();
   const recovered = inbox(reconnected);
   await recovered((m) => m.type === "events" && m.events.some((e) => e.message === "Offline 1005"));
+  await recovered(
+    (m) =>
+      m.type === "events" && m.events.some((e) => e.type === "agent" && e.message === transcript),
+  );
   revoked = true;
   const closed = once(reconnected, "close");
   await worker.appendEvent(goal.id, "attempt", "After logout");
