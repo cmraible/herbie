@@ -73,12 +73,13 @@ export function diagnosticRecord(
   error: unknown,
   context: DiagnosticContext,
   errorId: string = randomUUID(),
+  options: { outputTail?: boolean } = {},
 ): Record<string, unknown> {
   registerEnvironmentSecrets();
   const seen = new Set<object>();
   let remaining = 10_000;
   let nodes = 0;
-  let clean: (value: unknown, depth?: number) => unknown;
+  let clean: (value: unknown, depth?: number, tail?: boolean) => unknown;
   const cleanProperty = (
     out: Record<string, unknown>,
     key: string,
@@ -90,7 +91,10 @@ export function diagnosticRecord(
       out[safeKey] = "[REDACTED]";
       return;
     }
-    out[safeKey] = "value" in property ? clean(property.value, depth + 1) : "[accessor omitted]";
+    out[safeKey] =
+      "value" in property
+        ? clean(property.value, depth + 1, options.outputTail && /^(stdout|stderr)$/i.test(key))
+        : "[accessor omitted]";
   };
   const cleanObject = (value: object, depth: number): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -106,14 +110,16 @@ export function diagnosticRecord(
     }
     return out;
   };
-  clean = (value: unknown, depth = 0): unknown => {
+  clean = (value: unknown, depth = 0, tail = false): unknown => {
     if (++nodes > 200) return "[node limit]";
-    if (Buffer.isBuffer(value)) return clean(value.toString("utf8"), depth);
+    if (Buffer.isBuffer(value)) return clean(value.toString("utf8"), depth, tail);
     if (typeof value === "string") {
       const redacted = redactDiagnostic(value);
       const limit = Math.min(2000, Math.max(0, remaining));
       remaining -= Math.min(limit, redacted.length);
-      return redacted.length > limit ? redacted.slice(0, limit) + " [truncated]" : redacted;
+      return redacted.length > limit
+        ? (tail && limit > 0 ? redacted.slice(-limit) : redacted.slice(0, limit)) + " [truncated]"
+        : redacted;
     }
     if (value === null || typeof value === "boolean" || typeof value === "number") return value;
     if (typeof value !== "object") return clean(String(value), depth);
@@ -133,6 +139,18 @@ export function diagnosticRecord(
       excerpt: Buffer.from(encoded).subarray(0, 12_000).toString("utf8"),
     };
   return record;
+}
+// Persist the same bounded/redacted structure, retaining terminal command errors.
+export function failureDiagnosticRecord(
+  error: unknown,
+  context: DiagnosticContext,
+  errorId: string,
+): Record<string, unknown> {
+  try {
+    return diagnosticRecord(error, context, errorId, { outputTail: true });
+  } catch {
+    return { event: "herbie_failure", errorId, diagnosticUnavailable: true };
+  }
 }
 // Production stderr is captured by restricted container/runtime logging, never an API response.
 export function logFailure(error: unknown, context: DiagnosticContext): string {

@@ -199,3 +199,6 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS resources jsonb CHECK (resources I
   jsonb_typeof(resources)='object' AND resources ?& ARRAY['cpu','memory','disk']
   AND (resources->>'cpu')::numeric > 0 AND (resources->>'memory')::numeric > 0 AND (resources->>'disk')::numeric > 0
 ));
+
+-- Private, bounded/redacted failure details; intentionally omitted from API projections.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failure_diagnostic jsonb;

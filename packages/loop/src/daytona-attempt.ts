@@ -267,7 +267,7 @@ export async function runDaytonaAttempt(
     }
     await begin("runtime_preparation");
     const preflight = await sandbox.process.executeCommand(
-      (request.snapshot ? "" : installDaytonaRuntime) + configureDaytonaRuntime,
+      `(\n${(request.snapshot ? "" : installDaytonaRuntime) + configureDaytonaRuntime}\n) 2>&1`,
       undefined,
       undefined,
       request.snapshot ? 60 : 300,

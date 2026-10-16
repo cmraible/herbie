@@ -1048,3 +1048,36 @@ test("an environment that ignores custom sizing is deleted without starting the 
   assert.equal(sandbox.process.executeCommand.mock.callCount(), 0);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
+
+test("runtime failure captures stderr and named step before deleting the environment", async (t) => {
+  const { sandbox, run } = await fixture(t);
+  sandbox.process.executeCommand.mock.mockImplementation(async (command) => {
+    try {
+      await promisify(execFile)("bash", [
+        "-c",
+        `apt-get() { printf 'synthetic package download failed\\n' >&2; return 23; };\n${command}`,
+      ]);
+      assert.fail("setup should have failed");
+    } catch (error) {
+      const failed = error as Error & { code: number; stdout: string; stderr: string };
+      assert.equal(failed.code, 23);
+      assert.equal(failed.stderr, "");
+      return { exitCode: failed.code, result: failed.stdout };
+    }
+  });
+  await assert.rejects(run({ snapshot: undefined }), (error: unknown) => {
+    assert.ok(error instanceof DaytonaAttemptError);
+    assert.deepEqual(error.diagnostics[0], {
+      stage: "runtime_preparation",
+      cause: "command_failed",
+      exitCode: 23,
+    });
+    const cause = error.errors[0].cause as { stdout: string };
+    assert.match(cause.stdout, /synthetic package download failed/);
+    assert.match(cause.stdout, /herbie-runtime-failure step=system_packages exit=23/);
+    assert.equal(error.cleanup, "confirmed");
+    return true;
+  });
+  assert.equal(sandbox.process.executeCommand.mock.callCount(), 1);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});

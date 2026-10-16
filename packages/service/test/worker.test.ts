@@ -89,7 +89,7 @@ test("merged demo work keeps advancing until cancelled and a simulated failure s
   assert.equal((await store.getProject(failed.id))?.pullRequest, null);
 });
 
-test("worker retains raw redacted causes privately and persists safe attempt reference without retry", async (t) => {
+test("worker persists a private redacted run diagnostic and a safe public reference without retry", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
   if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL");
   const { DaytonaAttemptError } = await import("@herbie/loop/daytona-attempt");
@@ -116,13 +116,17 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   const error = new DaytonaAttemptError(
     [
       Object.assign(new Error("setup failed"), {
+        stdout:
+          "install progress\n".repeat(2000) +
+          "herbie-runtime-failure step=node_installation exit=28",
+        exitCode: 28,
         stderr: "useful synthetic failure",
         authorization: "hidden-fixture-token",
       }),
     ],
     "wrapped failure",
   );
-  error.diagnostics = [{ stage: "repository_clone", cause: "http_error", httpStatus: 503 }];
+  error.diagnostics = [{ stage: "runtime_preparation", cause: "command_failed", exitCode: 28 }];
   error.cleanup = "confirmed";
   let attempts = 0;
   const adapters = {
@@ -144,7 +148,24 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   assert.equal(record.context.projectId, project.id);
   assert.match(JSON.stringify(record), /useful synthetic failure/);
   assert.ok(!JSON.stringify(record).includes("hidden-fixture-token"));
-  assert.ok(!saved?.error?.includes("repository_clone"));
+  const jobId = saved!.attempts![0].id;
+  const diagnostic = (
+    await store.pool.query("SELECT failure_diagnostic FROM jobs WHERE id=$1", [jobId])
+  ).rows[0].failure_diagnostic;
+  assert.equal(diagnostic.errorId, record.errorId);
+  assert.equal(diagnostic.context.stage, "runtime_preparation");
+  assert.match(JSON.stringify(diagnostic), /step=node_installation exit=28/);
+  assert.match(JSON.stringify(diagnostic), /useful synthetic failure/);
+  assert.ok(!JSON.stringify(diagnostic).includes("hidden-fixture-token"));
+  assert.ok(!JSON.stringify(saved).includes("failure_diagnostic"));
+  assert.ok(!JSON.stringify(await store.events(project.id)).includes("useful synthetic failure"));
+  await store.migrate();
+  assert.deepEqual(
+    (await store.pool.query("SELECT failure_diagnostic FROM jobs WHERE id=$1", [jobId])).rows[0]
+      .failure_diagnostic,
+    diagnostic,
+  );
+  assert.ok(!saved?.error?.includes("runtime_preparation"));
   assert.ok(!saved?.error?.includes("useful synthetic failure"));
   assert.equal(await runWorkerOnce(store, adapters, "fixture-worker"), false);
   assert.equal(attempts, 1);
