@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   diagnosticRecord,
+  failureDiagnosticRecord,
   registerDiagnosticSecret,
   redactDiagnostic,
   logFailure,
@@ -116,4 +117,38 @@ test("known environment credentials and binary output are redacted without loggi
   assert.ok(!text.includes("binary-opaque-sensitive-value"));
   assert.ok(!text.includes("do-not-log-patch"));
   assert.match(text, /REDACTED/);
+});
+
+test("persisted command output preserves its redacted failure tail and stays bounded", () => {
+  const secret = "opaque-persisted-fixture-secret";
+  registerDiagnosticSecret(secret);
+  const error = Object.assign(new Error("setup failed"), {
+    stdout:
+      "install progress\n".repeat(10_000) +
+      `\ncurl: ${secret} failed\nherbie-runtime-failure step=node_installation exit=28`,
+    stderr: Buffer.from("details\n".repeat(1000) + "final stderr failure"),
+  });
+  const record = failureDiagnosticRecord(
+    new AggregateError([new Error("wrapper", { cause: error })], "attempt failed"),
+    { component: "attempt", stage: "runtime_preparation" },
+    "fixture-reference",
+  );
+  const encoded = JSON.stringify(record);
+  assert.match(encoded, /step=node_installation exit=28/);
+  assert.match(encoded, /final stderr failure/);
+  assert.ok(!encoded.includes(secret));
+  assert.ok(Buffer.byteLength(encoded) < 32_768);
+});
+test("diagnostic serialization failure leaves a safe reference instead of failing persistence", () => {
+  const error = new Error("fixture");
+  Object.defineProperty(error, "name", {
+    get() {
+      throw new Error("unreadable error");
+    },
+  });
+  assert.deepEqual(failureDiagnosticRecord(error, { component: "attempt" }, "fixture-reference"), {
+    event: "herbie_failure",
+    errorId: "fixture-reference",
+    diagnosticUnavailable: true,
+  });
 });

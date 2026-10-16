@@ -930,6 +930,7 @@ export class Store {
     error: string,
     needsAttention = false,
     changes?: DaytonaAttemptChanges,
+    diagnostic?: Record<string, unknown>,
   ): Promise<void> {
     await this.transaction(async (client) => {
       const { row, project } = await lockJob(client, jobId, workerId);
@@ -949,8 +950,8 @@ export class Store {
           )
         : null;
       await client.query(
-        "UPDATE jobs SET stage=$2,lease_owner=NULL,lease_expires_at=NULL,artifact=CASE WHEN $2='cancelled' THEN NULL ELSE COALESCE($3,artifact) END WHERE id=$1",
-        [jobId, state, saved],
+        "UPDATE jobs SET stage=$2,lease_owner=NULL,lease_expires_at=NULL,artifact=CASE WHEN $2='cancelled' THEN NULL ELSE COALESCE($3,artifact) END,failure_diagnostic=$4::jsonb WHERE id=$1",
+        [jobId, state, saved, diagnostic],
       );
       await client.query(
         "UPDATE projects SET state=$2,error=$3,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",

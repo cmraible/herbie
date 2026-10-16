@@ -114,3 +114,18 @@ and logs; live integrations still need a separate smoke test.
 Project creation and editing accept `resources: { cpu, memory, disk }` (whole CPU cores and GiB), or `null` to use environment defaults. Settings apply to future runs, including repairs and feedback work. The authenticated `/api/environment-limits` endpoint discovers Daytona bounds using the existing API key's `read:limits` permission and caches them for one minute. Custom resources require image-based creation; a configured `HERBIE_DAYTONA_SNAPSHOT` retains its own sizing and rejects overrides. Multiple eligible CPU regions require an explicit `DAYTONA_TARGET`.
 
 Increasing resources changes Daytona consumption and does not extend the agent's execution deadline. The worker checks allocated CPU, memory, and disk before running repository code, and cleans up an environment whose allocation does not match the request.
+
+## Run failure diagnostics
+
+New unpublished-run failures save a bounded, redacted diagnostic in `jobs.failure_diagnostic`, in the same transaction as the failure state and activity reference. It includes the matching `errorId`, stage, nested causes, exit status, cleanup evidence, and terminal command output when available. Bootstrap failures add a fixed step label such as `node_installation` or `docker_startup`; stderr is captured alongside stdout. Output is redacted before truncation, retaining its tail so installation progress does not hide the final error.
+
+The detailed record is private database information and is intentionally omitted from project/run API responses and activity. Query it using the run ID or the reference shown in activity:
+
+```sql
+SELECT id, failure_diagnostic
+FROM herbie.jobs
+WHERE id = 'RUN_UUID'
+   OR failure_diagnostic->>'errorId' = 'ERROR_REFERENCE';
+```
+
+Existing failures remain null; this does not recover deleted environment output. Publication recovery, repair/feedback failure handling, and cancellation retain their existing behavior. A missing or unserializable diagnostic cannot skip failure handling; an unavailable record retains the reference. Runtime logs remain available as the other diagnostic source.

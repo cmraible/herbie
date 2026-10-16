@@ -1,7 +1,7 @@
 import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
-import { logFailure } from "./diagnostic-log.js";
+import { logFailure, failureDiagnosticRecord } from "./diagnostic-log.js";
 import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -206,7 +206,7 @@ export async function runWorkerOnce(
       );
       return true;
     }
-    const errorId = logFailure(error, {
+    const diagnosticContext = {
       component: publishing ? "publication" : "attempt",
       projectId: job.project.id,
       jobId: job.id,
@@ -215,8 +215,9 @@ export async function runWorkerOnce(
         : error instanceof DaytonaAttemptError
           ? error.diagnostics[0]?.stage
           : undefined,
-    });
-    // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
+    };
+    const errorId = logFailure(error, diagnosticContext);
+    // Detailed diagnostics stay in the run record and runtime logs, not UI responses.
     try {
       if (publishing && error instanceof PublicationBlockedError) {
         await store.blockPublication(job.id, workerId, error.message);
@@ -240,6 +241,7 @@ export async function runWorkerOnce(
               : `Run failed. No patches were saved. Reference: ${errorId}`,
           !(error instanceof KnownAttemptFailure),
           changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
+          failureDiagnosticRecord(error, diagnosticContext, errorId),
         );
     } catch (saveError) {
       logFailure(saveError, {
