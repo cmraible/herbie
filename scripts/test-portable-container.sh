@@ -49,6 +49,13 @@ docker exec -e EXPECTED_REVISION="$revision" "$prefix-app" node --input-type=mod
   const health=await r.json();assert.equal(health.executionEnabled,false);
   assert.equal(health.imageRevision,process.env.EXPECTED_REVISION);
   assert.equal(health.deploymentId,process.env.EXPECTED_REVISION);
+  const version=await fetch("http://127.0.0.1:8787/api/version");
+  assert.equal(version.status,200);
+  assert.match(version.headers.get("content-type"),/^application\/json\b/);
+  assert.deepEqual(await version.json(), {
+    version: JSON.parse((await import("node:fs")).readFileSync("package.json", "utf8")).version,
+    commitSha: process.env.EXPECTED_REVISION,
+  });
   assert.equal((await fetch("http://127.0.0.1:8787/")).status,200);
   const favicon=await fetch("http://127.0.0.1:8787/favicon.svg");
   assert.equal(favicon.status,200);
