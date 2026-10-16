@@ -11,6 +11,7 @@ export type PublicationCause =
   | "git_preparation_failed"
   | "git_push_uncertain"
   | "workflow_permission_missing"
+  | "installation_permissions_missing"
   | "pull_request_uncertain"
   | "cleanup_failed"
   | "lease_conflict"
@@ -65,6 +66,8 @@ export function publicationDiagnostic(
     return { phase: "publication_confirmation", cause: "cleanup_failed" };
   }
   if (error instanceof GithubError) {
+    if (error.code === "github_permissions_required")
+      return { phase, cause: "installation_permissions_missing" };
     if (error.status === 401) return { phase, cause: "github_unauthorized" };
     if (error.status === 403) return { phase, cause: "github_forbidden" };
     if (error.status === 404) return { phase, cause: "github_not_found" };
@@ -79,6 +82,7 @@ export function publicationDiagnostic(
 }
 
 export function publicationDiagnosticMessage(diagnostic: PublicationDiagnostic): string {
+  if (diagnostic.cause === "installation_permissions_missing") return diagnostic.cause;
   if (diagnostic.cause === "workflow_permission_missing")
     return `workflow_permission_missing${diagnostic.workflow ? ` (${diagnostic.workflow})` : ""}`;
   return `Publication remains unconfirmed during ${diagnostic.phase} (${diagnostic.cause}); reconciliation will check GitHub.`;

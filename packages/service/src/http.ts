@@ -336,7 +336,12 @@ export function createApiServer(options: ApiOptions) {
         return;
       }
       if (method === "GET" && url.pathname === "/api/repositories") {
-        json(response, 200, await adapters.repositories(userId));
+        if (request.headers["x-herbie-repository-version"] === "2") {
+          const discovery = adapters.discoverRepositories
+            ? await adapters.discoverRepositories(userId)
+            : { repositories: await adapters.repositories(userId), permissionsRequired: false };
+          json(response, 200, discovery);
+        } else json(response, 200, await adapters.repositories(userId));
         return;
       }
       if (method === "GET" && url.pathname === "/api/goals") {
@@ -499,7 +504,10 @@ export function createApiServer(options: ApiOptions) {
         error instanceof AuthError ||
         error instanceof GithubError
       )
-        json(response, error.status, { error: error.message });
+        json(response, error.status, {
+          error: error.message,
+          ...(error instanceof GithubError && error.code ? { code: error.code } : {}),
+        });
       else if (error instanceof z.ZodError || error instanceof URIError)
         json(response, 400, { error: "Invalid request" });
       else json(response, 500, { error: `Request failed. Reference: ${errorId}` });

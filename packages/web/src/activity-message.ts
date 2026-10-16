@@ -1,4 +1,4 @@
-import type { Goal, GoalEvent } from "@herbie/contracts";
+import { githubPermissionsMessage, type Goal, type GoalEvent } from "@herbie/contracts";
 
 export function errorReference(message: string): string | null {
   return /Reference:\s*([a-z0-9-]+)/i.exec(message)?.[1] ?? null;
@@ -125,6 +125,8 @@ export function goalErrorMessage(goal: Goal): string {
 }
 
 export function workflowPermissionMessage(error: string): string | null {
+  if (error.startsWith("Automatic publication recovery stopped: installation_permissions_missing"))
+    return `${githubPermissionsMessage}. Your patches are saved. Automatic retries are paused. Approve the updated permissions on GitHub, then retry publication.`;
   if (!error.startsWith("Automatic publication recovery stopped: workflow_permission_missing"))
     return null;
   const path =

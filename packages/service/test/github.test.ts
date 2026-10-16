@@ -22,7 +22,8 @@ export async function githubFixture(t: TestContext) {
     statuses: "read",
     actions: "read",
     pullRequests: "write",
-    workflows: undefined as string | undefined,
+    workflows: "write" as string | undefined,
+    outdatedInstallation: false,
     installationId: 11,
     installationToken: "ghs_fixture",
     pr: false,
@@ -60,6 +61,9 @@ export async function githubFixture(t: TestContext) {
       res.end(
         JSON.stringify({
           installations: [
+            ...(fixture.outdatedInstallation
+              ? [{ id: 12, permissions: { contents: "write" } }]
+              : []),
             {
               id: fixture.installationId,
               permissions: {
@@ -885,10 +889,21 @@ test("live publication rejects a legacy artifact without verification evidence b
   );
 });
 
-for (const permission of ["checks", "statuses", "actions"] as const) {
+for (const permission of [
+  "contents",
+  "pullRequests",
+  "workflows",
+  "checks",
+  "statuses",
+  "actions",
+] as const) {
   test(`installation setup and authorization require ${permission} access`, async (t) => {
     const { github, fixture } = await githubFixture(t);
     fixture[permission] = "";
+    assert.deepEqual(await github.discoverRepositories("ghu_fixture"), {
+      repositories: [],
+      permissionsRequired: true,
+    });
     assert.equal(await github.verifyUserInstallation("ghu_fixture", 11), "permissions");
     await assert.rejects(
       github.authorize("ghu_fixture", "alice/project"),
@@ -899,16 +914,19 @@ for (const permission of ["checks", "statuses", "actions"] as const) {
   });
 }
 
-test("publication tokens pick up newly granted workflows permission without requiring it for ordinary patches", async (t) => {
+test("publication tokens require workflows permission while read tokens stay restricted", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
-  await github.installationToken(11, "alice/project", "write", false, true);
+  fixture.workflows = undefined;
+  await assert.rejects(
+    github.installationToken(11, "alice/project", "write", false, true),
+    /installation permissions/,
+  );
   fixture.workflows = "write";
   await github.installationToken(11, "alice/project", "write", false, true);
   await github.installationToken(11, "alice/project", "read", false, true);
   assert.deepEqual(
     requests.filter((r) => r.path === "/app/installations/11/access_tokens").map((r) => r.body),
     [
-      { repositories: ["project"], permissions: { contents: "write", pull_requests: "write" } },
       {
         repositories: ["project"],
         permissions: { contents: "write", pull_requests: "write", workflows: "write" },
@@ -916,4 +934,13 @@ test("publication tokens pick up newly granted workflows permission without requ
       { repositories: ["project"], permissions: { contents: "read", pull_requests: "read" } },
     ],
   );
+});
+
+test("an outdated installation prompts for updates without blocking another approved installation", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.outdatedInstallation = true;
+  const discovery = await github.discoverRepositories("ghu_fixture");
+  assert.equal(discovery.permissionsRequired, true);
+  assert.equal(discovery.repositories[0]?.fullName, "alice/project");
+  assert.equal((await github.authorize("ghu_fixture", "alice/project")).installationId, 11);
 });

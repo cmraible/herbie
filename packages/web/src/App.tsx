@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createClient, ApiError } from "@herbie/contracts/client";
 import {
+  githubPermissionsMessage,
   type Goal,
   type GoalEvent,
   type GoalAction,
@@ -63,6 +64,7 @@ export function App() {
   const [goalsError, setGoalsError] = useState<string | null>(null);
   const [goalsRefresh, setGoalsRefresh] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [permissionsRequired, setPermissionsRequired] = useState(false);
   const [repositoryError, setRepositoryError] = useState<string | null>(null);
   const [repositoryLoading, setRepositoryLoading] = useState(true);
   const [repositoriesResolved, setRepositoriesResolved] = useState(false);
@@ -212,8 +214,11 @@ export function App() {
     setRepositoryError(null);
     async function discover() {
       try {
-        const list = sortRepositories(await api.repositories());
+        const discovery = await api.discoverRepositories();
+        const list = sortRepositories(discovery.repositories);
         if (!alive) return;
+        setPermissionsRequired(discovery.permissionsRequired);
+        setInstallationNotice((current) => (current === "permissions" ? null : current));
         setRepositories(list);
         setRepositoriesResolved(true);
         setDraft((current) =>
@@ -232,7 +237,10 @@ export function App() {
         }
       } catch (failure) {
         if (alive) {
-          setRepositoryError(message(failure));
+          if (failure instanceof ApiError && failure.code === "github_permissions_required") {
+            setPermissionsRequired(true);
+            setRepositories([]);
+          } else setRepositoryError(message(failure));
           setRepositoriesResolved(true);
         }
       } finally {
@@ -257,8 +265,13 @@ export function App() {
         setRepositoryRefresh((current) => current + 1);
       }
     };
+    const refreshPermissions = () => setRepositoryRefresh((current) => current + 1);
+    window.addEventListener("focus", refreshPermissions);
     window.addEventListener("pageshow", restoreRepositories);
-    return () => window.removeEventListener("pageshow", restoreRepositories);
+    return () => {
+      window.removeEventListener("focus", refreshPermissions);
+      window.removeEventListener("pageshow", restoreRepositories);
+    };
   }, [session]);
 
   useEffect(() => {
@@ -528,12 +541,32 @@ export function App() {
                 </div>
               )}
             </section>
-            {installationNotice && (
+            {(permissionsRequired || installationNotice === "permissions") && (
+              <div className="status-message" role="alert">
+                <span>
+                  {githubPermissionsMessage}. Approve the updated permissions on GitHub to continue.
+                </span>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    void connectRepositories();
+                  }}
+                >
+                  Update GitHub permissions
+                </button>
+                <button
+                  disabled={repositoryLoading}
+                  onClick={() => setRepositoryRefresh((current) => current + 1)}
+                >
+                  Check again
+                </button>
+              </div>
+            )}
+            {installationNotice && installationNotice !== "permissions" && (
               <div className="status-message" role="status">
                 {{
                   connected: "GitHub connected. Repositories are refreshing.",
-                  permissions:
-                    "The app needs Contents and Pull requests write permissions, plus Checks, Commit statuses, and Actions read permissions. Update its GitHub permissions, then connect again.",
                   cancelled: "GitHub connection was cancelled.",
                   expired: "That installation link expired. Connect repositories again.",
                   failed: "Herbie could not verify the installation. Try connecting again.",

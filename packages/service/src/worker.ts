@@ -212,7 +212,10 @@ export async function runWorkerOnce(
       } else if (publishing) {
         const diagnostic = publicationDiagnostic(error, publicationPhase);
         const reason = publicationDiagnosticMessage(diagnostic);
-        if (diagnostic.cause === "workflow_permission_missing")
+        if (
+          diagnostic.cause === "workflow_permission_missing" ||
+          diagnostic.cause === "installation_permissions_missing"
+        )
           await store.blockPublication(job.id, workerId, reason, errorId);
         else await store.publicationUncertain(job.id, workerId, reason, errorId);
       } else

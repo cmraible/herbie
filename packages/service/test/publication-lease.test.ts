@@ -25,7 +25,19 @@ async function githubFixture(t: TestContext) {
     const path = request.url ?? "";
     if (path === "/repos/alice/project") response.end(JSON.stringify(repository));
     else if (path === "/repos/alice/project/installation")
-      response.end(JSON.stringify({ id: 11, permissions: { workflows: "write" } }));
+      response.end(
+        JSON.stringify({
+          id: 11,
+          permissions: {
+            contents: "write",
+            pull_requests: "write",
+            workflows: "write",
+            checks: "read",
+            statuses: "read",
+            actions: "read",
+          },
+        }),
+      );
     else if (path.startsWith("/user/installations/11/repositories"))
       response.end(JSON.stringify({ repositories: [repository] }));
     else if (path.startsWith("/user/installations"))
@@ -36,6 +48,7 @@ async function githubFixture(t: TestContext) {
               id: 11,
               permissions: {
                 contents: "write",
+                workflows: "write",
                 pull_requests: "write",
                 checks: "read",
                 statuses: "read",

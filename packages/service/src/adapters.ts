@@ -1,4 +1,4 @@
-import type { Goal, Repository } from "@herbie/contracts";
+import type { Goal, Repository, RepositoryDiscovery } from "@herbie/contracts";
 import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
 
 export interface RepositoryAccess {
@@ -66,6 +66,7 @@ export interface Adapters {
   authorize(userId: string, repository: string): Promise<RepositoryAccess>;
   reconciliationRepository(repository: string): Promise<RepositoryAccess>;
   repositories(userId: string): Promise<Repository[]>;
+  discoverRepositories?(userId: string): Promise<RepositoryDiscovery>;
   attempt(
     execution: Execution,
     report: (message: string) => Promise<void>,

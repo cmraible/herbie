@@ -108,3 +108,43 @@ for (const maxWip of [undefined, 1, 2])
       },
     );
   });
+
+test("repository permission failures preserve the code for the in-app update prompt", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: "Update installation permissions",
+          code: "github_permissions_required",
+        }),
+      );
+    },
+    async (client) => {
+      await assert.rejects(
+        client.repositories(),
+        (error) =>
+          error instanceof ApiError &&
+          error.code === "github_permissions_required" &&
+          error.status === 403,
+      );
+    },
+  );
+});
+
+test("repository discovery retains the update prompt alongside usable repositories", async () => {
+  const repositories = [{ fullName: "alice/project", defaultBranch: "main", installationId: 11 }];
+  await withServer(
+    (request, response) => {
+      assert.equal(request.headers["x-herbie-repository-version"], "2");
+      response.end(JSON.stringify({ repositories, permissionsRequired: true }));
+    },
+    async (client) => {
+      assert.deepEqual(await client.discoverRepositories(), {
+        repositories,
+        permissionsRequired: true,
+      });
+      assert.deepEqual(await client.repositories(), repositories);
+    },
+  );
+});

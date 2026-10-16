@@ -99,6 +99,9 @@ export function createLiveAdapters(
           },
         }
       : {}),
+    async discoverRepositories(userId) {
+      return github.discoverRepositories(await auth.userToken(userId));
+    },
     async repositories(userId) {
       return github.repositories(await auth.userToken(userId));
     },
