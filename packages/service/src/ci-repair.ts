@@ -1,4 +1,4 @@
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { DaytonaRunError } from "@herbie/loop/daytona-run";
 import { StaleRepairError } from "./adapters.js";
 import type { Adapters, Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -12,37 +12,37 @@ export async function runCiRepairOnce(
 ): Promise<boolean> {
   if (!adapters.ciStatus) return false;
   await store.recoverCiRepairs();
-  const job = await store.takeCiReview();
-  if (!job) return false;
+  const run = await store.takeCiReview();
+  if (!run) return false;
   let id: string | null = null;
   let cleanupConfirmed = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      project: job.project,
-      branch: job.branch,
-      attemptId: job.attemptId,
-      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
+      project: run.project,
+      branch: run.branch,
+      runId: run.runId,
+      repository: await adapters.authorize(run.project.ownerId, run.project.repository),
       signal: controller.signal,
     };
     const failure = await adapters.ciStatus(execution);
     if (!failure) return true;
     if (failure.state === "passed") {
-      await store.discardWaitingCi(job.id);
+      await store.discardWaitingCi(run.id);
       if (!failure.draft) return true;
       const ready = await adapters.markReady?.(execution, failure.head, () =>
-        store.beginReadiness(job.id),
+        store.beginReadiness(run.id),
       );
       if (ready) {
         await adapters.requestReview?.(execution);
-        await store.confirmReadiness(job.id, failure.pullRequest.url);
+        await store.confirmReadiness(run.id, failure.pullRequest.url);
       }
       return true;
     }
-    id = await store.startCiRepair(job.id, failure.head, workerId);
+    id = await store.startCiRepair(run.id, failure.head, workerId);
     if (!id) return true;
-    execution.attemptId = id;
+    execution.runId = id;
     execution.ciRepair = failure;
     const requireLease = async () => {
       controller.signal.throwIfAborted();
@@ -66,12 +66,12 @@ export async function runCiRepairOnce(
     let changes = await store.ciArtifact(id);
     cleanupConfirmed = changes?.verification?.sandboxDeleted === true;
     if (!changes) {
-      changes = await adapters.attempt(
+      changes = await adapters.run(
         {
           ...execution,
-          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
+          onActivity: (message) => store.appendEvent(run.project.id, "agent", message, run.id),
         },
-        (message) => store.appendEvent(job.project.id, "ci_repair", message.slice(0, 2000), job.id),
+        (message) => store.appendEvent(run.project.id, "ci_repair", message.slice(0, 2000), run.id),
       );
       cleanupConfirmed = changes.verification?.sandboxDeleted === true;
       await requireLease();
@@ -83,11 +83,11 @@ export async function runCiRepairOnce(
     const current = await adapters.ciStatus(execution);
     await requireLease();
     if (!current) {
-      await store.waitForCi(id, workerId, job.id);
+      await store.waitForCi(id, workerId, run.id);
       return true;
     }
     if (current.head !== failure.head) {
-      await store.pauseCiRepairForExternalChange(id, job.id);
+      await store.pauseCiRepairForExternalChange(id, run.id);
       return true;
     }
     if (current.state !== "failed") {
@@ -107,13 +107,13 @@ export async function runCiRepairOnce(
     );
   } catch (error) {
     if (id && error instanceof StaleRepairError) {
-      await store.pauseCiRepairForExternalChange(id, job.id);
+      await store.pauseCiRepairForExternalChange(id, run.id);
       return true;
     }
     const reference = logFailure(error, {
       component: "ci-repair",
-      projectId: job.project.id,
-      jobId: job.id,
+      projectId: run.project.id,
+      runId: run.id,
     });
     if (id)
       await store.finishCiRepair(
@@ -122,7 +122,7 @@ export async function runCiRepairOnce(
         false,
         `CI repair stopped. Inspect diagnostics, sandbox cleanup, and PR state before manual recovery. Reference: ${reference}`,
         undefined,
-        cleanupConfirmed || (error instanceof DaytonaAttemptError && error.cleanup === "confirmed"),
+        cleanupConfirmed || (error instanceof DaytonaRunError && error.cleanup === "confirmed"),
       );
     // The periodic poll retries failed reads; immediate requeue starves other PRs.
   } finally {

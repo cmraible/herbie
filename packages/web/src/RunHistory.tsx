@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentTranscript } from "./AgentTranscript.js";
 import type { Project, ProjectEvent } from "@herbie/contracts";
-import { attemptLabels, groupAttempts, reviewLabel } from "./attempts.js";
+import { runLabels, groupRuns, reviewLabel } from "./runs.js";
 import { activityMessage, errorReference } from "./activity-message.js";
 
 function MarkdownCode({ className, children }: ComponentProps<"code">) {
@@ -32,7 +32,7 @@ function MarkdownCode({ className, children }: ComponentProps<"code">) {
   );
 }
 
-export function AttemptHistory({
+export function RunHistory({
   project,
   events,
   eventsState,
@@ -47,31 +47,31 @@ export function AttemptHistory({
   eventsError: string | null;
   time: (value: string) => string;
 }) {
-  const { attempts, history } = groupAttempts(project, events);
+  const { runs, history } = groupRuns(project, events);
   const groups = [
-    ...attempts.map((attempt) => ({
-      id: attempt.id,
-      title: `Run ${attempt.number}`,
-      createdAt: attempt.createdAt,
+    ...runs.map((run) => ({
+      id: run.id,
+      title: `Run ${run.number}`,
+      createdAt: run.createdAt,
       status:
-        attempt.pullRequest?.state === "merged"
+        run.pullRequest?.state === "merged"
           ? "Merged"
-          : attempt.pullRequest?.state === "closed"
+          : run.pullRequest?.state === "closed"
             ? "Closed"
-            : attempt.state === "awaiting_review"
-              ? reviewLabel(attempt.pullRequest)
-              : attemptLabels[attempt.state],
+            : run.state === "awaiting_review"
+              ? reviewLabel(run.pullRequest)
+              : runLabels[run.state],
       color:
-        attempt.pullRequest?.state === "merged"
+        run.pullRequest?.state === "merged"
           ? "merged"
-          : attempt.pullRequest?.state === "closed"
+          : run.pullRequest?.state === "closed"
             ? "cancelled"
-            : attempt.state === "awaiting_review" &&
-                reviewLabel(attempt.pullRequest) === "Waiting for checks"
+            : run.state === "awaiting_review" &&
+                reviewLabel(run.pullRequest) === "Waiting for checks"
               ? "waiting_for_checks"
-              : attempt.state,
-      events: attempt.events,
-      pullRequests: attempt.pullRequest ? [attempt.pullRequest] : [],
+              : run.state,
+      events: run.events,
+      pullRequests: run.pullRequest ? [run.pullRequest] : [],
     })),
     ...(history.length
       ? [
@@ -89,7 +89,7 @@ export function AttemptHistory({
   ];
   const group = groups.find((item) => item.id === selected);
   return (
-    <section className="attempts" aria-label={selected ? "Run details" : "Runs"}>
+    <section className="runs" aria-label={selected ? "Run details" : "Runs"}>
       {!selected && <h3>Runs</h3>}
       {eventsState === "loading" && (
         <p className="subtle-note" role="status">

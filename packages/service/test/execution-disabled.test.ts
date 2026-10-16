@@ -4,7 +4,7 @@ import { createLiveAdapters } from "../src/live.js";
 import { createGithub } from "../src/github.js";
 import type { Execution } from "../src/adapters.js";
 
-test("live adapters without approved execution configuration cannot start an attempt or publication", async () => {
+test("live adapters without approved execution configuration cannot start a run or publication", async () => {
   const github = createGithub({
     appId: "fixture",
     clientId: "fixture",
@@ -25,7 +25,7 @@ test("live adapters without approved execution configuration cannot start an att
       repository: "demo/example",
       name: "Disabled work",
       prompt: "Disabled work",
-      attemptCount: 0,
+      runCount: 0,
       maxWip: 1,
       model: "gpt-6-luna",
       pullRequests: [],
@@ -39,11 +39,11 @@ test("live adapters without approved execution configuration cannot start an att
       updatedAt: new Date().toISOString(),
     },
     repository: { repository: "demo/example", installationId: 1, defaultBranch: "main" },
-    attemptId: "id",
-    branch: "herbie/attempt",
+    runId: "id",
+    branch: "herbie/run",
   };
   await assert.rejects(
-    adapters.attempt(execution, async () => undefined),
+    adapters.run(execution, async () => undefined),
     /execution is disabled/,
   );
   await assert.rejects(

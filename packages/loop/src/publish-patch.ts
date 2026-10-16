@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { DaytonaAttemptChanges } from "./daytona-attempt.js";
+import type { DaytonaRunChanges } from "./daytona-run.js";
 import { MAX_PATCH_BYTES } from "./artifact-limits.js";
 
 type CreatePullRequest = (request: {
@@ -21,7 +21,7 @@ type Request = {
   branch: string;
   title: string;
   body: string;
-  changes: DaytonaAttemptChanges;
+  changes: DaytonaRunChanges;
   // Update an existing PR only while its head still matches the captured base.
   updatePullRequest?: { url: string; head: string };
   // Durable callers must confirm current lease ownership immediately before remote writes.
@@ -55,7 +55,7 @@ export class PatchPublicationError extends AggregateError {
 
 export function hasValidPublicationEvidence(
   repository: string,
-  changes: DaytonaAttemptChanges,
+  changes: DaytonaRunChanges,
 ): boolean {
   const remoteUrl = `https://github.com/${repository}.git`;
   const { verification, baseCommit } = changes;

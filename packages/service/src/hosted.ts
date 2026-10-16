@@ -71,7 +71,7 @@ export async function startHostedService(
         server.close((error) => (error ? reject(error) : resolve()));
         server.closeIdleConnections();
       });
-      // Abort stops new claims. The active bounded attempt must finish its cleanup
+      // Abort stops new claims. The active bounded run must finish its cleanup
       // and fenced database writes before the shared pool is closed.
       const results = await Promise.allSettled([httpClosed, worker]);
       await store.close();

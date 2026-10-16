@@ -52,9 +52,9 @@ for (const outcome of [
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "original");
     await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
-    const [job] = await store.reviewJobs("live");
-    assert.ok(job);
-    const pr = { ...job.project.pullRequests[0]!, headSha: "a".repeat(40) };
+    const [run] = await store.reviewRuns("live");
+    assert.ok(run);
+    const pr = { ...run.project.pullRequests[0]!, headSha: "a".repeat(40) };
     const item: PullRequestFeedback = {
       kind: "inline",
       id: 1,
@@ -65,7 +65,7 @@ for (const outcome of [
       replyTo: 1,
     };
     let context = [{ ...item, bot: outcome === "bot" }];
-    let attempts = 0,
+    let runs = 0,
       pushes = 0,
       replies = 0;
     let current = pr;
@@ -80,8 +80,8 @@ for (const outcome of [
       mode: "live",
       reconcile: async () => current,
       feedback: async () => context,
-      attempt: async (execution) => {
-        attempts++;
+      run: async (execution) => {
+        runs++;
         await execution.onActivity?.(
           JSON.stringify({
             method: "item/agentMessage/delta",
@@ -89,7 +89,7 @@ for (const outcome of [
           }),
         );
         assert.equal(execution.feedback?.item.id, item.id);
-        assert.equal(execution.branch, job.branch);
+        assert.equal(execution.branch, run.branch);
         if (outcome === "failure") throw new Error("Agent failed");
         if (outcome === "cancel") await store.control(project.id, "demo-user", "cancel");
         if (outcome === "lease")
@@ -125,7 +125,7 @@ for (const outcome of [
         await lease();
         pushes++;
         current = { ...pr, headSha: "c".repeat(40) };
-        assert.equal(await store.reconcilePullRequestHead(job.id, current), false);
+        assert.equal(await store.reconcilePullRequestHead(run.id, current), false);
         assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
         return current;
       },
@@ -137,17 +137,17 @@ for (const outcome of [
     };
     if (outcome === "crash" || outcome === "dedup") {
       const claims = await Promise.all([
-        store.startFeedback(job.id, context, "one"),
-        store.startFeedback(job.id, context, "two"),
+        store.startFeedback(run.id, context, "one"),
+        store.startFeedback(run.id, context, "two"),
       ]);
       assert.equal(claims.filter(Boolean).length, 1);
-      assert.equal(await store.startCiRepair(job.id, pr.headSha, "ci"), null);
+      assert.equal(await store.startCiRepair(run.id, pr.headSha, "ci"), null);
       if (outcome === "crash") {
         await store.pool.query(
           "UPDATE pr_feedback SET lease_expires_at=clock_timestamp()-interval '1 second'",
         );
         await store.recoverFeedback();
-        assert.equal(await store.startFeedback(job.id, context, "three"), null);
+        assert.equal(await store.startFeedback(run.id, context, "three"), null);
         assert.equal(
           (await store.pool.query("SELECT state FROM pr_feedback")).rows[0].state,
           "failed",
@@ -156,11 +156,11 @@ for (const outcome of [
       return;
     }
     if (outcome === "ci-failed") {
-      const repair = await store.startCiRepair(job.id, pr.headSha, "ci");
+      const repair = await store.startCiRepair(run.id, pr.headSha, "ci");
       assert.ok(repair);
       await store.finishCiRepair(repair, "ci", false, "Unconfirmed cleanup");
     }
-    if (outcome === "ci-busy") assert.ok(await store.startCiRepair(job.id, pr.headSha, "ci"));
+    if (outcome === "ci-busy") assert.ok(await store.startCiRepair(run.id, pr.headSha, "ci"));
     if (outcome === "paused") await store.control(project.id, "demo-user", "pause");
     if (outcome === "closed") current = { ...pr, state: "closed" };
     await store.requestFeedbackReview("other/repo");
@@ -168,10 +168,10 @@ for (const outcome of [
     await store.requestFeedbackReview("demo/example");
     await runFeedbackOnce(store, adapters, "worker");
     assert.equal(
-      attempts,
+      runs,
       ["ci-busy", "ci-failed", "paused", "closed", "bot"].includes(outcome) ? 0 : 1,
     );
-    if (attempts)
+    if (runs)
       assert.ok(
         (
           await store.pool.query(
@@ -187,14 +187,11 @@ for (const outcome of [
     if (outcome !== "edited") {
       await store.requestFeedbackReview();
       await runFeedbackOnce(store, adapters, "duplicate");
-      assert.ok(
-        attempts <= 1,
-        "redelivery or restart must not repeat a completed or uncertain action",
-      );
+      assert.ok(runs <= 1, "redelivery or restart must not repeat a completed or uncertain action");
     } else {
       await store.requestFeedbackReview();
       await runFeedbackOnce(store, adapters, "edited");
-      assert.equal(attempts, 2, "edited feedback receives a fresh decision");
+      assert.equal(runs, 2, "edited feedback receives a fresh decision");
       assert.equal(replies, 1);
     }
   });

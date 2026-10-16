@@ -11,19 +11,19 @@ import type {
 } from "@daytona/sdk";
 
 import {
-  AttemptCommandError,
-  AttemptResultError,
-  AttemptReportError,
-  attemptDiagnostic,
-  attemptDiagnosticMessage,
-  type AttemptStage,
-  type AttemptDiagnostic,
-} from "./attempt-diagnostics.js";
+  RunCommandError,
+  RunResultError,
+  RunReportError,
+  runDiagnostic,
+  runDiagnosticMessage,
+  type RunStage,
+  type RunDiagnostic,
+} from "./run-diagnostics.js";
 
 import { installDaytonaRuntime, configureDaytonaRuntime, daytonaPath } from "./daytona-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
 
-type AttemptSandbox = Pick<Sandbox, "id" | "delete"> & {
+type RunSandbox = Pick<Sandbox, "id" | "delete"> & {
   git: Pick<Sandbox["git"], "clone">;
   fs: {
     createFolder: Sandbox["fs"]["createFolder"];
@@ -38,7 +38,7 @@ type AttemptSandbox = Pick<Sandbox, "id" | "delete"> & {
 type CreateSandbox = (
   params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams,
   options: { timeout: number },
-) => Promise<AttemptSandbox>;
+) => Promise<RunSandbox>;
 type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyUrl"> & {
   signal?: AbortSignal;
   snapshot?: string;
@@ -53,7 +53,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   feedback?: boolean;
 };
 
-export interface DaytonaAttemptChanges {
+export interface DaytonaRunChanges {
   baseCommit: string;
   patch: Buffer;
   feedbackDecision?: FeedbackDecision;
@@ -75,21 +75,17 @@ export interface DaytonaAttemptChanges {
   };
 }
 
-export class DaytonaAttemptError extends AggregateError {
+export class DaytonaRunError extends AggregateError {
   // Keep retrieved changes available even if subsequent deletion fails.
-  changes?: DaytonaAttemptChanges;
-  diagnostics: AttemptDiagnostic[] = [];
+  changes?: DaytonaRunChanges;
+  diagnostics: RunDiagnostic[] = [];
   cleanup: "confirmed" | "unconfirmed" = "unconfirmed";
   safeMessage(): string {
-    return `Attempt failed (${this.diagnostics.map(attemptDiagnosticMessage).join("; ") || "diagnostic unavailable"}). Sandbox deletion ${this.cleanup}. No automatic retry.`;
+    return `Run failed (${this.diagnostics.map(runDiagnosticMessage).join("; ") || "diagnostic unavailable"}). Sandbox deletion ${this.cleanup}. No automatic retry.`;
   }
 }
 
-async function downloadBounded(
-  sandbox: AttemptSandbox,
-  path: string,
-  limit: number,
-): Promise<Buffer> {
+async function downloadBounded(sandbox: RunSandbox, path: string, limit: number): Promise<Buffer> {
   const controller = new AbortController();
   const stream = await sandbox.fs.downloadFileStream(path, {
     timeout: 30,
@@ -114,32 +110,32 @@ async function downloadBounded(
 
 // Use the built adapter (or provide a directory containing the built runtime files).
 // Secret values stay outside Herbie; secrets contains existing Daytona Secret names only.
-export async function runDaytonaAttempt(
+export async function runDaytonaRun(
   create: CreateSandbox,
   request: Request,
   report: (message: string) => void | Promise<void>,
   runtimeDirectory = new URL(".", import.meta.url),
-): Promise<DaytonaAttemptChanges> {
-  let stage: AttemptStage = "sandbox_creation";
+): Promise<DaytonaRunChanges> {
+  let stage: RunStage = "sandbox_creation";
   const emit = async (message: string, sink = report): Promise<void> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
         Promise.resolve().then(() => sink(message)),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Attempt event persistence timed out")), 5000);
+          timer = setTimeout(() => reject(new Error("Run event persistence timed out")), 5000);
         }),
       ]);
     } catch (cause) {
-      throw new AttemptReportError("Attempt event persistence failed", { cause });
+      throw new RunReportError("Run event persistence failed", { cause });
     } finally {
       clearTimeout(timer);
     }
   };
-  const begin = async (next: AttemptStage): Promise<void> => {
+  const begin = async (next: RunStage): Promise<void> => {
     if (next !== "sandbox_deletion") request.signal?.throwIfAborted();
     stage = next;
-    await emit(`Attempt stage: ${stage}`);
+    await emit(`Run stage: ${stage}`);
     if (next !== "sandbox_deletion") request.signal?.throwIfAborted();
   };
   const repo = new URL(request.repoUrl);
@@ -164,12 +160,12 @@ export async function runDaytonaAttempt(
       "diagnostic-log.js",
     ].map(async (name) => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })),
   );
-  const name = `herbie-attempt-${randomUUID()}`;
+  const name = `herbie-run-${randomUUID()}`;
   const directory = `/tmp/${name}`;
   const cwd = `${directory}/repo`;
   await begin("sandbox_creation");
   await emit(`Creating sandbox ${name}`);
-  let sandbox: AttemptSandbox;
+  let sandbox: RunSandbox;
   try {
     request.signal?.throwIfAborted();
     sandbox = await create(
@@ -186,20 +182,20 @@ export async function runDaytonaAttempt(
       { timeout: 120 },
     );
   } catch (cause) {
-    const error = new DaytonaAttemptError(
+    const error = new DaytonaRunError(
       [cause],
       `Creation failed for ${name}; cleanup is unconfirmed. Check Daytona by name.`,
       { cause },
     );
-    error.diagnostics = [attemptDiagnostic(cause, stage)];
+    error.diagnostics = [runDiagnostic(cause, stage)];
     throw error;
   }
   const failures: Error[] = [];
-  const diagnostics: AttemptDiagnostic[] = [];
+  const diagnostics: RunDiagnostic[] = [];
   let cleanupConfirmed = false;
   // Deletion interrupts an in-flight model command. Do not wait for its normal
   // completion before attempting to stop paid execution. A failed delete remains
-  // unconfirmed; it never permits another attempt or a publication.
+  // unconfirmed; it never permits another run or a publication.
   let deletion: Promise<void> | undefined;
   const removeSandbox = () =>
     (deletion ??= (async () => {
@@ -221,7 +217,7 @@ export async function runDaytonaAttempt(
   };
   request.signal?.addEventListener("abort", abort, { once: true });
   if (request.signal?.aborted) abort();
-  let changes: DaytonaAttemptChanges | undefined;
+  let changes: DaytonaRunChanges | undefined;
   try {
     request.signal?.throwIfAborted();
     await emit(`Created sandbox ${sandbox.id}`);
@@ -232,8 +228,7 @@ export async function runDaytonaAttempt(
       undefined,
       request.snapshot ? 30 : 240,
     );
-    if (preflight.exitCode !== 0)
-      throw new AttemptCommandError(preflight.exitCode, preflight.result);
+    if (preflight.exitCode !== 0) throw new RunCommandError(preflight.exitCode, preflight.result);
     await begin("runtime_upload");
     await sandbox.fs.createFolder(directory, "700");
     for (const file of runtime) {
@@ -250,7 +245,7 @@ export async function runDaytonaAttempt(
           feedback: request.feedback,
         }),
       ),
-      `${directory}/attempt.json`,
+      `${directory}/run.json`,
       30,
     );
     await begin("repository_clone");
@@ -296,9 +291,9 @@ export async function runDaytonaAttempt(
     if (recording.status === "rejected") throw recording.reason;
     if (outcome.status === "rejected") throw outcome.reason;
     const result = outcome.value;
-    if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
-    if (result.result !== "herbie-attempt-completed\n")
-      throw new AttemptResultError("Invalid project completion marker", result.result);
+    if (result.exitCode !== 0) throw new RunCommandError(result.exitCode, result.result);
+    if (result.result !== "herbie-run-completed\n")
+      throw new RunResultError("Invalid project completion marker", result.result);
     await emit(`Project completed in sandbox ${sandbox.id}`);
     await begin("artifact_download");
     const artifact: unknown = JSON.parse(
@@ -359,21 +354,21 @@ export async function runDaytonaAttempt(
     };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
-    diagnostics.push(attemptDiagnostic(cause, stage));
-    failures.push(new Error(`Attempt failed in sandbox ${sandbox.id}`, { cause }));
+    diagnostics.push(runDiagnostic(cause, stage));
+    failures.push(new Error(`Run failed in sandbox ${sandbox.id}`, { cause }));
   } finally {
     // A failed event write must never prevent sandbox cleanup.
     try {
       await begin("sandbox_deletion");
     } catch (cause) {
-      diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
+      diagnostics.push(runDiagnostic(cause, "sandbox_deletion"));
       failures.push(new Error("Cleanup stage could not be persisted", { cause }));
     }
     try {
       await removeSandbox();
       await emit(`Deletion confirmed for sandbox ${sandbox.id}`);
     } catch (cause) {
-      diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
+      diagnostics.push(runDiagnostic(cause, "sandbox_deletion"));
       failures.push(
         new Error(
           cleanupConfirmed
@@ -400,10 +395,7 @@ export async function runDaytonaAttempt(
     };
     return changes;
   }
-  const error = new DaytonaAttemptError(
-    failures,
-    failures.map((error) => error.message).join("; "),
-  );
+  const error = new DaytonaRunError(failures, failures.map((error) => error.message).join("; "));
   error.changes = changes;
   error.diagnostics = diagnostics;
   error.cleanup = cleanupConfirmed ? "confirmed" : "unconfirmed";

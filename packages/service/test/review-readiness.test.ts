@@ -51,7 +51,7 @@ for (const outcome of [
       prompt: "Fix",
       mode: "live",
       state: "awaiting_review",
-      attemptCount: 1,
+      runCount: 1,
       createdAt: "2026-10-15",
       updatedAt: "2026-10-15",
       stopRequested: null,
@@ -62,7 +62,7 @@ for (const outcome of [
     const current = await adapters.reconcile({
       project,
       branch: pr.branch,
-      attemptId: project.id,
+      runId: project.id,
       repository: { repository: project.repository, installationId: 1, defaultBranch: "main" },
     });
     assert.equal(current?.checksPassed, outcome === "passed");
@@ -81,7 +81,7 @@ test("a failed review request stays pending and reconciliation retries it before
     prompt: "Fix",
     mode: "live",
     state: "awaiting_review",
-    attemptCount: 1,
+    runCount: 1,
     createdAt: "2026-10-15",
     updatedAt: "2026-10-15",
     stopRequested: null,
@@ -97,14 +97,14 @@ test("a failed review request stays pending and reconciliation retries it before
     ],
   });
   const pr = project.pullRequests[0]!;
-  const job = { id: project.id, attemptId: project.id, project, branch: pr.branch };
+  const run = { id: project.id, runId: project.id, project, branch: pr.branch };
   let pending = false;
   let ready = false;
   let requests = 0;
   let confirmations = 0;
   const store = {
     recoverCiRepairs: async () => {},
-    takeCiReview: async () => job,
+    takeCiReview: async () => run,
     discardWaitingCi: async () => {},
     beginReadiness: async () => {
       pending = true;
@@ -114,7 +114,7 @@ test("a failed review request stays pending and reconciliation retries it before
       pending = false;
       confirmations++;
     },
-    reviewJobs: async (_mode: string, readiness: boolean) => (readiness && pending ? [job] : []),
+    reviewRuns: async (_mode: string, readiness: boolean) => (readiness && pending ? [run] : []),
   } as unknown as import("../src/store.js").Store;
   const adapters: import("../src/adapters.js").Adapters = {
     ...createDemoAdapters(),

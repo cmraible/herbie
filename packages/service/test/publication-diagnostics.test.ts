@@ -42,7 +42,7 @@ test("GitHub workflow rejection exposes only a safe path and a specific cause", 
 test("publication diagnostics retain a safe publisher stage without exposing raw errors or repository identifiers", () => {
   const error = new PatchPublicationError([new Error("Authorization: synthetic-secret")], {
     repository: "synthetic-owner/synthetic-project",
-    branch: "herbie/synthetic-project/synthetic-job",
+    branch: "herbie/synthetic-project/synthetic-run",
     stage: "pushing",
     commit: "a".repeat(40),
   });

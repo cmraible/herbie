@@ -26,24 +26,24 @@ Copy the App ID, client ID, client secret, private key, and webhook secret into
 
 ## Project behavior
 
-Postgres preserves jobs and results across restarts. Coding runs in disposable
+Postgres preserves runs and results across restarts. Coding runs in disposable
 Daytona sandboxes; GitHub write credentials stay on the Herbie host.
 
-- `maxWip` limits open PRs plus queued/running attempts. Merging a PR frees capacity;
-  closing one without merging pauses the project. Projects have no total attempt or dollar cap.
-- **Pause** lets an active attempt finish. Saved changes can resume publication
+- `maxWip` limits open PRs plus queued/running runs. Merging a PR frees capacity;
+  closing one without merging pauses the project. Projects have no total run or dollar cap.
+- **Pause** lets an active run finish. Saved changes can resume publication
   without another model run.
 - **Cancel** stops further work and requests sandbox cleanup. A GitHub write already
   in flight may finish; existing branches and PRs remain.
-- Failed attempts stop for attention. CI repairs update the same PR, with at most
+- Failed runs stop for attention. CI repairs update the same PR, with at most
   three repair sessions per PR. Failed repairs stop further automatic repair.
 - Passing CI can mark a draft PR ready for review and request review from the project owner; Herbie does not merge it. Review requests retry after failures without re-requesting users who are already requested or have reviewed.
   Missing checks or unsupported ruleset-required workflows leave it as a draft.
 
-Human PR comments, inline comments, and submitted reviews trigger a feedback attempt
+Human PR comments, inline comments, and submitted reviews trigger a feedback run
 on the existing PR. The agent decides whether to ignore, reply, or update the code
 and reply. Inline replies stay in their original thread. Bot comments provide
-conversation context but never trigger attempts. Edits to feedback receive a new
+conversation context but never trigger runs. Edits to feedback receive a new
 decision; duplicate deliveries and line movements do not. Existing feedback on
 tracked open PRs is considered on the first poll after upgrading.
 
@@ -82,7 +82,7 @@ Check the project's events and `docker compose logs herbie` first.
 - **Publication failure:** Herbie retries saved changes with backoff, without rerunning
   the model. Fix credentials or connectivity and let recovery proceed. After resolving
   a blocking conflict, `pnpm cli retry-publication PROJECT_ID` requests another checked
-  publication attempt; it does not retry sandbox execution.
+  publication; it does not retry sandbox execution.
 - **CI repair failure:** The project shows **Retry repair** when environment cleanup
   was confirmed and publication never started. This queues a fresh repair on the
   existing PR and preserves the failed repair's history. Duplicate requests queue
@@ -94,7 +94,7 @@ Check the project's events and `docker compose logs herbie` first.
   the recorded sandbox ID. Uncertain execution or cleanup is not retried automatically.
   Cancellation does not prove cleanup succeeded or undo remote writes.
 
-Pause projects and let active attempts finish before restarting. Keep the database and
+Pause projects and let active runs finish before restarting. Keep the database and
 `HERBIE_CREDENTIAL_KEY` together in backups. Stop the service before manual database repair.
 
 ## Verification

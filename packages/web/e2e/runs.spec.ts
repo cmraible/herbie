@@ -31,19 +31,19 @@ for (const [draft, checksPassed, label] of [
     const project = {
       id: projectId,
       ownerId: "fixture",
-      name: "Attempt history",
+      name: "Run history",
       repository: "demo/example",
-      prompt: "Review each attempt independently",
+      prompt: "Review each run independently",
       mode: "live",
       state: "awaiting_review",
-      attemptCount: 2,
+      runCount: 2,
       createdAt: "2026-10-15",
       updatedAt: "2026-10-15",
       stopRequested: null,
       error: null,
       pullRequest: pr(2),
       pullRequests: [pr(1), pr(2)],
-      attempts: [
+      runs: [
         { id: first, number: 1, state: "completed", createdAt: "2026-10-15", pullRequest: pr(1) },
         {
           id: second,
@@ -55,10 +55,10 @@ for (const [draft, checksPassed, label] of [
       ],
     };
     const events = [
-      { id: 1, attemptId: first, type: "attempt_started", message: "Run #1 started" },
-      { id: 2, attemptId: second, type: "attempt_started", message: "Run #2 started" },
-      { id: 3, attemptId: first, type: "pull_request_merged", message: "Pull request merged" },
-      { id: 4, attemptId: null, type: "renamed", message: "Project renamed" },
+      { id: 1, runId: first, type: "run_started", message: "Run #1 started" },
+      { id: 2, runId: second, type: "run_started", message: "Run #2 started" },
+      { id: 3, runId: first, type: "pull_request_merged", message: "Pull request merged" },
+      { id: 4, runId: null, type: "renamed", message: "Project renamed" },
     ].map((e) => ({ ...e, projectId, createdAt: "2026-10-15" }));
     const json = (body: unknown) => ({
       contentType: "application/json",
@@ -119,7 +119,7 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
     await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
     await expect(page.locator(".pr-metadata .badge")).toHaveText(label);
-    await page.getByRole("link", { name: "Attempt history", exact: true }).click();
+    await page.getByRole("link", { name: "Run history", exact: true }).click();
     await one.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/runs/${first}$`));
@@ -137,7 +137,7 @@ for (const [draft, checksPassed, label] of [
 
     await page.setViewportSize({ width: 1440, height: 1100 });
     await two.click();
-    await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
+    await page.screenshot({ path: "test-results/runs-desktop.png", fullPage: true });
     await expect(page.getByRole("button", { name: "Project history" })).toHaveCount(0);
     await expect(page.getByText("Project renamed", { exact: true })).toHaveCount(0);
     await page.goBack();
@@ -150,7 +150,7 @@ for (const [draft, checksPassed, label] of [
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    await page.screenshot({ path: "test-results/attempts-mobile.png", fullPage: true });
+    await page.screenshot({ path: "test-results/runs-mobile.png", fullPage: true });
     await page.goto(`/#${projectId}/runs/missing`);
     await expect(page.getByText("Run not found.", { exact: true })).toBeVisible();
   });

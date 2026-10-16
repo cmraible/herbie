@@ -56,15 +56,15 @@ for (const outcome of [
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "original");
     await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
-    const [job] = await store.reviewJobs("live");
-    assert.ok(job);
-    const pr = job.project.pullRequests[0]!;
+    const [run] = await store.reviewRuns("live");
+    assert.ok(run);
+    const pr = run.project.pullRequests[0]!;
     if (outcome === "retry-at-capacity") {
       await store.pool.query("UPDATE projects SET state='failed',error='synthetic' WHERE id=$1", [
         project.id,
       ]);
       await assert.rejects(
-        store.retryAttempt(project.id, "demo-user"),
+        store.retryRun(project.id, "demo-user"),
         /Review or close an open pull request before retrying this project/,
       );
       assert.equal((await store.getProject(project.id))?.state, "failed");
@@ -88,10 +88,10 @@ for (const outcome of [
         [project.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
-        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
-        [job.id, originalHead, originalBase, originalPatch],
+        "UPDATE project_runs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [run.id, originalHead, originalBase, originalPatch],
       );
-      await store.reconcilePullRequestHead(job.id, {
+      await store.reconcilePullRequestHead(run.id, {
         headSha: originalHead,
         draft: false,
         checksPassed: true,
@@ -113,12 +113,12 @@ for (const outcome of [
       await reconcileReviews(store, adapters);
       const paused = await store.getProject(project.id);
       assert.equal(paused?.state, "paused");
-      assert.equal(paused?.attempts?.[0]?.pullRequest?.checksPassed, false);
+      assert.equal(paused?.runs?.[0]?.pullRequest?.checksPassed, false);
       assert.equal(paused?.pullRequest?.checksPassed, false);
       draft = true;
       await reconcileReviews(store, adapters);
       const refreshed = await store.getProject(project.id);
-      assert.equal(refreshed?.attempts?.[0]?.pullRequest?.draft, true);
+      assert.equal(refreshed?.runs?.[0]?.pullRequest?.draft, true);
       assert.equal(refreshed?.pullRequest?.draft, true);
       assert.equal(refreshed?.pullRequest?.headSha, originalHead);
       assert.equal(
@@ -141,11 +141,11 @@ for (const outcome of [
         [project.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
-        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
-        [job.id, originalHead, originalBase, originalPatch],
+        "UPDATE project_runs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [run.id, originalHead, originalBase, originalPatch],
       );
       assert.equal(
-        await store.reconcilePullRequestHead(job.id, {
+        await store.reconcilePullRequestHead(run.id, {
           headSha: "b".repeat(40),
           baseSha: "d".repeat(40),
           patchSha: originalPatch,
@@ -157,9 +157,9 @@ for (const outcome of [
       return;
     }
     if (outcome.startsWith("audit-")) {
-      await store.beginReadiness(job.id);
+      await store.beginReadiness(run.id);
       if (outcome === "audit-cancelled") await store.control(project.id, "demo-user", "cancel");
-      else if (outcome !== "audit-pending") await store.reconcile(job.id, "closed");
+      else if (outcome !== "audit-pending") await store.reconcile(run.id, "closed");
       const adapters: Adapters = {
         ...demo,
         mode: "live",
@@ -177,8 +177,8 @@ for (const outcome of [
       await reconcileReviews(store, adapters);
       await reconcileReviews(store, adapters);
       assert.equal(
-        (await store.pool.query("SELECT readiness_pending FROM jobs WHERE id=$1", [job.id])).rows[0]
-          .readiness_pending,
+        (await store.pool.query("SELECT readiness_pending FROM project_runs WHERE id=$1", [run.id]))
+          .rows[0].readiness_pending,
         false,
       );
       assert.equal(
@@ -218,28 +218,28 @@ for (const outcome of [
       );
       const second = await store.takeCiReview();
       assert.ok(
-        second && second.id !== job.id,
-        "failed read must not requeue the oldest job immediately",
+        second && second.id !== run.id,
+        "failed read must not requeue the oldest run immediately",
       );
       await store.requestCiReview();
       const third = await store.takeCiReview();
       assert.ok(
-        third && third.id !== job.id && third.id !== second.id,
+        third && third.id !== run.id && third.id !== second.id,
         "global poll must not starve unreviewed PRs",
       );
       return;
     }
     if (outcome === "crash") {
       const claims = await Promise.all([
-        store.startCiRepair(job.id, "a".repeat(40), "one"),
-        store.startCiRepair(job.id, "a".repeat(40), "two"),
+        store.startCiRepair(run.id, "a".repeat(40), "one"),
+        store.startCiRepair(run.id, "a".repeat(40), "two"),
       ]);
       assert.equal(claims.filter(Boolean).length, 1);
       await store.pool.query(
         "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
       );
       await store.recoverCiRepairs();
-      assert.equal(await store.startCiRepair(job.id, "b".repeat(40), "replacement"), null);
+      assert.equal(await store.startCiRepair(run.id, "b".repeat(40), "replacement"), null);
       await store.finishCiRepair(claims.find(Boolean)!, "one", true, "stale completion");
       assert.equal(
         (await store.pool.query("SELECT state FROM ci_repairs")).rows[0].state,
@@ -248,7 +248,7 @@ for (const outcome of [
       return;
     }
 
-    let attempts = 0,
+    let runs = 0,
       pushes = 0,
       reads = 0;
     let head = "a".repeat(40);
@@ -257,7 +257,7 @@ for (const outcome of [
       ...demo,
       mode: "live",
       ciStatus: async () =>
-        rerunning && attempts > 0
+        rerunning && runs > 0
           ? null
           : {
               state: "failed",
@@ -265,17 +265,17 @@ for (const outcome of [
               pullRequest: pr,
               details: "test addition failed",
             },
-      attempt: async (execution) => {
-        attempts++;
+      run: async (execution) => {
+        runs++;
         assert.equal(execution.ciRepair?.head, head);
-        assert.equal(execution.branch, job.branch);
+        assert.equal(execution.branch, run.branch);
         if (outcome === "failure") throw new Error("Verification failed");
         if (outcome === "cancel") await store.control(project.id, "demo-user", "cancel");
         if (outcome === "lease")
           await store.pool.query(
             "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
           );
-        const changes = await demo.attempt(execution, async () => {});
+        const changes = await demo.run(execution, async () => {});
         return {
           ...changes,
           baseCommit: head,
@@ -301,17 +301,17 @@ for (const outcome of [
     assert.equal(await runCiRepairOnce(store, adapters, "repair"), false);
     await store.requestCiReview("demo/example");
     await runCiRepairOnce(store, adapters, "repair");
-    assert.equal(attempts, 1);
+    assert.equal(runs, 1);
     assert.equal(pushes, outcome === "success" ? 1 : 0);
     if (outcome !== "stale") {
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "duplicate");
-      assert.equal(attempts, 1);
+      assert.equal(runs, 1);
     }
     assert.equal((await store.getProject(project.id))?.pullRequests.length, 1);
     if (outcome.startsWith("rerun-")) {
       if (outcome === "rerun-crash" || outcome === "rerun-publishing-crash") {
-        const id = await store.startCiRepair(job.id, head, "interrupted");
+        const id = await store.startCiRepair(run.id, head, "interrupted");
         assert.ok(id);
         if (outcome === "rerun-publishing-crash") await store.beginCiPublication(id, "interrupted");
         await store.pool.query(
@@ -325,7 +325,7 @@ for (const outcome of [
         rerunning = false;
         await store.requestCiReview();
         await runCiRepairOnce(store, adapters, "recovered");
-        assert.equal(attempts, 1, "saved work never launches another session");
+        assert.equal(runs, 1, "saved work never launches another session");
         assert.equal(
           pushes,
           outcome === "rerun-crash" ? 1 : 0,
@@ -334,7 +334,7 @@ for (const outcome of [
         return;
       }
       if (outcome === "rerun-cancelled") await store.control(project.id, "demo-user", "cancel");
-      else if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
+      else if (outcome === "rerun-closed") await store.reconcile(run.id, "closed");
       else {
         if (outcome === "rerun-passed")
           adapters.ciStatus = async () => ({
@@ -376,14 +376,14 @@ for (const outcome of [
       rerunning = false;
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "after-restart");
-      assert.equal(attempts, 1, "resume saved verified artifact without another paid session");
+      assert.equal(runs, 1, "resume saved verified artifact without another paid session");
       assert.equal(pushes, 1);
     }
     if (outcome === "late-stale") {
       head = "b".repeat(40);
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "new-head");
-      assert.equal(attempts, 1, "external changes pause further repairs");
+      assert.equal(runs, 1, "external changes pause further repairs");
       assert.equal((await store.getProject(project.id))?.state, "paused");
     }
 
@@ -393,7 +393,7 @@ for (const outcome of [
         await store.requestCiReview();
         await runCiRepairOnce(store, adapters, "next");
       }
-      assert.equal(attempts, 3, "repair budget is per PR");
+      assert.equal(runs, 3, "repair budget is per PR");
       assert.equal(pushes, 3);
       let ready = false;
       adapters.ciStatus = async () => ({ state: "passed", draft: true, head, pullRequest: pr });
@@ -416,15 +416,15 @@ for (const outcome of [
       });
       await runCiRepairOnce(store, adapters, "ready");
       assert.equal(
-        (await store.pool.query("SELECT readiness_pending FROM jobs WHERE id=$1", [job.id])).rows[0]
-          .readiness_pending,
+        (await store.pool.query("SELECT readiness_pending FROM project_runs WHERE id=$1", [run.id]))
+          .rows[0].readiness_pending,
         true,
       );
 
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "ready-again");
       assert.equal(ready, true);
-      assert.equal(attempts, 3, "marking ready does not launch another session");
+      assert.equal(runs, 3, "marking ready does not launch another session");
       assert.equal(
         (
           await store.pool.query(
@@ -443,9 +443,9 @@ for (const outcome of [
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "already-ready");
       assert.equal(redundantWrites, 0);
-      assert.equal(await store.ciReviewActive(job.id), true);
+      assert.equal(await store.ciReviewActive(run.id), true);
       await store.control(project.id, "demo-user", "pause");
-      assert.equal(await store.ciReviewActive(job.id), false);
+      assert.equal(await store.ciReviewActive(run.id), false);
     }
     const events = await store.pool.query<{ type: string }>(
       "SELECT type FROM project_events WHERE project_id=$1",

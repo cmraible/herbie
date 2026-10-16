@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Store } from "./store.js";
 import type { Auth } from "./auth.js";
 import { logFailure } from "./diagnostic-log.js";
+import { apiEvents, apiProject } from "./api-compat.js";
 
 // One LISTEN connection per API process, shared across browser connections.
 export function attachRealtime(
@@ -68,6 +69,7 @@ export function attachRealtime(
       const session = token ? await auth.session(token) : null;
       if (!session || !token) return reject(401);
       const selected = url.searchParams.get("project");
+      const version = url.searchParams.get("version") ?? undefined;
       if (selected && !z.string().uuid().safeParse(selected).success) return reject(400);
       if (selected && !(await store.getProject(selected, session.user.id))) return reject(404);
       await listen(); // Subscribe before reading snapshots so concurrent commits cannot be lost.
@@ -106,12 +108,15 @@ export function attachRealtime(
               }
               const projects = await store.listProjects(session!.user.id);
               owned = new Set(projects.map((project) => project.id));
-              send({ type: "projects", projects });
+              send({
+                type: "projects",
+                projects: projects.map((project) => apiProject(project, version)),
+              });
               if (selected && owned.has(selected)) {
                 // Drain all pages, including histories longer than the REST page limit.
                 while (socket.readyState === WebSocket.OPEN) {
                   const events = await store.events(selected, cursor);
-                  send({ type: "events", projectId: selected, events });
+                  send({ type: "events", projectId: selected, events: apiEvents(events, version) });
                   if (events.length) cursor = events[events.length - 1]!.id;
                   if (events.length < 1000) break;
                 }

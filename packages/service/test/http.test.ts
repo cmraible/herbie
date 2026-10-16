@@ -8,11 +8,23 @@ import { createApiServer } from "../src/http.js";
 import { projectSchema } from "@herbie/contracts";
 import { testAuth, testSessionToken } from "./test-auth.js";
 
-for (const version of [undefined, "2"])
+for (const version of [undefined, "2", "3"])
   test(`HTTP project contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
-    const responseSchema = version
-      ? projectSchema
-      : projectSchema.omit({ maxWip: true, pullRequests: true }).strict();
+    const responseSchema =
+      version === "3"
+        ? projectSchema
+        : version === "2"
+          ? projectSchema.omit({ runCount: true, runs: true }).extend({
+              attemptCount: projectSchema.shape.runCount,
+              attempts: projectSchema.shape.runs,
+            })
+          : projectSchema
+              .omit({ maxWip: true, pullRequests: true, runCount: true, runs: true })
+              .extend({
+                attemptCount: projectSchema.shape.runCount,
+                attempts: projectSchema.shape.runs,
+              })
+              .strict();
     const database = process.env.HERBIE_TEST_DATABASE_URL;
     if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
     const schema = `http_${randomUUID().replaceAll("-", "")}`;

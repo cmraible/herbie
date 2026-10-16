@@ -94,7 +94,7 @@ const project = {
   repository: "octocat/demo",
   name: "Regression coverage",
   prompt: "Add a regression test",
-  attemptCount: 0,
+  runCount: 0,
   state: "queued",
   createdAt: "2026-10-08T00:00:00Z",
   updatedAt: "2026-10-08T00:00:00Z",

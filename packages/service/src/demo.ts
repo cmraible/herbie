@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Adapters } from "./adapters.js";
-import { KnownAttemptFailure } from "./adapters.js";
+import { KnownRunFailure } from "./adapters.js";
 
 // This deterministic adapter never calls GitHub, Daytona, a model, or host Git.
 export function createDemoAdapters(): Adapters {
@@ -17,20 +17,20 @@ export function createDemoAdapters(): Adapters {
       if (repository !== "demo/example") throw new Error("Demo supports only demo/example");
       return { repository, defaultBranch: "main", installationId: 0 };
     },
-    async attempt(execution, report) {
-      await report("DEMO: deterministic attempt started; no sandbox or model was used.");
+    async run(execution, report) {
+      await report("DEMO: deterministic run started; no sandbox or model was used.");
       if (execution.project.prompt.includes("[demo:fail]"))
-        throw new KnownAttemptFailure(
-          "DEMO: requested simulated attempt failure; no publication occurred.",
+        throw new KnownRunFailure(
+          "DEMO: requested simulated run failure; no publication occurred.",
         );
       const patch = Buffer.from("DEMO artifact; never eligible for live publication.");
-      await report("DEMO: simulated attempt completed.");
+      await report("DEMO: simulated run completed.");
       return { baseCommit: "0".repeat(40), patch };
     },
     async publish(execution, _changes, requireLease) {
       await requireLease();
       const number = Number.parseInt(
-        createHash("sha256").update(execution.attemptId).digest("hex").slice(0, 7),
+        createHash("sha256").update(execution.runId).digest("hex").slice(0, 7),
         16,
       );
       return {

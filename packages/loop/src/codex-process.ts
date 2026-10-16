@@ -7,7 +7,7 @@ import { startCodexThread } from "./codex-thread.js";
 import { runCodexTurn } from "./codex-turn.js";
 
 type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number };
-type AttemptOptions = ProcessOptions & {
+type RunOptions = ProcessOptions & {
   cwd: string;
   project: string;
   model?: string;
@@ -28,10 +28,10 @@ export function initializeCodexProcess(
 }
 
 // One initialized thread and project, followed by owned-group cleanup on every outcome.
-export function runCodexAttempt(
+export function runCodexRun(
   command: string,
   args: readonly string[],
-  options: AttemptOptions,
+  options: RunOptions,
 ): Promise<void> {
   return runCodexProcess(command, args, { ...options, cwd: resolve(options.cwd) });
 }
@@ -40,7 +40,7 @@ export function runCodexAttempt(
 async function runCodexProcess(
   command: string,
   args: readonly string[],
-  options: ProcessOptions | AttemptOptions,
+  options: ProcessOptions | RunOptions,
 ): Promise<void> {
   const { signal, timeoutMs = 10_000, shutdownMs = 1_000 } = options;
   if (signal?.aborted) throw new Error("Codex process cancelled");

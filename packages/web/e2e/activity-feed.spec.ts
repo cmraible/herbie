@@ -12,7 +12,7 @@ test("activity feed shows clear run progress and hides internal system events", 
     state: "open",
   };
   const rawFailure =
-    "Attempt failed (runtime_preparation: command_failed; exit 28). Sandbox deletion confirmed. No automatic retry. Reference: db3a91ad-09c8-44ea-a2d8-f002570936cf";
+    "Run failed (runtime_preparation: command_failed; exit 28). Sandbox deletion confirmed. No automatic retry. Reference: db3a91ad-09c8-44ea-a2d8-f002570936cf";
   const project = {
     id: projectId,
     ownerId: "fixture",
@@ -21,14 +21,14 @@ test("activity feed shows clear run progress and hides internal system events", 
     prompt: "Improve the activity feed",
     mode: "live",
     state: "awaiting_review",
-    attemptCount: 1,
+    runCount: 1,
     createdAt: "2026-10-15T00:00:00Z",
     updatedAt: "2026-10-15T00:00:00Z",
     stopRequested: null,
     error: null,
     pullRequest,
     pullRequests: [pullRequest],
-    attempts: [
+    runs: [
       {
         id: runId,
         number: 1,
@@ -40,11 +40,11 @@ test("activity feed shows clear run progress and hides internal system events", 
   };
   const messages = [
     ["queued", "Run #1 queued"],
-    ["attempt_started", "Run #1 started"],
-    ["attempt", "Attempt stage: sandbox_creation"],
-    ["attempt", "Attempt stage: repository_clone"],
-    ["attempt", "Attempt stage: model_execution"],
-    ["attempt", "Project completed in sandbox abc123"],
+    ["run_started", "Run #1 started"],
+    ["run", "Run stage: sandbox_creation"],
+    ["run", "Run stage: repository_clone"],
+    ["run", "Run stage: model_execution"],
+    ["run", "Project completed in sandbox abc123"],
     ["failed", rawFailure],
     ["publication_phase", "Publication phase: state_persistence"],
     ["pull_request_opened", "Pull request #42 awaits review"],
@@ -55,7 +55,7 @@ test("activity feed shows clear run progress and hides internal system events", 
   ].map(([type, message], index) => ({
     id: index + 1,
     projectId,
-    attemptId: runId,
+    runId: runId,
     type,
     message,
     createdAt: "2026-10-15T00:00:00Z",
@@ -85,7 +85,7 @@ test("activity feed shows clear run progress and hides internal system events", 
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   const ready = page.getByRole("link", { name: "Pull request #42 is ready for review" });
   await expect(ready).toHaveAttribute("href", pullRequest.url);
-  await expect(page.getByText("Attempt stage: sandbox_creation")).toHaveCount(0);
+  await expect(page.getByText("Run stage: sandbox_creation")).toHaveCount(0);
   await expect(page.getByText("Publication phase: state_persistence")).toHaveCount(0);
   await expect(page.getByText(rawFailure)).toHaveCount(0);
   await page.getByText("Error reference").click();

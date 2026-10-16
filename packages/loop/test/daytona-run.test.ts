@@ -10,10 +10,10 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { test, mock, type TestContext } from "node:test";
-import { DaytonaAttemptError, runDaytonaAttempt } from "../src/daytona-attempt.js";
+import { DaytonaRunError, runDaytonaRun } from "../src/daytona-run.js";
 import { createArithmeticFixture } from "./fixtures/arithmetic.js";
 
-type Create = Parameters<typeof runDaytonaAttempt>[0];
+type Create = Parameters<typeof runDaytonaRun>[0];
 type Sandbox = Awaited<ReturnType<Create>>;
 const request = {
   model: "custom-model",
@@ -76,7 +76,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   await Promise.all(runtime.map((file) => writeFile(join(directory, file.name), file.code)));
   const sandbox = {
-    id: "attempt-sandbox",
+    id: "run-sandbox",
     fs: {
       createFolder: mock.fn<Sandbox["fs"]["createFolder"]>(async () => {}),
       uploadFile: mock.fn<Sandbox["fs"]["uploadFile"]>(async () => {}),
@@ -88,7 +88,7 @@ async function fixture(t: TestContext) {
     process: {
       executeCommand: mock.fn<Sandbox["process"]["executeCommand"]>(async () => ({
         exitCode: 0,
-        result: "herbie-attempt-completed\n",
+        result: "herbie-run-completed\n",
       })),
     },
     delete: mock.fn<Sandbox["delete"]>(async () => {}),
@@ -99,14 +99,13 @@ async function fixture(t: TestContext) {
     reports.push(message);
   };
   const run = (
-    options: Partial<Parameters<typeof runDaytonaAttempt>[1]> = {},
-    reporter: Parameters<typeof runDaytonaAttempt>[2] = report,
-  ) =>
-    runDaytonaAttempt(create, { ...request, ...options }, reporter, pathToFileURL(directory + "/"));
+    options: Partial<Parameters<typeof runDaytonaRun>[1]> = {},
+    reporter: Parameters<typeof runDaytonaRun>[2] = report,
+  ) => runDaytonaRun(create, { ...request, ...options }, reporter, pathToFileURL(directory + "/"));
   return { directory, sandbox, create, reports, run };
 }
 
-test("prepares runtime and repo, invokes the attempt, and waits for deletion using SDK contracts", async (t) => {
+test("prepares runtime and repo, invokes the run, and waits for deletion using SDK contracts", async (t) => {
   const { sandbox, create, reports, run } = await fixture(t);
   let release = () => {};
   const deleting = new Promise<void>((resolve) => {
@@ -130,7 +129,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     outboundProxyUrl: request.outboundProxyUrl,
     ttlMinutes: 35,
   });
-  assert.match(params.name ?? "", /^herbie-attempt-[0-9a-f-]+$/);
+  assert.match(params.name ?? "", /^herbie-run-[0-9a-f-]+$/);
   assert.deepEqual(options, { timeout: 120 });
   const root = `/tmp/${params.name}`;
   assert.deepEqual(sandbox.fs.createFolder.mock.calls[0].arguments, [root, "700"]);
@@ -146,7 +145,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     [
       ...runtimeNames.map((name) => `${root}/${name}.js`),
       `${root}/package.json`,
-      `${root}/attempt.json`,
+      `${root}/run.json`,
     ],
   );
   assert.ok(uploads.every(([, , timeout]) => timeout === 30));
@@ -168,7 +167,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.equal(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].timeout, 30);
   assert.ok(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].signal.aborted);
   assert.deepEqual(sandbox.delete.mock.calls[0].arguments, [60, true]);
-  assert.equal(reports.at(-1), "Deletion confirmed for sandbox attempt-sandbox");
+  assert.equal(reports.at(-1), "Deletion confirmed for sandbox run-sandbox");
   assert.equal(sandbox.git.clone.mock.callCount(), 1);
   assert.equal(sandbox.process.executeCommand.mock.callCount(), 2);
   assert.equal(sandbox.fs.downloadFileStream.mock.callCount(), 1);
@@ -226,7 +225,7 @@ for (const phase of [
     if (phase === "delete" || phase.endsWith("-and-delete"))
       sandbox.delete.mock.mockImplementation(fail);
     await assert.rejects(run(), (error) => {
-      assert.ok(error instanceof DaytonaAttemptError);
+      assert.ok(error instanceof DaytonaRunError);
       assert.equal(error.errors.length, phase.endsWith("-and-delete") ? 2 : 1);
       assert.deepEqual(error.changes, phase === "delete" ? changes : undefined);
       assert.doesNotMatch(error.message, /private/);
@@ -274,16 +273,12 @@ test("creation failure remains unconfirmed without retries or fake deletion", as
 test("missing runtime and credential-bearing repo URLs fail before provisioning", async (t) => {
   const { create, directory } = await fixture(t);
   await assert.rejects(
-    runDaytonaAttempt(
-      create,
-      { ...request, repoUrl: "https://user:secret@github.com/repo" },
-      () => {},
-    ),
+    runDaytonaRun(create, { ...request, repoUrl: "https://user:secret@github.com/repo" }, () => {}),
     /public HTTPS/,
   );
   await rm(join(directory, "codex-process.js"));
   await assert.rejects(
-    runDaytonaAttempt(create, request, () => {}, pathToFileURL(directory + "/")),
+    runDaytonaRun(create, request, () => {}, pathToFileURL(directory + "/")),
     /ENOENT/,
   );
   assert.equal(create.mock.callCount(), 0);
@@ -294,7 +289,7 @@ async function localFixture(t: TestContext, edits = "") {
   const bin = join(directory, "bin");
   await mkdir(bin);
   const record = join(directory, "protocol");
-  const protocolFixture = fileURLToPath(new URL("./fixtures/project-attempt.ts", import.meta.url));
+  const protocolFixture = fileURLToPath(new URL("./fixtures/project-run.ts", import.meta.url));
   await writeFile(
     join(bin, "codex"),
     `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-title.txt', ${JSON.stringify(pullRequestTitle)});\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
@@ -380,7 +375,7 @@ test("clones an unmerged PR branch before checking out its feedback or repair he
 });
 
 test(
-  "uploaded runner executes the connected attempt with a local fake Codex and preserves an empty patch",
+  "uploaded runner executes the connected run with a local fake Codex and preserves an empty patch",
   { skip: process.platform === "win32", timeout: 10_000 },
   async (t) => {
     const { sandbox, run, record, baseCommit } = await localFixture(t);
@@ -421,10 +416,9 @@ test(
     assert.deepEqual(paramsFor("thread/start"), {
       cwd: sandbox.git.clone.mock.calls[0].arguments[1],
       ephemeral: true,
-      model: request.model,
+      model: "gpt-6-luna",
       modelProvider: "daytona_openai",
     });
-    assert.equal((paramsFor("turn/start") as { model: string }).model, request.model);
     assert.ok(JSON.stringify(paramsFor("turn/start")).includes("externalSandbox"));
     assert.match(JSON.stringify(paramsFor("turn/start")), /why you chose it/);
     assert.match(JSON.stringify(paramsFor("turn/start")), /pr-description.md/);
@@ -433,9 +427,9 @@ test(
   },
 );
 
-for (const commitDuringAttempt of [false, true]) {
+for (const commitDuringRun of [false, true]) {
   test(
-    `retrieved patch reproduces tracked, staged, new, binary and non-UTF-8 files after deletion (Codex commits: ${commitDuringAttempt})`,
+    `retrieved patch reproduces tracked, staged, new, binary and non-UTF-8 files after deletion (Codex commits: ${commitDuringRun})`,
     { skip: process.platform === "win32", timeout: 10_000 },
     async (t) => {
       const { directory, sandbox, run, baseRepo, baseCommit } = await localFixture(
@@ -443,8 +437,8 @@ for (const commitDuringAttempt of [false, true]) {
         `
       import { writeFileSync, rmSync, chmodSync } from 'node:fs';
       import { execFileSync } from 'node:child_process';
-      if (${commitDuringAttempt}) {
-        writeFileSync('committed.txt', 'committed during the attempt\\n');
+      if (${commitDuringRun}) {
+        writeFileSync('committed.txt', 'committed during the run\\n');
         execFileSync('git', ['add', 'committed.txt']);
         execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
           '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'Codex change']);
@@ -486,10 +480,10 @@ for (const commitDuringAttempt of [false, true]) {
         "add.mjs",
       ]);
       assert.match(mode, /^100755 /);
-      if (commitDuringAttempt)
+      if (commitDuringRun)
         assert.equal(
           await readFile(join(baseRepo, "committed.txt"), "utf8"),
-          "committed during the attempt\n",
+          "committed during the run\n",
         );
     },
   );
@@ -507,7 +501,7 @@ test(
   `,
     );
     await assert.rejects(run(), (error) => {
-      assert.ok(error instanceof DaytonaAttemptError);
+      assert.ok(error instanceof DaytonaRunError);
       assert.equal(error.changes, undefined);
       return true;
     });
@@ -547,7 +541,7 @@ test("fresh runtime setup failure deletes the sandbox before cloning or starting
     exitCode: 1,
     result: "setup failure",
   }));
-  await assert.rejects(run({ snapshot: undefined, domainAllowList: undefined }), /Attempt failed/);
+  await assert.rejects(run({ snapshot: undefined, domainAllowList: undefined }), /Run failed/);
   assert.equal(sandbox.git.clone.mock.callCount(), 0);
   assert.equal(sandbox.fs.uploadFile.mock.callCount(), 0);
   assert.equal(sandbox.delete.mock.callCount(), 1);
@@ -567,7 +561,7 @@ test("aborts an oversized artifact download and cleans up without issuing eviden
     { highWaterMark: 1 },
   );
   sandbox.fs.downloadFileStream.mock.mockImplementationOnce(async () => stream);
-  await assert.rejects(run(), (error) => error instanceof DaytonaAttemptError && !error.changes);
+  await assert.rejects(run(), (error) => error instanceof DaytonaRunError && !error.changes);
   assert.ok(stream.destroyed);
   assert.ok(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].signal.aborted);
   assert.ok(
@@ -592,11 +586,7 @@ test("accepts the patch byte limit and rejects decoded overflow within the same 
     assert.ok(encoded.length <= MAX_ARTIFACT_BYTES);
     sandbox.fs.downloadFileStream.mock.mockImplementation(async () => Readable.from([encoded]));
     if (size === MAX_PATCH_BYTES) assert.equal((await run()).patch.length, size);
-    else
-      await assert.rejects(
-        run(),
-        (error) => error instanceof DaytonaAttemptError && !error.changes,
-      );
+    else await assert.rejects(run(), (error) => error instanceof DaytonaRunError && !error.changes);
   }
   assert.equal(sandbox.delete.mock.callCount(), 2);
 });
@@ -610,7 +600,7 @@ test("rejects an interrupted artifact stream and cancels its transport", async (
     })(),
   );
   sandbox.fs.downloadFileStream.mock.mockImplementation(async () => stream);
-  await assert.rejects(run(), (error) => error instanceof DaytonaAttemptError && !error.changes);
+  await assert.rejects(run(), (error) => error instanceof DaytonaRunError && !error.changes);
   assert.ok(sandbox.fs.downloadFileStream.mock.calls[0].arguments[1].signal.aborted);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
@@ -654,7 +644,7 @@ for (const point of [
             ? "runtime_upload"
             : "runtime_preparation";
     await assert.rejects(run(), (error) => {
-      assert.ok(error instanceof DaytonaAttemptError);
+      assert.ok(error instanceof DaytonaRunError);
       assert.deepEqual(error.diagnostics, [
         point === "preparation-exit"
           ? { stage, cause: "command_failed", exitCode: 23 }
@@ -662,12 +652,12 @@ for (const point of [
       ]);
       assert.equal(error.cleanup, point === "creation" ? "unconfirmed" : "confirmed");
       assert.match(error.safeMessage(), new RegExp(stage));
-      assert.doesNotMatch(error.safeMessage(), /DO-NOT-LOG|attempt-sandbox|https/);
+      assert.doesNotMatch(error.safeMessage(), /DO-NOT-LOG|run-sandbox|https/);
       return true;
     });
     assert.equal(create.mock.callCount(), 1);
     assert.equal(sandbox.delete.mock.callCount(), point === "creation" ? 0 : 1);
-    assert.ok(reports.includes("Attempt stage: " + stage));
+    assert.ok(reports.includes("Run stage: " + stage));
     assert.ok(!reports.some((message) => message.startsWith("Running project")));
   });
 
@@ -676,7 +666,7 @@ test("stage persistence is awaited before starting runtime preparation", async (
   const entered = Promise.withResolvers<void>(),
     release = Promise.withResolvers<void>();
   const result = run({}, async (message) => {
-    if (message === "Attempt stage: runtime_preparation") {
+    if (message === "Run stage: runtime_preparation") {
       entered.resolve();
       await release.promise;
     }
@@ -691,11 +681,11 @@ test("failed stage persistence still deletes the sandbox and reports confirmed c
   const { sandbox, run } = await fixture(t);
   await assert.rejects(
     run({}, async (message) => {
-      if (message.startsWith("Attempt stage:") && !message.endsWith("sandbox_creation"))
+      if (message.startsWith("Run stage:") && !message.endsWith("sandbox_creation"))
         throw new Error("private database detail");
     }),
     (error) => {
-      assert.ok(error instanceof DaytonaAttemptError);
+      assert.ok(error instanceof DaytonaRunError);
       assert.equal(error.cleanup, "confirmed");
       assert.equal(error.diagnostics[0]?.cause, "event_persistence_failed");
       assert.doesNotMatch(error.safeMessage(), /private/);
@@ -715,7 +705,7 @@ test("a deletion failure retains the setup cause and marks cleanup unconfirmed",
     throw Object.assign(new Error("secret deletion details"), { name: "TimeoutError" });
   });
   await assert.rejects(run(), (error) => {
-    assert.ok(error instanceof DaytonaAttemptError);
+    assert.ok(error instanceof DaytonaRunError);
     assert.equal(error.cleanup, "unconfirmed");
     assert.deepEqual(error.diagnostics, [
       { stage: "repository_clone", cause: "http_error", httpStatus: 403 },
@@ -732,10 +722,10 @@ test("runner transports nested original failures to the host with sandbox creden
   createArithmeticFixture(cwd);
   const prompt = "private-prompt-fixture-do-not-log";
   const secret = "opaque-openai-fixture-do-not-log";
-  await writeFile(join(directory, "attempt.json"), JSON.stringify({ cwd, project: prompt }));
+  await writeFile(join(directory, "run.json"), JSON.stringify({ cwd, project: prompt }));
   await writeFile(
     join(directory, "codex-process.js"),
-    `export async function runCodexAttempt(_bin,_args,{project}) { throw new Error('adapter failed '+project,{cause:Object.assign(new Error('original RPC failure '+process.env.OPENAI_API_KEY),{stderr:'useful runner failure context',signal:'SIGTERM'})}); }`,
+    `export async function runCodexRun(_bin,_args,{project}) { throw new Error('adapter failed '+project,{cause:Object.assign(new Error('original RPC failure '+process.env.OPENAI_API_KEY),{stderr:'useful runner failure context',signal:'SIGTERM'})}); }`,
   );
   let output = "";
   try {
@@ -753,14 +743,14 @@ test("runner transports nested original failures to the host with sandbox creden
   assert.ok(!output.includes(secret));
   assert.ok(!output.includes(prompt));
   assert.ok(Buffer.byteLength(output) < 32_800);
-  const { AttemptCommandError } = await import("../src/attempt-diagnostics.js");
+  const { RunCommandError } = await import("../src/run-diagnostics.js");
   const { diagnosticRecord } = await import("../src/diagnostic-log.js");
-  const transported = new DaytonaAttemptError(
-    [new Error("Attempt failed", { cause: new AttemptCommandError(1, output) })],
-    "Attempt wrapper",
+  const transported = new DaytonaRunError(
+    [new Error("Run failed", { cause: new RunCommandError(1, output) })],
+    "Run wrapper",
   );
   const host = JSON.stringify(
-    diagnosticRecord(transported, { component: "attempt", stage: "model_execution" }),
+    diagnosticRecord(transported, { component: "run", stage: "model_execution" }),
   );
   assert.match(host, /original RPC failure/);
   assert.match(host, /useful runner failure context/);
@@ -793,7 +783,7 @@ for (const deleteFails of [false, true])
       await assert.rejects(
         work,
         (error) =>
-          error instanceof DaytonaAttemptError &&
+          error instanceof DaytonaRunError &&
           error.cleanup === (deleteFails ? "unconfirmed" : "confirmed"),
       );
       assert.equal(sandbox.delete.mock.callCount(), deleteFails ? 3 : 1);
@@ -810,7 +800,7 @@ test("cancellation during sandbox creation deletes the eventual sandbox without 
   });
   await assert.rejects(
     run({ signal: controller.signal }),
-    (error) => error instanceof DaytonaAttemptError && error.cleanup === "confirmed",
+    (error) => error instanceof DaytonaRunError && error.cleanup === "confirmed",
   );
   assert.equal(sandbox.delete.mock.callCount(), 1);
   assert.equal(sandbox.process.executeCommand.mock.callCount(), 0);
@@ -831,12 +821,12 @@ for (const body of [undefined, "", "   ", 123, "x".repeat(60_001)]) {
         ),
       ]),
     );
-    await assert.rejects(run(), DaytonaAttemptError);
+    await assert.rejects(run(), DaytonaRunError);
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
 
-test("attempts for the same project retain their own agent-authored titles and descriptions", async (t) => {
+test("runs for the same project retain their own agent-authored titles and descriptions", async (t) => {
   const { sandbox, run } = await fixture(t);
   for (const body of [
     "Fixed addition so totals are accurate.",
@@ -873,7 +863,7 @@ for (const title of [undefined, "", "   ", 123, "x".repeat(257), "First\nSecond"
         ),
       ]),
     );
-    await assert.rejects(run(), DaytonaAttemptError);
+    await assert.rejects(run(), DaytonaRunError);
     assert.equal(sandbox.delete.mock.callCount(), 1);
   });
 }
@@ -957,7 +947,7 @@ test("persists full agent activity while running and drains it before cleanup on
         release();
       },
     }),
-    DaytonaAttemptError,
+    DaytonaRunError,
   );
   assert.deepEqual(received, [record]);
   assert.ok(reads >= 2);

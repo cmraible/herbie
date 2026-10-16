@@ -2,24 +2,24 @@ import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure } from "./diagnostic-log.js";
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { DaytonaRunError } from "@herbie/loop/daytona-run";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  KnownAttemptFailure,
+  KnownRunFailure,
   PublicationBlockedError,
   type Adapters,
   type Execution,
 } from "./adapters.js";
-import type { Job } from "./store.js";
+import type { Run } from "./store.js";
 import { Store, StoreError } from "./store.js";
 import { publicationDiagnostic, publicationDiagnosticMessage } from "./publication-diagnostics.js";
 import type { PublicationPhase } from "./adapters.js";
 
-async function executionFor(adapters: Adapters, job: Job, readOnly: boolean): Promise<Execution> {
+async function executionFor(adapters: Adapters, run: Run, readOnly: boolean): Promise<Execution> {
   const repository = readOnly
-    ? await adapters.reconciliationRepository(job.project.repository)
-    : await adapters.authorize(job.project.ownerId, job.project.repository);
-  return { project: job.project, repository, attemptId: job.attemptId, branch: job.branch };
+    ? await adapters.reconciliationRepository(run.project.repository)
+    : await adapters.authorize(run.project.ownerId, run.project.repository);
+  return { project: run.project, repository, runId: run.runId, branch: run.branch };
 }
 
 // One claim per tick. Saved publication retries require lease and remote-state checks.
@@ -31,8 +31,8 @@ export async function runWorkerOnce(
 ): Promise<boolean> {
   const { leaseMs, heartbeatMs } = timing;
   await store.recoverExpired();
-  const job = await store.claim(workerId, leaseMs, adapters.mode);
-  if (!job) return false;
+  const run = await store.claim(workerId, leaseMs, adapters.mode);
+  if (!run) return false;
   let leaseLost = false;
   const controller = new AbortController();
   const loseLease = () => {
@@ -44,7 +44,7 @@ export async function runWorkerOnce(
     if (renewing) return;
     renewing = true;
     void store
-      .heartbeat(job.id, workerId, leaseMs)
+      .heartbeat(run.id, workerId, leaseMs)
       .then((owned) => {
         if (!owned) loseLease();
       })
@@ -52,8 +52,8 @@ export async function runWorkerOnce(
         loseLease();
         logFailure(error, {
           component: "worker-heartbeat",
-          projectId: job.project.id,
-          jobId: job.id,
+          projectId: run.project.id,
+          runId: run.id,
         });
       })
       .finally(() => {
@@ -62,31 +62,31 @@ export async function runWorkerOnce(
   }, heartbeatMs);
   const requireLease = async (): Promise<void> => {
     if (leaseLost) throw new StoreError(409, "Worker lease lost");
-    const owned = await store.heartbeat(job.id, workerId, leaseMs);
+    const owned = await store.heartbeat(run.id, workerId, leaseMs);
     if (!owned || leaseLost) {
       loseLease();
       throw new StoreError(409, "Worker lease lost");
     }
   };
-  const recoveringPublication = job.stage === "publishing";
+  const recoveringPublication = run.stage === "publishing";
   let publishing = recoveringPublication;
   let publicationPhase: PublicationPhase = "preflight_reconciliation";
   const reportPublicationPhase = async (phase: PublicationPhase): Promise<void> => {
     publicationPhase = phase;
-    if (!recoveringPublication) await store.recordPublicationPhase(job.id, workerId, phase);
+    if (!recoveringPublication) await store.recordPublicationPhase(run.id, workerId, phase);
   };
-  let changes = job.artifact;
+  let changes = run.artifact;
   let published: { url: string; number: number; branch: string } | undefined;
   try {
     await requireLease();
     // A recovered ready artifact must enter publication before authorization can fail;
-    // otherwise an auth outage would strand saved work as an attempt failure.
+    // otherwise an auth outage would strand saved work as a run failure.
     if (changes && !publishing) {
-      if (!(await store.beginPublication(job.id, workerId))) return true;
+      if (!(await store.beginPublication(run.id, workerId))) return true;
       publishing = true;
     }
     const execution = {
-      ...(await executionFor(adapters, job, publishing)),
+      ...(await executionFor(adapters, run, publishing)),
       signal: controller.signal,
     };
     await requireLease();
@@ -95,9 +95,9 @@ export async function runWorkerOnce(
       await reportPublicationPhase("preflight_reconciliation");
       const existing = await adapters.reconcile(execution);
       if (!existing) {
-        if (!changes || !hasValidPublicationEvidence(job.project.repository, changes)) {
+        if (!changes || !hasValidPublicationEvidence(run.project.repository, changes)) {
           await store.blockPublication(
-            job.id,
+            run.id,
             workerId,
             "saved artifact lacks matching test and cleanup evidence",
           );
@@ -105,7 +105,7 @@ export async function runWorkerOnce(
         }
         if (!adapters.checkPublicationRetry) {
           await store.publicationUncertain(
-            job.id,
+            run.id,
             workerId,
             publicationDiagnosticMessage({
               phase: "preflight_reconciliation",
@@ -118,17 +118,17 @@ export async function runWorkerOnce(
         await requireLease();
         if (check === "branch_exists" || check === "base_changed") {
           await store.blockPublication(
-            job.id,
+            run.id,
             workerId,
             check === "branch_exists"
-              ? "the attempt branch exists without a confirmed pull request; it will not be overwritten"
+              ? "the run branch exists without a confirmed pull request; it will not be overwritten"
               : "repository history no longer contains the original base",
           );
           return true;
         }
         if (check === "pull_request_exists") {
           await store.publicationUncertain(
-            job.id,
+            run.id,
             workerId,
             "A pull request appeared during the safety check; reconciliation will confirm it.",
           );
@@ -142,11 +142,11 @@ export async function runWorkerOnce(
         );
         await requireLease();
         await reportPublicationPhase("state_persistence");
-        await store.completePublication(job.id, workerId, published);
+        await store.completePublication(run.id, workerId, published);
       } else {
         published = existing;
         await reportPublicationPhase("state_persistence");
-        await store.completePublication(job.id, workerId, existing);
+        await store.completePublication(run.id, workerId, existing);
       }
       return true;
     }
@@ -154,22 +154,22 @@ export async function runWorkerOnce(
     if (!changes) {
       // Authorization can outlive the lease; fence the paid operation after that read.
       await requireLease();
-      changes = await adapters.attempt(
+      changes = await adapters.run(
         {
           ...execution,
-          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
+          onActivity: (message) => store.appendEvent(run.project.id, "agent", message, run.id),
         },
         async (message) => {
-          await store.appendEvent(job.project.id, "attempt", message.slice(0, 2000), job.id);
+          await store.appendEvent(run.project.id, "run", message.slice(0, 2000), run.id);
         },
       );
       await requireLease();
-      await store.saveArtifact(job.id, workerId, changes);
+      await store.saveArtifact(run.id, workerId, changes);
     }
     if (leaseLost) throw new Error("Worker lease lost");
-    if (!publishing && !(await store.beginPublication(job.id, workerId))) {
+    if (!publishing && !(await store.beginPublication(run.id, workerId))) {
       await store.finishCancelled(
-        job.id,
+        run.id,
         workerId,
         changes?.verification?.sandboxDeleted ? "complete" : "needs_attention",
         changes ?? undefined,
@@ -187,39 +187,39 @@ export async function runWorkerOnce(
       (await adapters.publish(execution, changes, requireLease, reportPublicationPhase));
     published = result;
     if (!existing) await reportPublicationPhase("state_persistence");
-    await store.completePublication(job.id, workerId, result);
+    await store.completePublication(run.id, workerId, result);
   } catch (error) {
-    const cancelled = await store.getProject(job.project.id);
+    const cancelled = await store.getProject(run.project.id);
     if (cancelled?.state === "cancelled") {
       controller.abort();
       await store.finishCancelled(
-        job.id,
+        run.id,
         workerId,
         !publishing &&
-          (error instanceof DaytonaAttemptError
+          (error instanceof DaytonaRunError
             ? error.cleanup === "confirmed"
             : changes?.verification?.sandboxDeleted === true)
           ? "complete"
           : "needs_attention",
-        changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
+        changes ?? (error instanceof DaytonaRunError ? error.changes : undefined),
         published,
       );
       return true;
     }
     const errorId = logFailure(error, {
-      component: publishing ? "publication" : "attempt",
-      projectId: job.project.id,
-      jobId: job.id,
+      component: publishing ? "publication" : "run",
+      projectId: run.project.id,
+      runId: run.id,
       stage: publishing
         ? publicationPhase
-        : error instanceof DaytonaAttemptError
+        : error instanceof DaytonaRunError
           ? error.diagnostics[0]?.stage
           : undefined,
     });
     // Keep detailed redacted causes in runtime logs and only a safe reference in UI.
     try {
       if (publishing && error instanceof PublicationBlockedError) {
-        await store.blockPublication(job.id, workerId, error.message);
+        await store.blockPublication(run.id, workerId, error.message);
       } else if (publishing) {
         const diagnostic = publicationDiagnostic(error, publicationPhase);
         const reason = publicationDiagnosticMessage(diagnostic);
@@ -227,25 +227,25 @@ export async function runWorkerOnce(
           diagnostic.cause === "workflow_permission_missing" ||
           diagnostic.cause === "installation_permissions_missing"
         )
-          await store.blockPublication(job.id, workerId, reason, errorId);
-        else await store.publicationUncertain(job.id, workerId, reason, errorId);
+          await store.blockPublication(run.id, workerId, reason, errorId);
+        else await store.publicationUncertain(run.id, workerId, reason, errorId);
       } else
         await store.fail(
-          job.id,
+          run.id,
           workerId,
-          error instanceof KnownAttemptFailure
+          error instanceof KnownRunFailure
             ? error.message
-            : error instanceof DaytonaAttemptError
+            : error instanceof DaytonaRunError
               ? `Run failed. ${error.changes ? "Your patches are saved." : "No patches were saved."} Reference: ${errorId}`
               : `Run failed. No patches were saved. Reference: ${errorId}`,
-          !(error instanceof KnownAttemptFailure),
-          changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
+          !(error instanceof KnownRunFailure),
+          changes ?? (error instanceof DaytonaRunError ? error.changes : undefined),
         );
     } catch (saveError) {
       logFailure(saveError, {
         component: "failure-persistence",
-        projectId: job.project.id,
-        jobId: job.id,
+        projectId: run.project.id,
+        runId: run.id,
       });
       // A stale worker must not overwrite the new owner's recovery decision.
       if (!(saveError instanceof StoreError && saveError.status === 409)) throw saveError;
@@ -259,41 +259,41 @@ export async function runWorkerOnce(
 export async function reconcileReviews(store: Store, adapters: Adapters): Promise<void> {
   // Recovery of a past write must not depend on current CI, project state, or PR state.
   if (adapters.readinessState)
-    for (const job of await store.reviewJobs(adapters.mode, true)) {
+    for (const run of await store.reviewRuns(adapters.mode, true)) {
       try {
-        const state = await adapters.readinessState(await executionFor(adapters, job, true));
+        const state = await adapters.readinessState(await executionFor(adapters, run, true));
         if (
           state === "closed" ||
-          (state === "draft" && ["cancelled", "completed", "failed"].includes(job.project.state))
+          (state === "draft" && ["cancelled", "completed", "failed"].includes(run.project.state))
         )
-          await store.cancelReadiness(job.id);
+          await store.cancelReadiness(run.id);
         if (state === "ready") {
-          const pr = job.project.pullRequests.find((pr) => pr.branch === job.branch);
+          const pr = run.project.pullRequests.find((pr) => pr.branch === run.branch);
           if (pr) {
-            await adapters.requestReview?.(await executionFor(adapters, job, true));
-            await store.confirmReadiness(job.id, pr.url);
+            await adapters.requestReview?.(await executionFor(adapters, run, true));
+            await store.confirmReadiness(run.id, pr.url);
           }
         }
       } catch (error) {
         logFailure(error, {
           component: "readiness-reconciliation",
-          projectId: job.project.id,
-          jobId: job.id,
+          projectId: run.project.id,
+          runId: run.id,
         });
       }
     }
-  for (const job of await store.reviewJobs(adapters.mode)) {
+  for (const run of await store.reviewRuns(adapters.mode)) {
     try {
-      const current = await adapters.reconcile(await executionFor(adapters, job, true));
+      const current = await adapters.reconcile(await executionFor(adapters, run, true));
       if (current?.state === "open" && current.headSha)
-        await store.reconcilePullRequestHead(job.id, current);
+        await store.reconcilePullRequestHead(run.id, current);
       else if (current && current.state !== "open")
-        await store.reconcile(job.id, current.state, current);
+        await store.reconcile(run.id, current.state, current);
     } catch (error) {
       logFailure(error, {
         component: "review-reconciliation",
-        projectId: job.project.id,
-        jobId: job.id,
+        projectId: run.project.id,
+        runId: run.id,
       });
       // Transient GitHub failures do not change the durable review state. Poll again later.
     }

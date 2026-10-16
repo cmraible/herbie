@@ -2,7 +2,7 @@
 
 Herbie runs ongoing coding projects through a durable service. The React web UI and
 CLI use the same authenticated API; a separate worker continues after either client
-exits. Postgres owns projects, attempts, jobs, captured artifacts, PRs and events.
+exits. Postgres owns projects, runs, captured artifacts, PRs and events.
 
 ## Service, web UI and CLI
 
@@ -53,13 +53,13 @@ pnpm cli cancel PROJECT_ID
 ```
 
 `maxWip` defaults to 1 and limits each project's outstanding work: open PRs plus
-any queued or running attempt. Attempts run sequentially, filling available
+any queued or running run. Runs proceed sequentially, filling available
 capacity without waiting for merges. Each merge frees capacity for the next
-attempt. For example, `--max-wip 2` keeps up to two PRs outstanding until the
+run. For example, `--max-wip 2` keeps up to two PRs outstanding until the
 project is paused, cancelled, or stopped by a failure or an unmerged close.
 The project view lists every published PR. Use **Edit project** to update its name,
 prompt, and maximum work in progress together. Prompt changes apply to future
-attempts; lowering the limit keeps existing work and delays new attempts until
+runs; lowering the limit keeps existing work and delays new runs until
 capacity is available. The repository stays fixed for the life of the project.
 
 CLI responses are JSON. Login stores only a Herbie bearer session in a private
@@ -77,7 +77,7 @@ Environment configuration is validated together by the Zod schema in
 variables that need fixing without displaying their values. Live mode requires
 `OPENAI_API_KEY`, including when execution is disabled. Automatic naming must succeed
 before a project is queued; provider errors and invalid responses fail the request
-without saving a project or job. Live execution requires `DAYTONA_API_KEY` and
+without saving a project or run. Live execution requires `DAYTONA_API_KEY` and
 `HERBIE_DAYTONA_OPENAI_SECRET` when enabled.
 
 The Compose container exits on invalid configuration. Check `docker compose logs
@@ -92,7 +92,7 @@ environment approval and disabled execution until separately approved.
 
 The workspace retains the original foreground experiments:
 
-- **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement attempt for a local repository and project.
+- **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement run for a local repository and project.
 - **`@herbie/demo`** (`packages/demo`): the local ChatGPT sign-in and streaming demo. See its [README](packages/demo/README.md).
 
 ### Foreground experiment setup
@@ -130,13 +130,13 @@ CI checks lint and formatting. `pnpm install` installs a pre-commit hook that fo
 staged files with Oxfmt, preserving unstaged changes through lint-staged.
 
 The internal app-server helpers are not wired into the CLI. After building, one
-complete attempt can be called with:
+complete run can be called with:
 
 ```js
-import { runCodexAttempt } from "./packages/loop/dist/codex-process.js";
+import { runCodexRun } from "./packages/loop/dist/codex-process.js";
 
 const controller = new AbortController();
-await runCodexAttempt("codex", ["app-server"], {
+await runCodexRun("codex", ["app-server"], {
   cwd: "/path/to/checkout",
   project: "Fix the failing addition test",
   signal: controller.signal, // optional AbortController owned by the caller
@@ -172,7 +172,7 @@ or change groups, remote work, and termination of Herbie itself are not. Unreape
 zombies can keep group cleanup unconfirmed. Windows is rejected before spawning.
 The eventual disposable Daytona sandbox needs confirmed deletion as the stronger
 boundary for escaped descendants. `initializeCodexProcess` remains an initialization
-probe; `runCodexAttempt` adds the thread and project using the same process owner.
+probe; `runCodexRun` adds the thread and project using the same process owner.
 
 ### Opt-in real Codex smoke test
 
@@ -241,16 +241,16 @@ Capture console output if you need a record. This command is excluded from defau
 tests and CI, but typechecked. `pnpm test` runs its mocked lifecycle and error-output tests without
 credentials, provisioning, or charges.
 
-### Callable Daytona project attempt (not run by default tests)
+### Callable Daytona project run (not run by default tests)
 
-After `pnpm build`, `runDaytonaAttempt` in
-`packages/loop/dist/daytona-attempt.js` connects the repo and project flow to Daytona:
+After `pnpm build`, `runDaytonaRun` in
+`packages/loop/dist/daytona-run.js` connects the repo and project flow to Daytona:
 
 ```js
-import { runDaytonaAttempt } from "./packages/loop/dist/daytona-attempt.js";
+import { runDaytonaRun } from "./packages/loop/dist/daytona-run.js";
 
 // daytona is an already configured SDK client with requestTimeoutMs: 30_000.
-const changes = await runDaytonaAttempt(
+const changes = await runDaytonaRun(
   (params, options) => daytona.create(params, options),
   {
     // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
@@ -299,10 +299,10 @@ environment variables; it does not inherit arbitrary Codex authentication overri
 
 Only the disposable Daytona runner requests `externalSandbox` with restricted network
 access and no interactive approvals; Daytona supplies the isolation boundary. Normal
-host attempts retain server-owned sandbox and approval settings. The fixed model is
-the project’s configured model (default `gpt-6-luna`), low effort, default service tier, with web search disabled and a 32K
-configured context window. Token-usage notifications do not trigger spending-based
-cancellation. Herbie does not impose a dollar spending cap. Attempt counts and the
+host runs retain server-owned sandbox and approval settings. Each project selects
+its model (default `gpt-6-luna`), with low effort, default service tier, web search
+disabled and a 32K configured context window. Token-usage notifications do not trigger spending-based
+cancellation. Herbie does not impose a dollar spending cap. Run counts and the
 20-minute turn deadline still bound execution. Cancellation waits at most five
 seconds for a matching terminal event, then the existing owned-process-group
 cleanup runs; unconfirmed termination remains a failure. There is no model
@@ -327,11 +327,11 @@ bytes. Streaming downloads stop at a bounded JSON envelope before parsing; the
 decoded patch must be at most 8 MiB. The artifact is downloaded into host memory
 before deletion. If deletion
 fails, the adapter still rejects and exposes the retrieved artifact on
-`DaytonaAttemptError.changes`. The caller owns durable storage of returned/recovered
+`DaytonaRunError.changes`. The caller owns durable storage of returned/recovered
 artifacts. Project, extraction, change-artifact download, or malformed-artifact failures
-reject and still attempt deletion; they do not provide a partial patch.
+reject and still run deletion; they do not provide a partial patch.
 
-For initial project attempts, the agent installs dependencies and runs tests in its
+For initial project runs, the agent installs dependencies and runs tests in its
 own checkout; there is no separate validation command. For CI repairs, the runner
 requires and executes the agent's verification script after the session exits.
 Only successful local verification and confirmed sandbox deletion allow a repair
@@ -347,9 +347,9 @@ is processed once. Feedback processing stops when the project is paused or cance
 See [service operations](docs/service.md) for subscriptions and failure recovery.
 After project completion and confirmed sandbox deletion, the host attaches
 `verification` evidence binding the repository URL, base commit and SHA-256 of
-the patch bytes to that attempt. Version 3 records completion and cleanup, not a
+the patch bytes to that run. Version 3 records completion and cleanup, not a
 test result. Saved version 2 evidence remains eligible for publication; artifacts
-without a supported version or from failed attempts do not.
+without a supported version or from failed runs do not.
 
 This preserves the final repository file state, not commit history or ignored files;
 submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
@@ -361,7 +361,7 @@ the adapter does not provision secrets or change account settings.
 
 ### Callable patch publisher
 
-After building, the host can publish a successfully completed attempt using
+After building, the host can publish a successfully completed run using
 `publishPatch`. It is not wired into the CLI. Git authentication and the GitHub
 API client must already be configured on the host; neither is sent to the Codex
 sandbox. The caller supplies a narrow `createPullRequest` adapter for that client:
@@ -369,7 +369,7 @@ sandbox. The caller supplies a narrow `createPullRequest` adapter for that clien
 ```js
 import { publishPatch } from "./packages/loop/dist/publish-patch.js";
 
-// changes is the successful return from runDaytonaAttempt.
+// changes is the successful return from runDaytonaRun.
 // github is an existing authenticated client; this example uses Octokit's shape.
 const published = await publishPatch(
   async ({ repository, ...pull }) => {
@@ -408,8 +408,8 @@ paths; published branches are never deleted as rollback. There are no automatic
 retries. After a partial failure, inspect the recorded branch and its PRs before
 acting; retrying the same branch is rejected instead of creating a blind duplicate.
 
-Use the host-issued evidence from the completed attempt, not hand-built success
-flags. It binds the supplied artifact to that attempt; it does not certify that
+Use the host-issued evidence from the completed run, not hand-built success
+flags. It binds the supplied artifact to that run; it does not certify that
 tests passed or replace repository CI and review. Durable
 storage, CLI orchestration, and live end-to-end validation remain later work. Unit
 tests use only temporary Git repositories and mocked GitHub calls.
@@ -421,12 +421,12 @@ The separate GitHub API callback needs permission to create draft PRs. A connect
 GitHub app alone does not configure native Git push authentication. The target public
 test repository and base branch must already exist. Herbie does not create these
 credentials, change Git settings, or create a target repository. Fixture tests cover
-publication locally; a live attempt followed by native Git push remains unvalidated.
+publication locally; a live run followed by native Git push remains unvalidated.
 
 ### Agent transcripts
 
 Each live run streams the Codex app-server's thread-scoped notifications into
-Postgres `project_events` records with type `agent` and the run's `job_id`. The JSON
+Postgres `project_events` records with type `agent` and the run's `run_id`. The JSON
 message is stored without the progress-message truncation limit. The existing
 owner-authenticated WebSocket feed replays these records on reconnect. The run
 view assembles message deltas, reasoning, and tool activity; **Download transcript**
