@@ -42,7 +42,8 @@ test("cancelled projects reject edits without changing their saved definition", 
   for (const edit of [
     () => store.renameProject(project.id, "owner", "Changed name"),
     () => store.editProjectPrompt(project.id, "owner", "Changed prompt"),
-    () => store.updateProject(project.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
+    () =>
+      store.updateProject(project.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
   ]) {
     await assert.rejects(edit(), /Cancelled projects cannot be edited/);
   }
@@ -123,8 +124,8 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
       assert.equal(saved.cleanupStatus, cleanup === "confirmed" ? "complete" : "needs_attention");
       assert.equal(await runWorkerOnce(store, adapters, "next"), false);
       assert.ok(
-        (await store.pool.query("SELECT artifact FROM jobs WHERE project_id=$1", [project.id])).rows[0]
-          .artifact,
+        (await store.pool.query("SELECT artifact FROM jobs WHERE project_id=$1", [project.id]))
+          .rows[0].artifact,
       );
     },
   );
@@ -165,14 +166,15 @@ test("cancel fences a publisher already in flight and preserves its eventual PR 
   assert.equal(saved.pullRequest?.number, 1);
   assert.equal(await store.claim("next"), null);
   assert.equal((await store.reviewJobs()).length, 1);
-  const job = (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [project.id])).rows[0];
+  const job = (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [project.id]))
+    .rows[0];
   await store.reconcile(job.id, "merged");
   assert.equal((await store.getProject(project.id))?.state, "cancelled");
   assert.equal((await store.getProject(project.id))?.pullRequest?.state, "merged");
   assert.deepEqual(await store.reviewJobs(), []);
   assert.equal(
-    (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [project.id])).rows[0]
-      .n,
+    (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [project.id]))
+      .rows[0].n,
     1,
   );
 });

@@ -158,5 +158,9 @@ export type ProjectAction = z.infer<typeof actionSchema>;
 
 export const streamMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("projects"), projects: z.array(projectSchema) }),
-  z.object({ type: z.literal("events"), projectId: z.string().uuid(), events: z.array(eventSchema) }),
+  z.object({
+    type: z.literal("events"),
+    projectId: z.string().uuid(),
+    events: z.array(eventSchema),
+  }),
 ]);

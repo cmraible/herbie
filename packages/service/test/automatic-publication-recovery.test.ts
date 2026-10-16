@@ -93,7 +93,9 @@ async function fixture(t: TestContext) {
     return r.rows[0]!;
   };
   const due = async () => {
-    await pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE project_id=$1", [project.id]);
+    await pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE project_id=$1", [
+      project.id,
+    ]);
   };
   async function legacy() {
     const job = await store.claim("old", 30_000, "live");
@@ -347,9 +349,10 @@ test("identical capped retries update status without flooding the event feed; ch
   }
   const events = async () =>
     (
-      await f.pool.query("SELECT type,message FROM project_events WHERE project_id=$1 ORDER BY id", [
-        f.project.id,
-      ])
+      await f.pool.query(
+        "SELECT type,message FROM project_events WHERE project_id=$1 ORDER BY id",
+        [f.project.id],
+      )
     ).rows;
   const before = await events();
   assert.equal(before.filter((e) => e.type === "publication_uncertain").length, 5);

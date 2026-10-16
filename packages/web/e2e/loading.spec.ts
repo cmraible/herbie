@@ -98,7 +98,9 @@ test("the welcome copy renders immediately while health and session are pending"
   await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
 });
 
-test("projects and repository actions stay pending until their responses arrive", async ({ page }) => {
+test("projects and repository actions stay pending until their responses arrive", async ({
+  page,
+}) => {
   let releaseProjects!: () => void;
   let releaseRepos!: () => void;
   const projectsGate = new Promise<void>((resolve) => {

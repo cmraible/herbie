@@ -168,7 +168,9 @@ test("private schema denies Data API roles, repairs old grants, and remains usab
   // RLS still blocks a client after accidental SQL grants and a permissive policy.
   await pool.query(`GRANT USAGE ON SCHEMA herbie TO ${probe}`);
   await pool.query(`GRANT SELECT ON herbie.projects TO ${probe}`);
-  await pool.query("CREATE POLICY broad_access ON herbie.projects FOR SELECT TO PUBLIC USING (true)");
+  await pool.query(
+    "CREATE POLICY broad_access ON herbie.projects FOR SELECT TO PUBLIC USING (true)",
+  );
   const client = await inspect.connect();
   try {
     await client.query(`SET ROLE ${probe}`);

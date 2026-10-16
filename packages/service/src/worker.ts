@@ -50,7 +50,11 @@ export async function runWorkerOnce(
       })
       .catch((error) => {
         loseLease();
-        logFailure(error, { component: "worker-heartbeat", projectId: job.project.id, jobId: job.id });
+        logFailure(error, {
+          component: "worker-heartbeat",
+          projectId: job.project.id,
+          jobId: job.id,
+        });
       })
       .finally(() => {
         renewing = false;
@@ -286,7 +290,11 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
       else if (current && current.state !== "open")
         await store.reconcile(job.id, current.state, current);
     } catch (error) {
-      logFailure(error, { component: "review-reconciliation", projectId: job.project.id, jobId: job.id });
+      logFailure(error, {
+        component: "review-reconciliation",
+        projectId: job.project.id,
+        jobId: job.id,
+      });
       // Transient GitHub failures do not change the durable review state. Poll again later.
     }
   }

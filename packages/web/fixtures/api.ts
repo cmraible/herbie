@@ -1,6 +1,12 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
-import { projectInput, projectUpdate, type Project, type ProjectEvent, type Attempt } from "@herbie/contracts";
+import {
+  projectInput,
+  projectUpdate,
+  type Project,
+  type ProjectEvent,
+  type Attempt,
+} from "@herbie/contracts";
 
 const repository = "acme/storefront";
 const date = (hour: number, minute = 0) =>
@@ -229,7 +235,8 @@ export function fixtureApi(): Plugin {
           if (action === "events")
             return send(
               events.filter(
-                (e) => e.projectId === project.id && e.id > Number(url.searchParams.get("after") ?? 0),
+                (e) =>
+                  e.projectId === project.id && e.id > Number(url.searchParams.get("after") ?? 0),
               ),
             );
           if (request.method === "GET") return send(project);

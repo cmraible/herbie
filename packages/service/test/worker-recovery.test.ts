@@ -85,7 +85,10 @@ test("a replacement worker reconciles an interrupted publication without calling
   };
   assert.equal(await runWorkerOnce(store, adapters, "replacement"), true);
   assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
-  assert.deepEqual((await store.getProject(project.id))?.pullRequest, { ...remotePr, state: "open" });
+  assert.deepEqual((await store.getProject(project.id))?.pullRequest, {
+    ...remotePr,
+    state: "open",
+  });
   assert.equal(await runWorkerOnce(store, adapters, "another-worker"), false);
 });
 
@@ -109,7 +112,12 @@ test("worker resumes a held artifact after restart and cooperative cancellation 
   assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
   assert.equal((await store.getProject(project.id))?.attemptCount, 1);
   await store.control(project.id, "demo-user", "cancel");
-  const { project: cancelled } = await store.createProject("demo-user", request, "demo", randomUUID());
+  const { project: cancelled } = await store.createProject(
+    "demo-user",
+    request,
+    "demo",
+    randomUUID(),
+  );
   const cancelAdapters: Adapters = {
     ...createDemoAdapters(),
     async attempt(execution) {
@@ -296,8 +304,11 @@ for (const recovering of [false, true])
         assert.equal((await store.getProject(project.id))?.state, "paused");
         assert.equal((await store.getProject(project.id))?.attemptCount, 1);
         assert.equal(
-          (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [project.id]))
-            .rows[0].n,
+          (
+            await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [
+              project.id,
+            ])
+          ).rows[0].n,
           1,
         );
       } else {

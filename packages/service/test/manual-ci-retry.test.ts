@@ -105,7 +105,10 @@ for (const scenario of [
     await store.requestCiReview();
     await runCiRepairOnce(store, adapters, "automatic");
     assert.equal(attempts, 1, "failures must not automatically retry");
-    await assert.rejects(store.retryCiRepair(project.id, "other-owner", repair.id), /Project not found/);
+    await assert.rejects(
+      store.retryCiRepair(project.id, "other-owner", repair.id),
+      /Project not found/,
+    );
     if (scenario === "publication")
       await store.pool.query("UPDATE ci_repairs SET publication_started=true WHERE id=$1", [
         repair.id,

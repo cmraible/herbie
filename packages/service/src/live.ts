@@ -89,7 +89,12 @@ export function createLiveAdapters(
               execution.repository.repository,
             );
             const token = await github.installationToken(access.installationId, access.repository);
-            await github.requestReview(token, access.repository, pr.number, execution.project.ownerId);
+            await github.requestReview(
+              token,
+              access.repository,
+              pr.number,
+              execution.project.ownerId,
+            );
           },
           async readinessState(execution: Execution): Promise<"ready" | "draft" | "closed"> {
             const pr = execution.project.pullRequests.find((pr) => pr.branch === execution.branch);
@@ -230,7 +235,8 @@ Inspect these branches before choosing your change. Make one small, independentl
       } else if (existing) return existing;
       await requireLease();
       const title =
-        changes.pullRequestTitle ?? `Herbie: ${execution.project.prompt.split("\n")[0].slice(0, 180)}`;
+        changes.pullRequestTitle ??
+        `Herbie: ${execution.project.prompt.split("\n")[0].slice(0, 180)}`;
       const published = await publishPatch(
         (request) => github.openPullRequest(token, request, requireLease),
         {

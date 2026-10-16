@@ -174,9 +174,10 @@ for (const outcome of [
     if (attempts)
       assert.ok(
         (
-          await store.pool.query("SELECT 1 FROM project_events WHERE project_id=$1 AND type='agent'", [
-            project.id,
-          ])
+          await store.pool.query(
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='agent'",
+            [project.id],
+          )
         ).rowCount,
       );
     assert.equal(pushes, ["update", "reply-failed"].includes(outcome) ? 1 : 0);

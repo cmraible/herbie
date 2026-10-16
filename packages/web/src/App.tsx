@@ -13,7 +13,11 @@ import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
-import { errorReference, projectErrorMessage, workflowPermissionMessage } from "./activity-message.js";
+import {
+  errorReference,
+  projectErrorMessage,
+  workflowPermissionMessage,
+} from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 import { projectReadyForReview } from "./attempts.js";
 
@@ -617,7 +621,11 @@ export function App() {
               </div>
               {!creating && !editing && !selected && (
                 <div className="heading-actions">
-                  <button className="primary" onClick={openCreate} disabled={busy || !projectsLoaded}>
+                  <button
+                    className="primary"
+                    onClick={openCreate}
+                    disabled={busy || !projectsLoaded}
+                  >
                     New project
                   </button>
                 </div>
@@ -716,7 +724,11 @@ export function App() {
                         </dd>
                       </div>
                     </dl>
-                    <section className="project-list" aria-label="Projects" aria-busy={!projectsLoaded}>
+                    <section
+                      className="project-list"
+                      aria-label="Projects"
+                      aria-busy={!projectsLoaded}
+                    >
                       {visibleProjects.map((item) => (
                         <button
                           className="project-row"
@@ -825,8 +837,9 @@ export function App() {
                     <p className="project-brief">{project.prompt}</p>
 
                     <p className="project-meta">
-                      {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"} <span>·</span>{" "}
-                      Max parallel runs {project.maxWip} <span>·</span> Created {time(project.createdAt)}
+                      {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"}{" "}
+                      <span>·</span> Max parallel runs {project.maxWip} <span>·</span> Created{" "}
+                      {time(project.createdAt)}
                     </p>
                     {project.error && (
                       <div className="status-message" role="alert">
@@ -884,8 +897,8 @@ export function App() {
                       ))}
                     {project.stopRequested && (
                       <p className="subtle-note">
-                        {project.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The
-                        current run will finish before stopping.
+                        {project.stopRequested === "pause" ? "Pause" : "Cancellation"} requested.
+                        The current run will finish before stopping.
                       </p>
                     )}
                     <hr className="project-divider" />

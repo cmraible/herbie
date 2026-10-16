@@ -82,7 +82,8 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}`;
   const headers = { origin: "http://localhost:8787", cookie: `herbie_session=${testSessionToken}` };
-  const connect = (id = project.id) => new WebSocket(`${base}/api/stream?project=${id}`, { headers });
+  const connect = (id = project.id) =>
+    new WebSocket(`${base}/api/stream?project=${id}`, { headers });
   for (const [path, supplied, status] of [
     ["/api/stream", { ...headers, origin: "https://evil.example" }, 403],
     ["/api/stream", { origin: headers.origin }, 401],
@@ -115,7 +116,9 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
       m.type === "events" &&
       m.events.some(
         (e) =>
-          e.type === "agent" && e.message === transcript && e.attemptId === project.attempts![0]!.id,
+          e.type === "agent" &&
+          e.message === transcript &&
+          e.attemptId === project.attempts![0]!.id,
       ),
   );
   const transaction = await workerPool.connect();

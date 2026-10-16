@@ -151,7 +151,10 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.ok(uploads.every(([, , timeout]) => timeout === 30));
   const input = uploads.at(-1);
   assert.ok(input);
-  assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, project: request.project });
+  assert.deepEqual(JSON.parse(input[0].toString()), {
+    cwd: `${root}/repo`,
+    project: request.project,
+  });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
     `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
     root,

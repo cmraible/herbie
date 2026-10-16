@@ -135,7 +135,11 @@ function decodeJob(row: z.infer<typeof jobRow>, project: Project): Job {
     project,
   };
 }
-async function projectFrom(client: Pool | PoolClient, id: string, lock = false): Promise<Project | null> {
+async function projectFrom(
+  client: Pool | PoolClient,
+  id: string,
+  lock = false,
+): Promise<Project | null> {
   const result = await client.query<Record<string, unknown>>(
     `SELECT ${projectColumns} FROM projects WHERE id=$1 ${lock ? "FOR UPDATE" : ""}`,
     [id],
@@ -149,12 +153,10 @@ async function addEvent(
   message: string,
   attemptId?: string,
 ): Promise<void> {
-  await client.query("INSERT INTO project_events(project_id,type,message,job_id) VALUES ($1,$2,$3,$4)", [
-    id,
-    type,
-    message,
-    attemptId ?? null,
-  ]);
+  await client.query(
+    "INSERT INTO project_events(project_id,type,message,job_id) VALUES ($1,$2,$3,$4)",
+    [id, type, message, attemptId ?? null],
+  );
 }
 async function loadJob(client: PoolClient, id: string): Promise<z.infer<typeof jobRow>> {
   const result = await client.query<Record<string, unknown>>(
@@ -313,7 +315,9 @@ export class Store {
         if (mode === "live" && !this.nameProject)
           throw new Error("Live project naming is not configured");
         name = projectName.parse(
-          await (mode === "live" ? this.nameProject!(request.prompt) : demoProjectName(request.prompt)),
+          await (mode === "live"
+            ? this.nameProject!(request.prompt)
+            : demoProjectName(request.prompt)),
         );
       }
     }
@@ -367,7 +371,8 @@ export class Store {
     return this.transaction(async (client) => {
       const project = await projectFrom(client, id, true);
       if (!project || project.ownerId !== ownerId) throw new StoreError(404, "Project not found");
-      if (project.state === "cancelled") throw new StoreError(409, "Cancelled projects cannot be edited");
+      if (project.state === "cancelled")
+        throw new StoreError(409, "Cancelled projects cannot be edited");
       const result = await client.query<Record<string, unknown>>(
         `UPDATE projects SET name=$3,updated_at=clock_timestamp() WHERE id=$1 AND owner_id=$2 RETURNING ${projectColumns}`,
         [id, ownerId, parsed],
@@ -385,7 +390,8 @@ export class Store {
     return this.transaction(async (client) => {
       const project = await projectFrom(client, id, true);
       if (!project || project.ownerId !== ownerId) throw new StoreError(404, "Project not found");
-      if (project.state === "cancelled") throw new StoreError(409, "Cancelled projects cannot be edited");
+      if (project.state === "cancelled")
+        throw new StoreError(409, "Cancelled projects cannot be edited");
       // Normalize legacy request hashes before their fallback loses the original prompt.
       await client.query(
         `UPDATE project_requests SET fingerprint=$2 WHERE project_id=$1
@@ -450,7 +456,10 @@ export class Store {
     return this.transaction(async (client) => {
       const project = await projectFrom(client, id, true);
       if (!project || project.ownerId !== ownerId) throw new StoreError(404, "Project not found");
-      if (["queued", "running", "awaiting_review"].includes(project.state) && !project.stopRequested)
+      if (
+        ["queued", "running", "awaiting_review"].includes(project.state) &&
+        !project.stopRequested
+      )
         return project;
       if (!["failed", "needs_attention"].includes(project.state) || project.stopRequested)
         throw conflict("Only failed or interrupted projects can be retried");
@@ -472,7 +481,12 @@ export class Store {
         "UPDATE projects SET state='queued',error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
         [id],
       );
-      await advanceProject(client, { ...project, state: "queued", error: null, stopRequested: null });
+      await advanceProject(client, {
+        ...project,
+        state: "queued",
+        error: null,
+        stopRequested: null,
+      });
       const next = await client.query<{ id: string; cycle: number }>(
         "SELECT id,cycle FROM jobs WHERE project_id=$1 AND stage='queued' ORDER BY cycle DESC LIMIT 1",
         [id],
@@ -524,7 +538,9 @@ export class Store {
       );
       const job = jobRow.parse(result.rows[0]);
       if (job.stage === "publishing")
-        throw conflict("Wait for publication reconciliation before pausing or resuming this project");
+        throw conflict(
+          "Wait for publication reconciliation before pausing or resuming this project",
+        );
       if (
         (action === "pause" && (project.state === "paused" || project.stopRequested === "pause")) ||
         (action === "resume" &&
@@ -587,7 +603,9 @@ export class Store {
         ]);
       }
       if (pullRequest && pullRequest.branch === row.branch) {
-        const pr = projectSchema.shape.pullRequest.unwrap().parse({ state: "open", ...pullRequest });
+        const pr = projectSchema.shape.pullRequest
+          .unwrap()
+          .parse({ state: "open", ...pullRequest });
         await client.query("UPDATE jobs SET pull_request=$2 WHERE id=$1", [
           jobId,
           JSON.stringify(pr),
@@ -1234,7 +1252,10 @@ export class Store {
     return this.transaction(async (client) => {
       const project = await projectFrom(client, projectId, true);
       if (!project || project.ownerId !== ownerId) throw new StoreError(404, "Project not found");
-      if (project.stopRequested || !["queued", "running", "awaiting_review"].includes(project.state))
+      if (
+        project.stopRequested ||
+        !["queued", "running", "awaiting_review"].includes(project.state)
+      )
         throw conflict("Resume the project before retrying a repair");
       const result = await client.query<{ job_id: string; head: string }>(
         `SELECT r.job_id,r.head FROM ci_repairs r JOIN jobs j ON j.id=r.job_id
@@ -1669,7 +1690,9 @@ export class Store {
       client,
       project.id,
       closed ? "pull_request_closed" : "pull_request_merged",
-      closed ? "Pull request closed without merging; project pause requested" : "Pull request merged",
+      closed
+        ? "Pull request closed without merging; project pause requested"
+        : "Pull request merged",
       jobId,
     );
     return updated;

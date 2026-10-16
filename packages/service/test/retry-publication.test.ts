@@ -372,8 +372,12 @@ test("cancel confirmed unpublished work checks ownership and CSRF, preserves evi
   );
   const other = await setup.retryableProject("other-owner", "other-owner/other-project");
   assert.equal(
-    (await fetch(base + "/api/projects/" + other.project.id + "/cancel", { method: "POST", headers }))
-      .status,
+    (
+      await fetch(base + "/api/projects/" + other.project.id + "/cancel", {
+        method: "POST",
+        headers,
+      })
+    ).status,
     404,
   );
   assert.equal(checks, 0);
@@ -622,7 +626,9 @@ for (const missing of ["workflow", "installation"] as const)
     assert.match(saved.error!, /workflow_permission_missing|installation_permissions_missing/);
     assert.doesNotMatch(saved.error!, /private|Retrying automatically/);
     assert.ok(errorReference(saved.error!));
-    const event = (await setup.store.events(project.id)).find((e) => e.type === "publication_blocked");
+    const event = (await setup.store.events(project.id)).find(
+      (e) => e.type === "publication_blocked",
+    );
     assert.ok(event);
     assert.equal(activityMessage(saved, event), projectErrorMessage(saved));
     assert.match(projectErrorMessage(saved), /Workflows/);
@@ -639,11 +645,14 @@ for (const missing of ["workflow", "installation"] as const)
     assert.equal(await runWorkerOnce(setup.store, setup.adapters, "automatic-retry"), false);
 
     setup.adapters.publish = publish;
-    const response = await fetch(setup.base + "/api/projects/" + project.id + "/retry-publication", {
-      method: "POST",
-      headers: await setup.session(),
-      body: "{}",
-    });
+    const response = await fetch(
+      setup.base + "/api/projects/" + project.id + "/retry-publication",
+      {
+        method: "POST",
+        headers: await setup.session(),
+        body: "{}",
+      },
+    );
     assert.equal(response.status, 200);
     await runWorkerOnce(setup.store, setup.adapters, "permission-fixed-worker");
     const resumed = await setup.store.getProject(project.id);

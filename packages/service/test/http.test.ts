@@ -59,8 +59,13 @@ for (const version of [undefined, "2"])
       ...versionHeaders,
     };
     assert.equal(
-      (await fetch(`${base}/api/projects`, { method: "POST", headers, body: JSON.stringify(input) }))
-        .status,
+      (
+        await fetch(`${base}/api/projects`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(input),
+        })
+      ).status,
       403,
     );
     const request = () =>

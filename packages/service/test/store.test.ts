@@ -389,7 +389,10 @@ integration(
     );
     const workers = ["worker-a", "worker-b"];
     const claimed = await Promise.all(workers.map((worker) => store.claim(worker)));
-    assert.deepEqual(new Set(claimed.map((job) => job?.project.id)), new Set([first.id, second.id]));
+    assert.deepEqual(
+      new Set(claimed.map((job) => job?.project.id)),
+      new Set([first.id, second.id]),
+    );
     for (const [index, job] of claimed.entries()) {
       assert.ok(job);
       const worker = workers[index]!;
@@ -555,7 +558,8 @@ integration(
     const project = results[0]!.project;
     await namedStore.renameProject(project.id, owner, "My new name");
     assert.equal(
-      (await namedStore.createProject(owner, { ...request, name: undefined }, "live", key)).project.name,
+      (await namedStore.createProject(owner, { ...request, name: undefined }, "live", key)).project
+        .name,
       "My new name",
     );
     await assert.rejects(
@@ -595,14 +599,16 @@ integration(
       await started.promise;
       assert.deepEqual(await namedStore.listProjects(owner), []);
       assert.equal(
-        (await pool.query("SELECT project_id FROM project_requests WHERE owner_id=$1", [owner])).rowCount,
+        (await pool.query("SELECT project_id FROM project_requests WHERE owner_id=$1", [owner]))
+          .rowCount,
         0,
       );
       release.resolve("Arithmetic cleanup");
       const result = await pending;
       assert.equal(result.project.name, "Arithmetic cleanup");
       assert.equal(
-        (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id])).rowCount,
+        (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id]))
+          .rowCount,
         1,
       );
     } finally {
@@ -641,7 +647,8 @@ integration("naming failures leave no project or request and allow a clean retry
     assert.equal(result.project.name, "Arithmetic cleanup");
     assert.equal((await retry.createProject(owner, request, "live", key)).created, false);
     assert.equal(
-      (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id])).rowCount,
+      (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [result.project.id]))
+        .rowCount,
       1,
     );
   }
@@ -838,7 +845,12 @@ integration(
 );
 
 integration("closing a sibling PR holds a saved artifact and releases it for resume", async () => {
-  const { project } = await store.createProject("owner", { ...input(), maxWip: 2 }, "demo", randomUUID());
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), maxWip: 2 },
+    "demo",
+    randomUUID(),
+  );
   const first = await publishNext(1);
   const second = await store.claim("worker");
   assert.ok(second);
@@ -880,7 +892,12 @@ integration(
 );
 
 integration("a sibling merge preserves the closure pause until publication finishes", async () => {
-  const { project } = await store.createProject("owner", { ...input(), maxWip: 3 }, "demo", randomUUID());
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), maxWip: 3 },
+    "demo",
+    randomUUID(),
+  );
   const first = await publishNext(1);
   const second = await publishNext(2);
   const third = await store.claim("worker");
@@ -1103,10 +1120,10 @@ integration(
       "UPDATE jobs SET stage='awaiting_review',lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
       [job.id],
     );
-    await store.pool.query("UPDATE projects SET state='awaiting_review',pull_request=$2 WHERE id=$1", [
-      project.id,
-      JSON.stringify(pr),
-    ]);
+    await store.pool.query(
+      "UPDATE projects SET state='awaiting_review',pull_request=$2 WHERE id=$1",
+      [project.id, JSON.stringify(pr)],
+    );
     assert.deepEqual((await store.getProject(project.id))?.pullRequests, [pr]);
     assert.deepEqual(
       (await store.reviewJobs()).map((job) => job.id),
@@ -1154,7 +1171,11 @@ integration(
     const job = await store.claim("worker");
     assert.ok(job);
     assert.equal(job.project.prompt, edited.prompt);
-    const running = await store.editProjectPrompt(project.id, owner, "Instructions for the next attempt");
+    const running = await store.editProjectPrompt(
+      project.id,
+      owner,
+      "Instructions for the next attempt",
+    );
     assert.equal(running.state, "running");
     assert.equal(job.project.prompt, edited.prompt);
     await store.saveArtifact(job.id, "worker", {

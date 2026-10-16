@@ -70,9 +70,10 @@ for (const outcome of [
       assert.equal((await store.getProject(project.id))?.state, "failed");
       assert.equal(
         (
-          await store.pool.query("SELECT 1 FROM project_events WHERE project_id=$1 AND type='retry'", [
-            project.id,
-          ])
+          await store.pool.query(
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='retry'",
+            [project.id],
+          )
         ).rowCount,
         0,
       );
@@ -351,7 +352,10 @@ for (const outcome of [
       }
       const terminal = await store.pool.query(
         "SELECT message FROM project_events WHERE project_id=$1 AND type=$2",
-        [project.id, outcome === "rerun-changed" ? "external_change_paused" : "ci_repair_completed"],
+        [
+          project.id,
+          outcome === "rerun-changed" ? "external_change_paused" : "ci_repair_completed",
+        ],
       );
       if (outcome === "rerun-changed") {
         assert.equal(terminal.rowCount, 1);

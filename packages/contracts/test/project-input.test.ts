@@ -11,8 +11,11 @@ test("blank create names are omitted while renames must remain nonblank", () => 
     assert.equal(projectRename.safeParse({ name }).success, false);
   }
   assert.equal(
-    projectInput.parse({ repository: "demo/example", prompt: "Fix arithmetic", name: " Custom name " })
-      .name,
+    projectInput.parse({
+      repository: "demo/example",
+      prompt: "Fix arithmetic",
+      name: " Custom name ",
+    }).name,
     "Custom name",
   );
   assert.equal(

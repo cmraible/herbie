@@ -124,7 +124,8 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       request(`${projectPath(id)}/${actionSchema.parse(action)}`, projectSchema, {}),
     retryRepair: (id: string, repairId: string) =>
       request(`${projectPath(id)}/retry-repair`, projectSchema, { repairId }),
-    retryPublication: (id: string) => request(`${projectPath(id)}/retry-publication`, projectSchema, {}),
+    retryPublication: (id: string) =>
+      request(`${projectPath(id)}/retry-publication`, projectSchema, {}),
     retry: (id: string) => request(`${projectPath(id)}/retry`, projectSchema, {}),
     authStart: (client: "cli" | "web") => request("/api/auth/start", authStartSchema, { client }),
     installationStart: () => request("/api/auth/install/start", installationStartSchema, {}),

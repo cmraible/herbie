@@ -36,7 +36,8 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       if (stage === "model_execution") return "Agent started working";
       if (stage === "runtime_preparation" || stage === "runtime_upload") return null;
       if (stage === "artifact_download" || stage === "sandbox_deletion") return null;
-      if (event.message.startsWith("Project completed in sandbox ")) return "Preparing pull request";
+      if (event.message.startsWith("Project completed in sandbox "))
+        return "Preparing pull request";
       return null;
     }
     case "publication_phase":

@@ -901,7 +901,8 @@ test("live publication rejects a legacy artifact without verification evidence b
       { baseCommit: "0".repeat(40), patch: Buffer.from("patch") },
       async () => {},
     ),
-    (error) => error instanceof Error && /successful project and cleanup evidence/.test(error.message),
+    (error) =>
+      error instanceof Error && /successful project and cleanup evidence/.test(error.message),
   );
   assert.equal(
     requests.filter((request) => request.path === "/repos/alice/project/pulls").length,
