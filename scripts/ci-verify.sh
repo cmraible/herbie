@@ -136,7 +136,9 @@ run_unit_tests() {
   run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
-  run_step build pnpm build
+  # Unit tests only import compiled files from @herbie/loop; other workspace
+  # packages expose their TypeScript source directly to the test runner.
+  run_step build pnpm --filter @herbie/loop build
   run_unit_tests
 }
 start_web_preview() {
