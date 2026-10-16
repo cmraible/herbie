@@ -23,6 +23,25 @@ import {
 import { installDaytonaRuntime, configureDaytonaRuntime, daytonaPath } from "./daytona-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
 
+export const DAYTONA_RUNTIME_FILES = [
+  "codex-initialize.js",
+  "codex-thread.js",
+  "codex-turn.js",
+  "codex-process.js",
+  "daytona-runner.js",
+  "feedback-decision.js",
+  "diagnostic-log.js",
+] as const;
+
+export interface DaytonaAttemptArtifact {
+  baseCommit: string;
+  patchBase64: string;
+  pullRequestTitle: string;
+  pullRequestBody: string;
+  feedbackDecision?: FeedbackDecision;
+  localChecksPassed?: true;
+}
+
 type AttemptSandbox = Pick<Sandbox, "id" | "delete"> & {
   git: Pick<Sandbox["git"], "clone">;
   fs: {
@@ -155,15 +174,10 @@ export async function runDaytonaAttempt(
     throw new Error("Project and any supplied snapshot or domain allowlist must not be empty");
   }
   const runtime = await Promise.all(
-    [
-      "codex-initialize.js",
-      "codex-thread.js",
-      "codex-turn.js",
-      "codex-process.js",
-      "daytona-runner.js",
-      "feedback-decision.js",
-      "diagnostic-log.js",
-    ].map(async (name) => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })),
+    DAYTONA_RUNTIME_FILES.map(async (name) => ({
+      name,
+      contents: await readFile(new URL(name, runtimeDirectory)),
+    })),
   );
   const name = `herbie-attempt-${randomUUID()}`;
   const directory = `/tmp/${name}`;
