@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy only the manifest within one registry repository; never rebuild or pull layers.
+# Reuse the tested candidate, or build and test the merged checkout if unavailable.
 set -euo pipefail
 image_repository="${1:?Pass the image repository}"
 tree="${2:?Pass the merged source tree SHA}"
@@ -9,8 +9,14 @@ sequence="${4:-0}"
 
 candidate="$image_repository:tree-$tree"
 if ! digest="$(docker buildx imagetools inspect "$candidate" --format '{{json .Manifest}}' | jq -er '.digest | select(test("^sha256:[a-f0-9]{64}$"))')"; then
-  echo "No PR image for source tree $tree. Update the PR against main and let its image upload finish before merging. No rebuild was attempted." >&2
-  exit 1
+  echo "No PR image for source tree $tree. Building and testing the merged checkout." >&2
+  # Never rebuild a caller-supplied tree from different or modified source.
+  test "$(git rev-parse HEAD^{tree})" = "$tree"
+  test "$(git rev-parse HEAD)" = "$revision"
+  git diff --quiet HEAD --
+  bash "$(dirname "$0")/build-portable-image.sh" "$candidate" "$revision" >&2
+  docker push "$candidate" >&2
+  digest="$(docker buildx imagetools inspect "$candidate" --format '{{json .Manifest}}' | jq -er '.digest | select(test("^sha256:[a-f0-9]{64}$"))')"
 fi
 image="$image_repository@$digest"
 source_tree="$(docker buildx imagetools inspect "$image" --format '{{json .Image}}' | jq -er '.config.Labels["io.herbie.source-tree"]')"
