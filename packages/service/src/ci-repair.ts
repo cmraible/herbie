@@ -63,8 +63,12 @@ export async function runCiRepairOnce(
     await requireLease();
     let changes = await store.ciArtifact(id);
     if (!changes) {
-      changes = await adapters.attempt(execution, (message) =>
-        store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000), job.id),
+      changes = await adapters.attempt(
+        {
+          ...execution,
+          onActivity: (message) => store.appendEvent(job.goal.id, "agent", message, job.id),
+        },
+        (message) => store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000), job.id),
       );
       await requireLease();
       await store.saveCiArtifact(id, workerId, changes);

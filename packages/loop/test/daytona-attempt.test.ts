@@ -871,3 +871,44 @@ exec /usr/bin/git "$@"
   assert.match(result.patch.toString(), /return a\+b/);
   assert.doesNotMatch(result.patch.toString(), /modified/);
 });
+
+test("persists full agent activity while running and drains it before cleanup on failure", async (t) => {
+  const { sandbox, run } = await fixture(t);
+  const record = JSON.stringify({
+    method: "item/commandExecution/outputDelta",
+    params: { delta: "x".repeat(5000) },
+  });
+  let release!: () => void;
+  const running = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reads = 0;
+  sandbox.process.executeCommand.mock.mockImplementation(async (command) => {
+    if (command.includes("daytona-runner.js")) {
+      await running;
+      return { exitCode: 1, result: "failed" };
+    }
+    if (command.includes("transcript.jsonl")) {
+      reads++;
+      return {
+        exitCode: 0,
+        result: reads === 1 ? Buffer.from(record + "\n").toString("base64") : "",
+      };
+    }
+    return { exitCode: 0, result: "" };
+  });
+  const received: string[] = [];
+  await assert.rejects(
+    run({
+      onActivity: async (message) => {
+        assert.equal(sandbox.delete.mock.callCount(), 0);
+        received.push(message);
+        release();
+      },
+    }),
+    DaytonaAttemptError,
+  );
+  assert.deepEqual(received, [record]);
+  assert.ok(reads >= 2);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});

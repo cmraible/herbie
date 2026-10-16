@@ -395,3 +395,28 @@ for (const reason of ["timeout", "cancel"] as const) {
     await rejected;
   });
 }
+
+test("captures full scoped activity including failed completion without waiting for success", async (t) => {
+  const { lines, send, receive } = connection(t);
+  const activity: unknown[] = [];
+  const done = assert.rejects(
+    runCodexTurn(lines, send, "thread-1", "Work", {
+      onActivity: (message) => {
+        activity.push(message);
+      },
+    }),
+    /Codex turn failed/,
+  );
+  receive(started);
+  receive({ method: "item/started", params: { threadId: "other-thread" } });
+  const notification = {
+    method: "item/commandExecution/outputDelta",
+    params: { threadId: "thread-1", turnId: "turn-1", itemId: "command", delta: "x".repeat(10000) },
+  };
+  receive(notification);
+  assert.deepEqual(activity, [notification]);
+  const terminal = completed("thread-1", "turn-1", "failed");
+  receive(terminal);
+  await done;
+  assert.deepEqual(activity, [notification, terminal]);
+});

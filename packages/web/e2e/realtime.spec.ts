@@ -43,6 +43,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     message: "Attempt stage: model_execution",
     createdAt: goal.createdAt,
   };
+  const events = [event];
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
   let goalReads = 0;
   let eventReads = 0;
@@ -67,12 +68,58 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     stream = socket;
     connections++;
     socket.send(JSON.stringify({ type: "goals", goals: [goal] }));
-    socket.send(JSON.stringify({ type: "events", goalId: id, events: [event] }));
+    socket.send(JSON.stringify({ type: "events", goalId: id, events }));
   });
   await page.goto(`/#${id}`);
   await expect(page.getByRole("heading", { name: "Live project" })).toBeVisible();
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
   await expect.poll(() => connections).toBe(1);
+  const activity = (method: string, params: Record<string, unknown>) => ({
+    ...event,
+    id: events.length + 1,
+    type: "agent",
+    message: JSON.stringify({ method, params: { threadId: "thread", turnId: "turn", ...params } }),
+  });
+  events.push(
+    activity("item/reasoning/summaryTextDelta", {
+      itemId: "thinking",
+      delta: "Checking the implementation",
+    }),
+  );
+  events.push(
+    activity("item/started", {
+      item: { id: "command", type: "commandExecution", command: "pnpm test", status: "inProgress" },
+    }),
+  );
+  events.push(
+    activity("item/commandExecution/outputDelta", { itemId: "command", delta: "All tests passed" }),
+  );
+  events.push(
+    activity("item/agentMessage/delta", {
+      itemId: "message",
+      delta: "Implemented <script>alert(1)</script> safely",
+    }),
+  );
+  stream!.send(JSON.stringify({ type: "events", goalId: id, events }));
+  await expect(page.getByText("Checking the implementation", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Implemented <script>alert(1)</script> safely", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".agent-transcript pre").filter({ hasText: "All tests passed" }),
+  ).toBeVisible();
+  const downloaded = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download transcript" }).click();
+  const download = await downloaded;
+  const contents = await download.createReadStream();
+  let text = "";
+  for await (const chunk of contents!) text += chunk.toString();
+  expect(
+    text
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+  ).toHaveLength(4);
   goal.name = "Merged project";
   pr.state = "merged";
   goal.attempts[0]!.state = "completed";
@@ -82,6 +129,10 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   stream!.close({ code: 1012, reason: "Service restart" });
   await expect.poll(() => connections).toBe(2);
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Checking the implementation", { exact: true })).toHaveCount(1);
+  await expect(
+    page.getByText("Implemented <script>alert(1)</script> safely", { exact: true }),
+  ).toHaveCount(1);
   // Exceed both former polling intervals.
   await page.waitForTimeout(2500);
   expect(goalReads).toBe(1);

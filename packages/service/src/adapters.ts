@@ -13,6 +13,7 @@ export interface Execution {
   branch: string;
   signal?: AbortSignal;
   ciRepair?: CiFailure;
+  onActivity?: (message: string) => Promise<void>;
 }
 export interface CiFailure {
   head: string;

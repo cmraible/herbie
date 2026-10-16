@@ -1,3 +1,4 @@
+import { streamAgentTranscript } from "./agent-transcript.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
@@ -44,6 +45,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   commit?: string;
   goal: string;
   verifyLocally?: boolean;
+  onActivity?: (message: string) => Promise<void>;
 };
 
 export interface DaytonaAttemptChanges {
@@ -113,11 +115,11 @@ export async function runDaytonaAttempt(
   runtimeDirectory = new URL(".", import.meta.url),
 ): Promise<DaytonaAttemptChanges> {
   let stage: AttemptStage = "sandbox_creation";
-  const emit = async (message: string): Promise<void> => {
+  const emit = async (message: string, sink = report): Promise<void> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        Promise.resolve().then(() => report(message)),
+        Promise.resolve().then(() => sink(message)),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error("Attempt event persistence timed out")), 5000);
         }),
@@ -244,12 +246,43 @@ export async function runDaytonaAttempt(
     await emit(`Running goal in sandbox ${sandbox.id}`);
     // Only the generated UUID path enters the shell. The goal and repo URL never do.
     request.signal?.throwIfAborted();
-    const result = await sandbox.process.executeCommand(
+    const execution = sandbox.process.executeCommand(
       `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} node ${directory}/daytona-runner.js`,
       directory,
       undefined,
       (request.verifyLocally ? 32 : 22) * 60,
     );
+    let finished = false;
+    const command = execution.finally(() => {
+      finished = true;
+    });
+    const transcript = request.onActivity
+      ? streamAgentTranscript(
+          async (offset) => {
+            const response = await sandbox.process.executeCommand(
+              `bash -o pipefail -c 'if [ -f ${directory}/transcript.jsonl ]; then dd if=${directory}/transcript.jsonl iflag=skip_bytes,count_bytes skip=${offset} count=65536 status=none | base64 -w0; fi'`,
+              undefined,
+              undefined,
+              30,
+            );
+            if (response.exitCode !== 0) throw new Error("Agent transcript read failed");
+            const bytes = Buffer.from(response.result, "base64");
+            if (bytes.toString("base64") !== response.result)
+              throw new Error("Invalid agent transcript encoding");
+            return bytes;
+          },
+          (message) => emit(message, request.onActivity),
+          () => finished,
+        ).catch(async (error) => {
+          await removeSandbox();
+          throw error;
+        })
+      : Promise.resolve();
+    // Drain the transcript even if execution failed, before deleting the environment.
+    const [outcome, recording] = await Promise.allSettled([command, transcript]);
+    if (recording.status === "rejected") throw recording.reason;
+    if (outcome.status === "rejected") throw outcome.reason;
+    const result = outcome.value;
     if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
     if (result.result !== "herbie-attempt-completed\n")
       throw new AttemptResultError("Invalid goal completion marker", result.result);

@@ -417,3 +417,26 @@ GitHub app alone does not configure native Git push authentication. The target p
 test repository and base branch must already exist. Herbie does not create these
 credentials, change Git settings, or create a target repository. Fixture tests cover
 publication locally; a live attempt followed by native Git push remains unvalidated.
+
+### Agent transcripts
+
+Each live run streams the Codex app-server's thread-scoped notifications into
+Postgres `goal_events` records with type `agent` and the run's `job_id`. The JSON
+message is stored without the progress-message truncation limit. The existing
+owner-authenticated WebSocket feed replays these records on reconnect. The run
+view assembles message deltas, reasoning, and tool activity; **Download transcript**
+exports the original notifications as JSONL, including records the UI does not
+render individually. Check-repair turns are included in the same run.
+
+The runner appends notifications to a JSONL file in its environment. The worker
+reads new byte ranges every 500 ms when caught up, persists them in order, and
+drains the file before cleanup, including after execution failures. A recording
+failure stops execution rather than silently dropping output. Records already
+committed remain available after cancellation or a worker crash; uncollected
+output can be lost if the environment is deleted or the worker crashes.
+
+Thinking includes only reasoning summaries/text emitted by Codex and the selected
+model. The transcript preserves exposed protocol output, not unavailable model
+internals. Treat transcript contents as private project data: tool output can
+include repository contents and sensitive values. No transcript bodies are sent
+to operational logs.

@@ -1,6 +1,7 @@
 import { useState, type ComponentProps } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AgentTranscript } from "./AgentTranscript.js";
 import type { Goal, GoalEvent } from "@herbie/contracts";
 import { attemptLabels, groupAttempts, reviewLabel } from "./attempts.js";
 import { activityMessage, errorReference } from "./activity-message.js";
@@ -191,6 +192,7 @@ export function AttemptHistory({
                 </details>
               </div>
             ))}
+            <AgentTranscript events={group.events} />
             <section className="activity">
               <h3>Activity</h3>
               {group.events.every((event) => activityMessage(goal, event) === null) ? (
