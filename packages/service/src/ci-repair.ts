@@ -1,3 +1,4 @@
+import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
 import { StaleRepairError } from "./adapters.js";
 import type { Adapters, Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -117,6 +118,8 @@ export async function runCiRepairOnce(
         workerId,
         false,
         `CI repair stopped. Inspect diagnostics, sandbox cleanup, and PR state before manual recovery. Reference: ${reference}`,
+        undefined,
+        error instanceof DaytonaAttemptError && error.cleanup === "confirmed",
       );
     // The periodic poll retries failed reads; immediate requeue starves other PRs.
   } finally {

@@ -71,7 +71,13 @@ export const pullRequestSchema = pullRequestMetadataSchema.extend({
     .regex(/^[a-f0-9]{64}$/)
     .optional(),
 });
+export const ciRepairSchema = z.object({
+  id: z.string().uuid(),
+  state: z.enum(["running", "waiting", "completed", "failed"]),
+  canRetry: z.boolean(),
+});
 export const attemptSchema = z.object({
+  ciRepair: ciRepairSchema.nullable().optional(),
   id: z.string().uuid(),
   number: z.number().int().positive(),
   state: z.enum([

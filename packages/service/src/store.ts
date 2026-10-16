@@ -26,7 +26,7 @@ const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
   max_wip AS "maxWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
-  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request) ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id),'[]'::jsonb) AS attempts,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request,'ciRepair',(SELECT jsonb_build_object('id',r.id,'state',r.state,'canRetry',r.state='failed' AND r.retryable AND NOT r.publication_started) FROM ci_repairs r WHERE r.job_id=j.id AND r.state <> 'superseded' ORDER BY r.created_at DESC LIMIT 1)) ORDER BY j.cycle) FROM jobs j WHERE j.goal_id=goals.id),'[]'::jsonb) AS attempts,
   cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseGoal = goalSchema.extend({
   createdAt: z.date().transform((d) => d.toISOString()),
@@ -1230,6 +1230,52 @@ export class Store {
     });
   }
 
+  async retryCiRepair(goalId: string, ownerId: string, repairId: string): Promise<Goal> {
+    return this.transaction(async (client) => {
+      const goal = await goalFrom(client, goalId, true);
+      if (!goal || goal.ownerId !== ownerId) throw new StoreError(404, "Goal not found");
+      if (goal.stopRequested || !["queued", "running", "awaiting_review"].includes(goal.state))
+        throw conflict("Resume the project before retrying a repair");
+      const result = await client.query<{ job_id: string; head: string }>(
+        `SELECT r.job_id,r.head FROM ci_repairs r JOIN jobs j ON j.id=r.job_id
+         WHERE r.id=$1 AND j.goal_id=$2 AND j.stage='awaiting_review'
+         AND j.pull_request->>'state'='open' AND r.state='failed'
+         AND r.retryable AND NOT r.publication_started FOR UPDATE OF r,j`,
+        [repairId, goalId],
+      );
+      const repair = result.rows[0];
+      if (!repair) {
+        const queued = await client.query(
+          "SELECT 1 FROM ci_repairs r JOIN jobs j ON j.id=r.job_id WHERE r.retry_of=$1 AND j.goal_id=$2",
+          [repairId, goalId],
+        );
+        if (queued.rowCount) return goal;
+        throw conflict("This repair cannot be safely retried");
+      }
+      const feedback = await client.query(
+        "SELECT 1 FROM pr_feedback WHERE job_id=$1 AND state IN ('running','failed')",
+        [repair.job_id],
+      );
+      if (feedback.rowCount)
+        throw conflict("Resolve the pending PR feedback before retrying a repair");
+      await client.query("UPDATE ci_repairs SET state='superseded' WHERE id=$1", [repairId]);
+      await client.query(
+        `INSERT INTO ci_repairs(id,job_id,head,state,lease_owner,lease_expires_at,retry_of)
+         VALUES($1,$2,$3,'waiting','',clock_timestamp(),$4)`,
+        [randomUUID(), repair.job_id, repair.head, repairId],
+      );
+      await client.query("UPDATE jobs SET ci_review_requested=true WHERE id=$1", [repair.job_id]);
+      await addEvent(
+        client,
+        goalId,
+        "ci_repair_retry_queued",
+        "Manual repair retry queued",
+        repair.job_id,
+      );
+      return (await goalFrom(client, goalId))!;
+    });
+  }
+
   async startCiRepair(jobId: string, head: string, workerId: string): Promise<string | null> {
     return this.transaction(async (client) => {
       const { row, goal } = await lockJob(client, jobId);
@@ -1293,7 +1339,7 @@ export class Store {
       );
       if (resumed.rows[0]) return resumed.rows[0].id;
       const previous = await client.query<{ head: string; state: string }>(
-        "SELECT head,state FROM ci_repairs WHERE job_id=$1",
+        "SELECT head,state FROM ci_repairs WHERE job_id=$1 AND state <> 'superseded'",
         [jobId],
       );
       if (
@@ -1426,12 +1472,13 @@ export class Store {
     succeeded: boolean,
     message: string,
     publishedHeadSha?: string,
+    retryable = false,
   ): Promise<void> {
     await this.transaction(async (client) => {
       const result = await client.query<{ goal_id: string; job_id: string }>(
-        `UPDATE ci_repairs r SET state=$3 FROM jobs j
+        `UPDATE ci_repairs r SET state=$3,retryable=$4 AND NOT r.publication_started FROM jobs j
         WHERE r.id=$1 AND r.lease_owner=$2 AND r.state='running' AND r.job_id=j.id RETURNING j.goal_id,j.id AS job_id`,
-        [id, workerId, succeeded ? "completed" : "failed"],
+        [id, workerId, succeeded ? "completed" : "failed", retryable],
       );
       if (result.rows[0])
         if (publishedHeadSha)

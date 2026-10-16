@@ -96,7 +96,7 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ci_reviewed_at timestamptz;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS readiness_pending boolean NOT NULL DEFAULT false;
 
 ALTER TABLE ci_repairs DROP CONSTRAINT IF EXISTS ci_repairs_state_check;
-ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('running','waiting','completed','failed'));
+ALTER TABLE ci_repairs ADD CONSTRAINT ci_repairs_state_check CHECK (state IN ('running','waiting','completed','failed','superseded'));
 
 ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;
 
@@ -142,3 +142,15 @@ CREATE TABLE IF NOT EXISTS pr_feedback (
   UNIQUE(job_id, kind, external_id, revision)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pr_feedback_one_running ON pr_feedback(job_id) WHERE state='running';
+
+-- Manual retries retain the failed attempt and get a fresh lease/artifact identity.
+ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS retryable boolean NOT NULL DEFAULT false;
+ALTER TABLE ci_repairs ADD COLUMN IF NOT EXISTS retry_of uuid REFERENCES ci_repairs(id);
+ALTER TABLE ci_repairs DROP CONSTRAINT IF EXISTS ci_repairs_job_id_head_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ci_repairs_active_head ON ci_repairs(job_id, head) WHERE state <> 'superseded';
+-- Recover cleanup evidence for failures recorded before retryability was persisted.
+UPDATE ci_repairs r SET retryable=true
+WHERE r.state='failed' AND NOT r.publication_started AND NOT r.retryable
+  AND NOT EXISTS (SELECT 1 FROM ci_repairs newer WHERE newer.job_id=r.job_id AND newer.created_at>r.created_at)
+  AND (SELECT e.message FROM goal_events e WHERE e.job_id=r.job_id AND e.type='ci_repair'
+       AND e.created_at>=r.created_at ORDER BY e.id DESC LIMIT 1) LIKE 'Deletion confirmed for sandbox %';

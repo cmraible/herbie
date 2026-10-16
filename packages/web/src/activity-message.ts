@@ -54,6 +54,8 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
       return prNumber
         ? `Pull request #${prNumber} is ready for review`
         : "Pull request is ready for review";
+    case "ci_repair_retry_queued":
+      return "Manual repair retry queued";
     case "ci_repair_started":
       return "Agent is fixing failing checks";
     case "external_change_paused":

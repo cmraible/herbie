@@ -83,6 +83,13 @@ Check the goal's events and `docker compose logs herbie` first.
   the model. Fix credentials or connectivity and let recovery proceed. After resolving
   a blocking conflict, `pnpm cli retry-publication GOAL_ID` requests another checked
   publication attempt; it does not retry sandbox execution.
+- **CI repair failure:** The project shows **Retry repair** when environment cleanup
+  was confirmed and publication never started. This queues a fresh repair on the
+  existing PR and preserves the failed repair's history. Duplicate requests queue
+  only one retry. Herbie rechecks the PR and checks before running; changed heads
+  pause the project, and passing checks discard the queued repair. Paused projects
+  must be resumed first. Failures with unknown cleanup or a possible push require
+  operator inspection. Repairs are not automatically retried.
 - **`needs_attention`:** Inspect the GitHub branch/PR and verify Daytona cleanup using
   the recorded sandbox ID. Uncertain execution or cleanup is not retried automatically.
   Cancellation does not prove cleanup succeeded or undo remote writes.
