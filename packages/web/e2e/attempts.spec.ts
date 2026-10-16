@@ -90,8 +90,9 @@ test("run selection defaults to latest and keeps statuses, PRs and activity sepa
     "href",
     "https://demo.invalid/pr/1",
   );
-  await expect(one.locator(".badge")).toHaveClass(/status-completed/);
+  await expect(one.locator(".badge")).toHaveCSS("color", "rgb(196, 165, 239)");
   await expect(two.locator(".badge")).toHaveClass(/status-awaiting_review/);
+  await expect(two.locator(".badge")).toHaveCSS("color", "rgb(112, 201, 152)");
   await expect.poll(() => page.getByRole("button", { pressed: true }).count()).toBe(1);
   await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
   await expect(page.getByRole("button", { name: "Goal history" })).toHaveCount(0);

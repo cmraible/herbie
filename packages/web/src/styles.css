@@ -243,11 +243,9 @@ h2 {
 .status-running,
 .status-ready,
 .status-publishing,
+.status-awaiting_review,
 .status-completed {
   --status-color: #70c998;
-}
-.status-awaiting_review {
-  --status-color: #e4c36c;
 }
 .status-needs_attention,
 .status-failed {
@@ -256,7 +254,8 @@ h2 {
 .status-queued {
   --status-color: #8eb6ec;
 }
-.status-paused {
+.status-paused,
+.status-merged {
   --status-color: #c4a5ef;
 }
 .status-cancelled {
