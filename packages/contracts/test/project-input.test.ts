@@ -48,3 +48,18 @@ test("reasoning effort defaults for legacy projects and supports updates", async
   assert.deepEqual(projectUpdate.parse({ reasoningEffort: "high" }), { reasoningEffort: "high" });
   assert.equal(projectUpdate.safeParse({ reasoningEffort: "" }).success, false);
 });
+
+test("environment sizing defaults to inherited and requires positive whole numbers", async () => {
+  const { projectUpdate } = await import("../src/index.js");
+  const input = { repository: "demo/example", prompt: "Optimize verification" };
+  assert.equal(projectInput.parse(input).resources, null);
+  assert.deepEqual(projectUpdate.parse({ resources: null }), { resources: null });
+  for (const resources of [
+    { cpu: 0, memory: 8, disk: 10 },
+    { cpu: 4, memory: 1.5, disk: 10 },
+    { cpu: 4, memory: 8 },
+    { cpu: 4, memory: 8, disk: 10, gpu: 1 },
+  ]) {
+    assert.equal(projectInput.safeParse({ ...input, resources }).success, false);
+  }
+});

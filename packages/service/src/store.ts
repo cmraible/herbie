@@ -22,7 +22,7 @@ import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import type { PullRequestFeedback, PublicationPhase } from "./adapters.js";
 import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
 
-const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, model, reasoning_effort AS "reasoningEffort",
+const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
   max_wip AS "maxWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
@@ -101,7 +101,7 @@ export class StoreError extends Error {
 }
 const conflict = (message: string) => new StoreError(409, message);
 function requestFingerprint(
-  { repository, prompt, name, maxWip, model, reasoningEffort }: ProjectInput,
+  { repository, prompt, name, maxWip, model, reasoningEffort, resources }: ProjectInput,
   mode: Project["mode"],
   legacyLimit?: number,
 ): string {
@@ -112,6 +112,7 @@ function requestFingerprint(
         prompt,
         ...(legacyLimit === undefined ? {} : { maxAttempts: legacyLimit }),
         mode,
+        ...(resources == null ? {} : { resources }),
         ...(name === undefined ? {} : { name }),
         ...(model === undefined || model === "gpt-6-luna" ? {} : { model }),
         ...(reasoningEffort === undefined || reasoningEffort === "low" ? {} : { reasoningEffort }),
@@ -354,7 +355,7 @@ export class Store {
       const id = randomUUID();
       if (name === undefined) throw new Error("Missing project name");
       await client.query(
-        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'queued')",
+        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued')",
         [
           id,
           ownerId,
@@ -365,6 +366,7 @@ export class Store {
           request.maxWip,
           request.model,
           request.reasoningEffort,
+          request.resources,
         ],
       );
       await client.query(
@@ -411,8 +413,17 @@ export class Store {
         [id, requestFingerprint({ ...project, name: undefined }, project.mode)],
       );
       const result = await client.query<Record<string, unknown>>(
-        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
-        [id, parsed.name, parsed.prompt, parsed.maxWip, parsed.model, parsed.reasoningEffort],
+        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
+        [
+          id,
+          parsed.name,
+          parsed.prompt,
+          parsed.maxWip,
+          parsed.model,
+          parsed.reasoningEffort,
+          parsed.resources !== undefined,
+          parsed.resources,
+        ],
       );
       const updated = databaseProject.parse(result.rows[0]);
       if (

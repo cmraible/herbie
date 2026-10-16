@@ -24,6 +24,19 @@ export const reasoningEffort = z
   .string()
   .regex(/^[a-z][a-z0-9_]*$/)
   .max(40);
+export const environmentResources = z
+  .object({
+    cpu: z.number().int().positive().safe(),
+    memory: z.number().int().positive().safe(),
+    disk: z.number().int().positive().safe(),
+  })
+  .strict();
+export type EnvironmentResources = z.infer<typeof environmentResources>;
+export const environmentLimits = z.object({
+  cpu: z.number().positive().nullable(),
+  memory: z.number().positive().nullable(),
+  disk: z.number().positive().nullable(),
+});
 export const projectInput = z
   .object({
     name: z
@@ -36,11 +49,13 @@ export const projectInput = z
     prompt: projectPrompt,
     model: projectModel.default("gpt-6-luna"),
     reasoningEffort: reasoningEffort.default("low"),
+    resources: environmentResources.nullable().default(null),
     maxWip: z.number().int().min(1).max(2147483647).default(1),
   })
   .strict();
 export const projectUpdate = z
   .object({
+    resources: environmentResources.nullable().optional(),
     name: projectName.optional(),
     prompt: projectPrompt.optional(),
     model: projectModel.optional(),

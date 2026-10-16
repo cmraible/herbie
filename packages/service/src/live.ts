@@ -1,3 +1,4 @@
+import { createEnvironmentLimits, validateEnvironmentResources } from "./environment-limits.js";
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 import { Daytona } from "@daytona/sdk";
 import { runDaytonaAttempt } from "@herbie/loop/daytona-attempt";
@@ -41,8 +42,10 @@ export function createLiveAdapters(
     if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
       throw new Error("Daytona API URL must use HTTPS without credentials");
   }
+  const environmentLimits = config ? createEnvironmentLimits(config) : undefined;
   return {
     mode: "live",
+    environmentLimits,
     ...(config
       ? {
           async feedback(execution: Execution) {
@@ -197,6 +200,9 @@ ${execution.ciRepair.details}`
 Other pull requests for this project are still open:
 ${openPullRequests.map((pr) => `- ${pr.url} (branch: ${pr.branch})`).join("\n")}
 Inspect these branches before choosing your change. Make one small, independently mergeable contribution on the current default branch. Do not duplicate or depend on their unmerged changes.`;
+      if (execution.project.resources) {
+        validateEnvironmentResources(execution.project.resources, await environmentLimits!());
+      }
       const daytona = new Daytona({
         apiKey: config.apiKey,
         apiUrl: config.apiUrl,
@@ -218,6 +224,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),
           secrets: { OPENAI_API_KEY: config.openaiSecretName },
           snapshot: config.snapshot,
+          resources: execution.project.resources ?? undefined,
           domainAllowList: config.domainAllowList,
           outboundProxyUrl: config.outboundProxyUrl,
         },

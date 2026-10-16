@@ -194,3 +194,8 @@ WHERE r.state='failed' AND NOT r.publication_started AND NOT r.retryable
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS model text NOT NULL DEFAULT 'gpt-6-luna';
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasoning_effort text NOT NULL DEFAULT 'low';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS resources jsonb CHECK (resources IS NULL OR (
+  jsonb_typeof(resources)='object' AND resources ?& ARRAY['cpu','memory','disk']
+  AND (resources->>'cpu')::numeric > 0 AND (resources->>'memory')::numeric > 0 AND (resources->>'disk')::numeric > 0
+));

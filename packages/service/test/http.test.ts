@@ -25,7 +25,10 @@ for (const version of [undefined, "2"])
     const server = createApiServer({
       store,
       auth,
-      adapters: createDemoAdapters(),
+      adapters: {
+        ...createDemoAdapters(),
+        environmentLimits: async () => ({ cpu: 4, memory: 8, disk: 10 }),
+      },
       publicUrl: "http://localhost:8787",
     });
     t.after(async () => {
@@ -46,7 +49,7 @@ for (const version of [undefined, "2"])
       repository: "demo/example",
       name: "Addition fix",
       prompt: "Make addition correct",
-      ...(version ? { maxWip: 2 } : {}),
+      ...(version ? { maxWip: 2, resources: { cpu: 4, memory: 8, disk: 10 } } : {}),
     };
     const key = randomUUID();
     const versionHeaders: Record<string, string> = version
@@ -81,6 +84,14 @@ for (const version of [undefined, "2"])
     assert.equal(replay.status, 200);
     assert.equal(responseSchema.parse(await replay.json()).id, project.id);
     assert.equal(project.name, "Addition fix");
+    assert.deepEqual(project.resources, version ? { cpu: 4, memory: 8, disk: 10 } : null);
+    const overLimit = await fetch(`${base}/api/projects/${project.id}`, {
+      method: "POST",
+      headers: { ...headers, origin: "http://localhost:8787" },
+      body: JSON.stringify({ resources: { cpu: 4, memory: 9, disk: 10 } }),
+    });
+    assert.equal(overLimit.status, 400);
+    assert.deepEqual((await store.getProject(project.id))?.resources, project.resources);
     const status = responseSchema.parse(
       await (await fetch(`${base}/api/projects/${project.id}`, { headers })).json(),
     );

@@ -1278,3 +1278,39 @@ integration(
     assert.equal(updated.reasoningEffort, "medium");
   },
 );
+
+integration(
+  "resource settings persist, reset to defaults, and participate in request identity",
+  async () => {
+    const resources = { cpu: 4, memory: 8, disk: 10 };
+    const request = { ...input(), resources };
+    const key = randomUUID();
+    const { project } = await store.createProject("owner", request, "demo", key);
+    assert.deepEqual(project.resources, resources);
+    await assert.rejects(
+      store.createProject(
+        "owner",
+        { ...request, resources: { ...resources, memory: 4 } },
+        "demo",
+        key,
+      ),
+      /different request/,
+    );
+    assert.deepEqual(
+      (await store.updateProject(project.id, "owner", { name: "Renamed" })).resources,
+      resources,
+    );
+    assert.equal(
+      (await store.updateProject(project.id, "owner", { resources: null })).resources,
+      null,
+    );
+    assert.deepEqual(
+      (await store.createProject("owner", request, "demo", key)).project.resources,
+      null,
+    );
+    await assert.rejects(
+      store.updateProject(project.id, "someone-else", { resources }),
+      /not found/,
+    );
+  },
+);

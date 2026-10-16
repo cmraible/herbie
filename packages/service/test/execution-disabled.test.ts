@@ -24,6 +24,7 @@ test("live adapters without approved execution configuration cannot start an att
       ownerId: "user",
       repository: "demo/example",
       name: "Disabled work",
+      resources: null,
       prompt: "Disabled work",
       attemptCount: 0,
       maxWip: 1,

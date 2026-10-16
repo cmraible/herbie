@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { projectInput, reasoningEffort } from "@herbie/contracts";
+import { projectInput, reasoningEffort, environmentResources } from "@herbie/contracts";
 // Preserve legacy names so retries keep the original idempotency payload.
 export const draftSchema = z.object({
   repository: z.string(),
@@ -7,6 +7,7 @@ export const draftSchema = z.object({
   prompt: z.string(),
   model: z.string().default("gpt-6-luna"),
   reasoningEffort: reasoningEffort.default("low"),
+  resources: environmentResources.nullable().default(null),
   maxWip: z.string().default("1"),
   requestId: z.string().uuid(),
 });
@@ -18,6 +19,7 @@ export function newDraft(repository = ""): Draft {
     model: "gpt-6-luna",
     reasoningEffort: "low",
     maxWip: "1",
+    resources: null,
     requestId: crypto.randomUUID(),
   };
 }
@@ -26,6 +28,7 @@ export function parseDraft(draft: Draft) {
     repository: draft.repository,
     ...(draft.name?.trim() ? { name: draft.name } : {}),
     prompt: draft.prompt,
+    ...(draft.resources === null ? {} : { resources: draft.resources }),
     model: draft.model,
     reasoningEffort: draft.reasoningEffort,
     maxWip: Number(draft.maxWip),

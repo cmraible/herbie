@@ -51,6 +51,7 @@ function fixtures() {
     name: "Make signup errors helpful",
     prompt:
       "Validate email addresses before submitting the signup form. Show clear, actionable errors next to each field, preserve entered values after a failed submission, and add coverage for the common failure cases.",
+    resources: null,
     maxWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
@@ -198,6 +199,8 @@ export function fixtureApi(): Plugin {
           if (url.pathname === "/api/session")
             return send({ mode: "live", user: { id: "local-preview", login: "chris" } });
           if (url.pathname === "/api/reasoning-efforts") return send(["low", "medium", "high"]);
+          if (url.pathname === "/api/environment-limits")
+            return send({ cpu: 8, memory: 16, disk: 30 });
           if (url.pathname === "/api/models") return send(["gpt-6-luna", "gpt-6-astra"]);
           if (url.pathname === "/api/repositories")
             return send([{ fullName: repository, defaultBranch: "main", installationId: 1 }]);
