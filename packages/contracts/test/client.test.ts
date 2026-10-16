@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
-import { ApiError, createClient } from "../src/client.js";
+import { ApiError, clientStreamMessageSchema, createClient } from "../src/client.js";
 
 async function withServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void,
@@ -102,6 +102,61 @@ test("project reads normalize legacy attempt fields from older servers", async (
       assert.deepEqual(await client.projects(), [project]);
     },
   );
+});
+
+test("legacy stream messages normalize attempt fields", () => {
+  const projectId = "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d";
+  const runId = "9d5058b1-9f2d-45eb-87d5-387c9a6e7353";
+  const project = {
+    id: projectId,
+    ownerId: "owner",
+    repository: "demo/example",
+    name: "Work",
+    prompt: "Work",
+    model: "gpt-6-luna",
+    state: "queued",
+    attemptCount: 1,
+    attempts: [
+      {
+        id: runId,
+        number: 1,
+        state: "running",
+        createdAt: "2026-10-15T00:00:00Z",
+        pullRequest: null,
+      },
+    ],
+    createdAt: "2026-10-15T00:00:00Z",
+    updatedAt: "2026-10-15T00:00:00Z",
+    mode: "demo",
+    stopRequested: null,
+    pullRequest: null,
+    cleanupStatus: "not_required",
+    error: null,
+  };
+  const projectUpdate = clientStreamMessageSchema.parse({ type: "projects", projects: [project] });
+  assert.equal(projectUpdate.type, "projects");
+  if (projectUpdate.type === "projects")
+    assert.equal(projectUpdate.projects[0].runs?.[0].id, runId);
+
+  const eventUpdate = clientStreamMessageSchema.parse({
+    type: "events",
+    projectId,
+    events: [
+      {
+        id: 1,
+        projectId,
+        attemptId: runId,
+        type: "attempt_started",
+        message: "Run started",
+        createdAt: "2026-10-15T00:00:00Z",
+      },
+    ],
+  });
+  assert.equal(eventUpdate.type, "events");
+  if (eventUpdate.type === "events") {
+    assert.equal(eventUpdate.events[0].runId, runId);
+    assert.equal(eventUpdate.events[0].type, "run_started");
+  }
 });
 
 for (const maxWip of [undefined, 1, 2])

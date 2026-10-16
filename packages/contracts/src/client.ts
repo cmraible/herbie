@@ -8,6 +8,7 @@ import {
   projectSchema,
   runSchema,
   eventSchema,
+  streamMessageSchema,
   sessionSchema,
   repositorySchema,
   repositoryDiscoverySchema,
@@ -30,7 +31,29 @@ const legacyProjectSchema = projectSchema
     runCount: attemptCount,
     runs: attempts,
   }));
-const clientProjectSchema = z.union([projectSchema, legacyProjectSchema]);
+export const clientProjectSchema = z.union([projectSchema, legacyProjectSchema]);
+
+const legacyEventSchema = eventSchema
+  .omit({ runId: true })
+  .extend({ attemptId: z.string().uuid().nullable().optional() })
+  .strict()
+  .transform(({ attemptId, type, ...event }) => ({
+    ...event,
+    type: type === "attempt" ? "run" : type === "attempt_started" ? "run_started" : type,
+    runId: attemptId,
+  }));
+const legacyStreamMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("projects"), projects: z.array(clientProjectSchema) }),
+  z.object({
+    type: z.literal("events"),
+    projectId: z.string().uuid(),
+    events: z.array(legacyEventSchema),
+  }),
+]);
+export const clientStreamMessageSchema = z.union([
+  legacyStreamMessageSchema,
+  z.lazy(() => streamMessageSchema),
+]);
 
 export class ApiError extends Error {
   constructor(

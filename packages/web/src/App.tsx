@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { createClient, ApiError } from "@herbie/contracts/client";
+import { createClient, ApiError, clientStreamMessageSchema } from "@herbie/contracts/client";
 import {
   githubPermissionsMessage,
-  streamMessageSchema,
   type Project,
   type ProjectEvent,
   type ProjectAction,
@@ -350,7 +349,7 @@ export function App() {
       socket.onmessage = (event) => {
         if (disposed) return;
         try {
-          const update = streamMessageSchema.parse(JSON.parse(event.data));
+          const update = clientStreamMessageSchema.parse(JSON.parse(event.data));
           delay = 500;
           setReconnecting(false);
           if (update.type === "projects") {
