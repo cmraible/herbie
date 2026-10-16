@@ -166,7 +166,8 @@ case "$stage" in
     ;;
   browser)
     start_browser_install
-    run_step build pnpm build
+    # CLI consent scenarios use the service; include its workspace dependencies.
+    run_step build pnpm --filter @herbie/web... --filter @herbie/service... build
     wait_browser_install
     start_web_preview
     run_browser
