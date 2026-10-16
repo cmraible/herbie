@@ -1,3 +1,4 @@
+import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure } from "./diagnostic-log.js";
@@ -305,10 +306,12 @@ export async function runWorker(
         await reconcileReviews(store, adapters);
         nextReconciliation = Date.now() + 30_000;
       }
-      if (adapters.ciStatus && Date.now() >= nextCiPoll) {
-        await store.requestCiReview();
+      if ((adapters.ciStatus || adapters.feedback) && Date.now() >= nextCiPoll) {
+        if (adapters.ciStatus) await store.requestCiReview();
+        if (adapters.feedback) await store.requestFeedbackReview();
         nextCiPoll = Date.now() + 10 * 60_000;
       }
+      if (!signal.aborted) await runFeedbackOnce(store, adapters, workerId);
       if (!signal.aborted) await runCiRepairOnce(store, adapters, workerId);
       if (!signal.aborted) await runWorkerOnce(store, adapters, workerId);
     } catch (error) {

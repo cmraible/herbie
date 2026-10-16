@@ -311,6 +311,25 @@ export function createApiServer(options: ApiOptions) {
           .safeParse(JSON.parse(payload.toString("utf8")));
         if (event.success) await store.requestCiReview(event.data.repository.full_name);
       }
+      if (
+        executionEnabled &&
+        adapters.mode === "live" &&
+        ["issue_comment", "pull_request_review_comment", "pull_request_review"].includes(
+          String(request.headers["x-github-event"]),
+        )
+      ) {
+        const event = z
+          .object({
+            repository: z.object({ full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }),
+            issue: z.object({ pull_request: z.unknown().optional() }).optional(),
+          })
+          .safeParse(JSON.parse(payload.toString("utf8")));
+        if (
+          event.success &&
+          (request.headers["x-github-event"] !== "issue_comment" || event.data.issue?.pull_request)
+        )
+          await store.requestFeedbackReview(event.data.repository.full_name);
+      }
       json(response, 200, { ok: true });
       return;
     }

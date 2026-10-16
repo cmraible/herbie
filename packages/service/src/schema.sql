@@ -125,3 +125,20 @@ CREATE TRIGGER notify_goal_change AFTER INSERT OR UPDATE OF stage, pull_request 
 DROP TRIGGER IF EXISTS notify_goal_change ON goal_events;
 CREATE TRIGGER notify_goal_change AFTER INSERT ON goal_events
   FOR EACH ROW EXECUTE FUNCTION notify_goal_change();
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS feedback_requested boolean NOT NULL DEFAULT false;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS feedback_reviewed_at timestamptz;
+CREATE TABLE IF NOT EXISTS pr_feedback (
+  id uuid PRIMARY KEY,
+  job_id uuid NOT NULL REFERENCES jobs(id),
+  kind text NOT NULL,
+  external_id bigint NOT NULL,
+  revision text NOT NULL,
+  state text NOT NULL CHECK (state IN ('pending','running','completed','failed')),
+  lease_owner text,
+  lease_expires_at timestamptz,
+  artifact jsonb,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE(job_id, kind, external_id, revision)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pr_feedback_one_running ON pr_feedback(job_id) WHERE state='running';

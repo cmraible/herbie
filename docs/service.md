@@ -8,8 +8,9 @@ For local installation, follow [setup](setup.md). For hosted deployment, see the
 Install the App on a **public repository** where you have push access. Configure:
 
 - **Permissions:** Contents, Pull requests, and Workflows read/write; Checks, Commit statuses,
-  Actions, and Metadata read. Existing installations must approve all updated permissions.
-- **Events:** Pull request, Check run, Check suite, and Status.
+  Actions, Issues, and Metadata read. Existing installations must approve all updated permissions.
+- **Events:** Pull request, Pull request review, Pull request review comment, Issue comment,
+  Check run, Check suite, and Status.
 - **Redirect on update:** Enabled. Accept permission changes on existing installations.
 
 Use the hostname from `HERBIE_PUBLIC_URL`:
@@ -39,7 +40,28 @@ Daytona sandboxes; GitHub write credentials stay on the Herbie host.
 - Passing CI can mark a draft PR ready for review and request review from the project owner; Herbie does not merge it. Review requests retry after failures without re-requesting users who are already requested or have reviewed.
   Missing checks or unsupported ruleset-required workflows leave it as a draft.
 
-Signed webhooks trigger PR/CI reconciliation; a ten-minute server poll covers missed events.
+Human PR comments, inline comments, and submitted reviews trigger a feedback attempt
+on the existing PR. The agent decides whether to ignore, reply, or update the code
+and reply. Inline replies stay in their original thread. Bot comments provide
+conversation context but never trigger attempts. Edits to feedback receive a new
+decision; duplicate deliveries and line movements do not. Existing feedback on
+tracked open PRs is considered on the first poll after upgrading.
+
+Code updates require successful local verification and confirmed sandbox deletion.
+Feedback and CI repair sessions do not run concurrently on the same PR. Paused or
+cancelled goals do not process feedback. Feedback failures or expired leases block
+further feedback and CI repairs on that PR, with a `pr_feedback_failed` event for
+inspection. A failed CI repair also blocks feedback until manually recovered.
+Inspect `pr_feedback.artifact`, sandbox cleanup, and remote writes before
+manual recovery; uncertain pushes or replies are never automatically replayed.
+Completed decisions and replies are recorded in goal events and saved artifacts.
+
+Enable the new event subscriptions in the GitHub App settings. GitHub requires
+Issues read permission to subscribe to [Issue comment events](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment);
+existing installations must accept that permission update. PR comment API writes
+use the existing Pull requests write permission.
+
+Signed webhooks trigger PR/CI/feedback reconciliation; a ten-minute server poll covers missed events.
 The browser receives goal, PR, and run-event updates over `/api/stream` WebSockets
 without polling. Reverse proxies must forward WebSocket upgrades. Each API process
 uses one PostgreSQL LISTEN connection from its pool, requiring a direct or session-pooled

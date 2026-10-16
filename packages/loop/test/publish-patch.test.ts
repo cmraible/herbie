@@ -55,6 +55,7 @@ async function fixture(t: TestContext, extraFiles = false) {
     "codex-turn",
     "codex-process",
     "daytona-runner",
+    "feedback-decision",
     "diagnostic-log",
   ]) {
     await writeFile(join(runtime, `${name}.js`), "");

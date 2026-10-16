@@ -1,4 +1,6 @@
 import { streamAgentTranscript } from "./agent-transcript.js";
+export { parseFeedbackDecision } from "./feedback-decision.js";
+import { parseFeedbackDecision, type FeedbackDecision } from "./feedback-decision.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
@@ -46,11 +48,13 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   goal: string;
   verifyLocally?: boolean;
   onActivity?: (message: string) => Promise<void>;
+  feedback?: boolean;
 };
 
 export interface DaytonaAttemptChanges {
   baseCommit: string;
   patch: Buffer;
+  feedbackDecision?: FeedbackDecision;
   // Optional only for artifacts saved before agent-authored descriptions.
   pullRequestBody?: string;
   // Optional only for artifacts saved before agent-authored titles.
@@ -154,6 +158,7 @@ export async function runDaytonaAttempt(
       "codex-turn.js",
       "codex-process.js",
       "daytona-runner.js",
+      "feedback-decision.js",
       "diagnostic-log.js",
     ].map(async (name) => ({ name, contents: await readFile(new URL(name, runtimeDirectory)) })),
   );
@@ -235,7 +240,12 @@ export async function runDaytonaAttempt(
     await sandbox.fs.uploadFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`, 30);
     await sandbox.fs.uploadFile(
       Buffer.from(
-        JSON.stringify({ cwd, goal: request.goal, verifyLocally: request.verifyLocally }),
+        JSON.stringify({
+          cwd,
+          goal: request.goal,
+          verifyLocally: request.verifyLocally,
+          feedback: request.feedback,
+        }),
       ),
       `${directory}/attempt.json`,
       30,
@@ -324,12 +334,21 @@ export async function runDaytonaAttempt(
       /[\r\n]/.test(artifact.pullRequestTitle)
     )
       throw new Error("Invalid pull request title");
+    const feedbackDecision = request.feedback
+      ? parseFeedbackDecision(
+          "feedbackDecision" in artifact ? artifact.feedbackDecision : undefined,
+        )
+      : undefined;
+    if (feedbackDecision && (feedbackDecision.action === "update") !== patch.length > 0)
+      throw new Error("Feedback decision does not match repository changes");
     if (
       request.verifyLocally &&
+      (!feedbackDecision || feedbackDecision.action === "update") &&
       (!("localChecksPassed" in artifact) || artifact.localChecksPassed !== true)
     )
       throw new Error("Local verification did not pass");
     changes = {
+      ...(feedbackDecision ? { feedbackDecision } : {}),
       pullRequestTitle: artifact.pullRequestTitle.trim(),
       baseCommit: artifact.baseCommit,
       patch,
@@ -365,7 +384,10 @@ export async function runDaytonaAttempt(
   request.signal?.removeEventListener("abort", abort);
   if (!failures.length && changes) {
     changes.verification = {
-      ...(request.verifyLocally ? { localChecksPassed: true as const } : {}),
+      ...(request.verifyLocally &&
+      (!changes.feedbackDecision || changes.feedbackDecision.action === "update")
+        ? { localChecksPassed: true as const }
+        : {}),
       version: 3,
       repoUrl: repo.href,
       baseCommit: changes.baseCommit,

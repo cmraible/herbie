@@ -1,3 +1,4 @@
+import { githubFeedback } from "./github-feedback.js";
 import { registerDiagnosticSecret, logFailure } from "./diagnostic-log.js";
 import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
@@ -653,6 +654,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     return null;
   }
   return {
+    ...githubFeedback(request),
     ciStatus,
     discoverRepositories,
     repositories,

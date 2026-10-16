@@ -14,10 +14,27 @@ export interface Execution {
   signal?: AbortSignal;
   ciRepair?: CiFailure;
   onActivity?: (message: string) => Promise<void>;
+  feedback?: PullRequestUpdate & { item: PullRequestFeedback; context: PullRequestFeedback[] };
 }
-export interface CiFailure {
+export interface PullRequestFeedback {
+  kind: "comment" | "inline" | "review";
+  id: number;
+  revision: string;
+  author: string;
+  bot?: boolean;
+  body: string;
+  url: string;
+  state?: string;
+  path?: string;
+  line?: number | null;
+  diff?: string;
+  replyTo?: number;
+}
+export interface PullRequestUpdate {
   head: string;
   pullRequest: { number: number; url: string };
+}
+export interface CiFailure extends PullRequestUpdate {
   details: string;
 }
 export type CiStatus =
@@ -49,6 +66,12 @@ export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
+  feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
+  replyToFeedback?(
+    execution: Execution,
+    body: string,
+    requireLease: () => Promise<void>,
+  ): Promise<void>;
   requestReview?(execution: Execution): Promise<void>;
   readinessState?(execution: Execution): Promise<"ready" | "draft" | "closed">;
   ciStatus?(execution: Execution): Promise<CiStatus | null>;
