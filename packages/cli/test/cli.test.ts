@@ -460,7 +460,12 @@ test("rename sends a validated name for the selected project", async () => {
 test("edit sends a validated prompt for the selected project", async () => {
   const prompts: unknown[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === `/api/projects/${projectId}/prompt` && request.method === "POST") {
+    if (
+      [`/api/projects/${projectId}/prompt`, `/api/projects/${projectId}`].includes(
+        request.url ?? "",
+      ) &&
+      request.method === "POST"
+    ) {
       let body = "";
       request.setEncoding("utf8");
       request.on("data", (chunk: string) => {
@@ -481,6 +486,10 @@ test("edit sends a validated prompt for the selected project", async () => {
     assert.equal(await app.invoke(["edit", projectId, "--prompt", "  Better coverage  "]), 0);
     assert.deepEqual(prompts, [{ prompt: "Better coverage" }]);
     assert.equal(JSON.parse(app.output.at(-1) ?? "").prompt, "Better coverage");
+    assert.equal(await app.invoke(["edit", projectId, "--model", "   "]), 1);
+    assert.equal(await app.invoke(["edit", projectId, "--model", "custom-model"]), 0);
+    assert.deepEqual(prompts.at(-1), { model: "custom-model" });
+    assert.equal(JSON.parse(app.output.at(-1) ?? "").model, "custom-model");
   } finally {
     await app.close();
   }

@@ -13,6 +13,7 @@ export function startCodexThread(
   cwd: string,
   timeoutMs = 10_000,
   disposableDaytona = false,
+  model?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error("Codex thread start timed out")), timeoutMs);
@@ -55,7 +56,10 @@ export function startCodexThread(
         params: {
           cwd,
           ephemeral: true,
-          ...(disposableDaytona ? { model: "gpt-6-luna", modelProvider: "daytona_openai" } : {}),
+          ...(model ? { model } : {}),
+          ...(disposableDaytona
+            ? { model: model ?? "gpt-6-luna", modelProvider: "daytona_openai" }
+            : {}),
         },
       });
     } catch {

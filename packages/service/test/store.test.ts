@@ -1217,10 +1217,13 @@ integration(
     const edited = await store.updateProject(project.id, "owner", {
       name: "New name",
       prompt: "New prompt",
+      model: "custom-model",
       maxWip: 2,
     });
     assert.equal(edited.name, "New name");
     assert.equal(edited.prompt, "New prompt");
+    assert.equal(edited.model, "custom-model");
+    assert.equal((await store.getProject(project.id))?.model, "custom-model");
     assert.equal(edited.state, "queued");
     // Reducing capacity must also hold work already queued under the higher limit.
     await store.updateProject(project.id, "owner", { maxWip: 1 });
@@ -1244,3 +1247,16 @@ integration(
     assert.equal((await store.createProject("owner", request, "demo", key)).project.maxWip, 3);
   },
 );
+
+integration("project models persist and participate in idempotency", async () => {
+  const request = { ...input(), model: "custom-model" };
+  const key = randomUUID();
+  const { project } = await store.createProject("owner", request, "demo", key);
+  assert.equal(project.model, "custom-model");
+  assert.equal((await store.getProject(project.id))?.model, "custom-model");
+  assert.equal((await store.createProject("owner", request, "demo", key)).created, false);
+  await assert.rejects(
+    store.createProject("owner", { ...request, model: "another-model" }, "demo", key),
+    /Idempotency key/,
+  );
+});

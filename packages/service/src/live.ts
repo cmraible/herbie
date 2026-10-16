@@ -197,6 +197,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           repoUrl: `https://github.com/${execution.repository.repository}.git`,
           project,
           branch: (execution.feedback ?? execution.ciRepair) ? execution.branch : undefined,
+          model: execution.project.model,
           commit: (execution.feedback ?? execution.ciRepair)?.head,
           feedback: !!execution.feedback,
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),

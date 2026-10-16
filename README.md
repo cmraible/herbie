@@ -300,7 +300,7 @@ environment variables; it does not inherit arbitrary Codex authentication overri
 Only the disposable Daytona runner requests `externalSandbox` with restricted network
 access and no interactive approvals; Daytona supplies the isolation boundary. Normal
 host attempts retain server-owned sandbox and approval settings. The fixed model is
-`gpt-6-luna`, low effort, default service tier, with web search disabled and a 32K
+the project’s configured model (default `gpt-6-luna`), low effort, default service tier, with web search disabled and a 32K
 configured context window. Token-usage notifications do not trigger spending-based
 cancellation. Herbie does not impose a dollar spending cap. Attempt counts and the
 20-minute turn deadline still bound execution. Cancellation waits at most five
@@ -445,3 +445,5 @@ model. The transcript preserves exposed protocol output, not unavailable model
 internals. Treat transcript contents as private project data: tool output can
 include repository contents and sensitive values. No transcript bodies are sent
 to operational logs.
+
+Set a project’s model in the create/edit form, with `herbie start --model MODEL`, or with `herbie edit PROJECT_ID --model MODEL`. The default is `gpt-6-luna`. Changes apply to future runs, including feedback and CI repairs.

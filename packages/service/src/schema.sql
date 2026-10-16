@@ -190,3 +190,5 @@ WHERE r.state='failed' AND NOT r.publication_started AND NOT r.retryable
   AND NOT EXISTS (SELECT 1 FROM ci_repairs newer WHERE newer.job_id=r.job_id AND newer.created_at>r.created_at)
   AND (SELECT e.message FROM project_events e WHERE e.job_id=r.job_id AND e.type='ci_repair'
        AND e.created_at>=r.created_at ORDER BY e.id DESC LIMIT 1) LIKE 'Deletion confirmed for sandbox %';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS model text NOT NULL DEFAULT 'gpt-6-luna';

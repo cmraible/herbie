@@ -100,12 +100,16 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     projects: () => request("/api/projects", z.array(projectSchema)),
     project: (id: string) => request(projectPath(id), projectSchema),
     start: (input: ProjectInput, requestId: string) => {
-      const { maxWip, ...project } = projectInput.parse(input);
+      const { maxWip, model, ...project } = projectInput.parse(input);
       // The default must remain acceptable to older strict APIs during rolling upgrades.
       return request(
         "/api/projects",
         projectSchema,
-        maxWip === 1 ? project : { ...project, maxWip },
+        {
+          ...project,
+          ...(maxWip === 1 ? {} : { maxWip }),
+          ...(model === "gpt-6-luna" ? {} : { model }),
+        },
         requestId,
       );
     },

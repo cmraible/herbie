@@ -31,7 +31,6 @@ id -u compat >/dev/null 2>&1 || useradd -m -s /bin/bash compat
 test "$(id -u compat)" -ne 0
 mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
-model = "gpt-6-luna"
 model_provider = "daytona_openai"
 model_reasoning_effort = "low"
 model_context_window = 32768

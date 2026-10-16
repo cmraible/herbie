@@ -47,6 +47,7 @@ Explain the specific change you actually made, why you chose it, and how it help
   await runCodexAttempt("codex", ["app-server"], {
     cwd,
     project,
+    model: "model" in input && typeof input.model === "string" ? input.model : undefined,
     turnTimeoutMs: 20 * 60_000,
     disposableDaytona: true,
     onActivity: (message) =>

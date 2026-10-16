@@ -19,6 +19,7 @@ export const projectName = z
 export const projectRename = z.object({ name: projectName }).strict();
 export const projectPrompt = z.string().trim().min(1).max(8000);
 export const projectPromptEdit = z.object({ prompt: projectPrompt }).strict();
+export const projectModel = z.string().trim().min(1).max(200);
 export const projectInput = z
   .object({
     name: z
@@ -29,6 +30,7 @@ export const projectInput = z
       .optional(),
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     prompt: projectPrompt,
+    model: projectModel.default("gpt-6-luna"),
     maxWip: z.number().int().min(1).max(2147483647).default(1),
   })
   .strict();
@@ -36,6 +38,7 @@ export const projectUpdate = z
   .object({
     name: projectName.optional(),
     prompt: projectPrompt.optional(),
+    model: projectModel.optional(),
     maxWip: projectInput.shape.maxWip.removeDefault().optional(),
   })
   .strict()
