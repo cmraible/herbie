@@ -27,3 +27,15 @@ test("blank create names are omitted while renames must remain nonblank", () => 
     false,
   );
 });
+
+test("models default for existing projects and can be configured or updated", async () => {
+  const { projectUpdate } = await import("../src/index.js");
+  const input = { repository: "demo/example", prompt: "Fix arithmetic" };
+  assert.equal(projectInput.parse(input).model, "gpt-6-luna");
+  assert.equal(projectInput.parse({ ...input, model: " custom-model " }).model, "custom-model");
+  assert.deepEqual(projectUpdate.parse({ model: "custom-model" }), { model: "custom-model" });
+  for (const model of ["", "   ", "x".repeat(201)]) {
+    assert.equal(projectInput.safeParse({ ...input, model }).success, false);
+    assert.equal(projectUpdate.safeParse({ model }).success, false);
+  }
+});

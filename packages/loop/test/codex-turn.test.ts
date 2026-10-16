@@ -318,6 +318,7 @@ for (const early of [false, true]) {
     let settled = false;
     const done = runCodexTurn(lines, send, "thread-1", "Fix addition", {
       disposableDaytona: true,
+      model: "custom-model",
     }).then(() => {
       settled = true;
     });
@@ -327,7 +328,7 @@ for (const early of [false, true]) {
       params: {
         threadId: "thread-1",
         input: [{ type: "text", text: "Fix addition" }],
-        model: "gpt-6-luna",
+        model: "custom-model",
         effort: "low",
         serviceTierForTurn: "default",
         approvalPolicy: "never",

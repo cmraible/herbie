@@ -8,6 +8,7 @@ test("a new project needs only a repository and prompt", () => {
     repository: "demo/example",
     prompt: "Add regression coverage",
     maxWip: 1,
+    model: "gpt-6-luna",
   });
 });
 
@@ -28,6 +29,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     name: "Old custom name",
     prompt: "Fix arithmetic",
     maxWip: 1,
+    model: "gpt-6-luna",
   });
 });
 

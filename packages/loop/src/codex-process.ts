@@ -10,6 +10,7 @@ type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; shutdownMs?: n
 type AttemptOptions = ProcessOptions & {
   cwd: string;
   project: string;
+  model?: string;
   turnTimeoutMs?: number;
   onActivity?: (message: Record<string, unknown>) => void;
   interruptTimeoutMs?: number;
@@ -145,7 +146,14 @@ async function runCodexProcess(
       if (signal?.aborted) throw cancellation;
       const threadId = await Promise.race([
         failure.promise,
-        startCodexThread(lines, send, options.cwd, timeoutMs, options.disposableDaytona),
+        startCodexThread(
+          lines,
+          send,
+          options.cwd,
+          timeoutMs,
+          options.disposableDaytona,
+          options.model,
+        ),
       ]);
       if (signal?.aborted) throw cancellation;
       runningTurn = true;
@@ -154,6 +162,7 @@ async function runCodexProcess(
           failure.promise,
           runCodexTurn(lines, send, threadId, options.project, {
             signal,
+            model: options.model,
             timeoutMs: options.turnTimeoutMs,
             interruptTimeoutMs: options.interruptTimeoutMs,
             disposableDaytona: options.disposableDaytona,

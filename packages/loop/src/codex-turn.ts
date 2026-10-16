@@ -20,7 +20,9 @@ export function runCodexTurn(
     interruptTimeoutMs = 5_000,
     disposableDaytona = false,
     onActivity,
+    model,
   }: {
+    model?: string;
     timeoutMs?: number;
     signal?: AbortSignal;
     interruptTimeoutMs?: number;
@@ -131,9 +133,10 @@ export function runCodexTurn(
         params: {
           threadId,
           input: [{ type: "text", text: project }],
+          ...(model ? { model } : {}),
           ...(disposableDaytona
             ? {
-                model: "gpt-6-luna",
+                model: model ?? "gpt-6-luna",
                 effort: "low",
                 serviceTierForTurn: "default",
                 approvalPolicy: "never",

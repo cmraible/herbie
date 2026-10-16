@@ -16,6 +16,7 @@ import { createArithmeticFixture } from "./fixtures/arithmetic.js";
 type Create = Parameters<typeof runDaytonaAttempt>[0];
 type Sandbox = Awaited<ReturnType<Create>>;
 const request = {
+  model: "custom-model",
   snapshot: "approved-codex-runtime",
   domainAllowList: "github.com,api.openai.com",
   outboundProxyUrl: "http://proxy.example:8080",
@@ -154,6 +155,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.deepEqual(JSON.parse(input[0].toString()), {
     cwd: `${root}/repo`,
     project: request.project,
+    model: request.model,
   });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
     `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
@@ -419,9 +421,10 @@ test(
     assert.deepEqual(paramsFor("thread/start"), {
       cwd: sandbox.git.clone.mock.calls[0].arguments[1],
       ephemeral: true,
-      model: "gpt-6-luna",
+      model: request.model,
       modelProvider: "daytona_openai",
     });
+    assert.equal((paramsFor("turn/start") as { model: string }).model, request.model);
     assert.ok(JSON.stringify(paramsFor("turn/start")).includes("externalSandbox"));
     assert.match(JSON.stringify(paramsFor("turn/start")), /why you chose it/);
     assert.match(JSON.stringify(paramsFor("turn/start")), /pr-description.md/);

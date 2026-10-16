@@ -119,6 +119,7 @@ export function App() {
               name: project.name,
               prompt: project.prompt,
               maxWip: String(project.maxWip),
+              model: project.model,
             },
       );
   }, [editing, project]);
@@ -487,6 +488,7 @@ export function App() {
       const result = await api.update(projectEdit.id, {
         name: projectEdit.name,
         prompt: projectEdit.prompt,
+        model: projectEdit.model,
         maxWip: Number(projectEdit.maxWip),
       });
       setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
@@ -1022,6 +1024,16 @@ export function App() {
                     />
                   </label>
                   <label>
+                    Model
+                    <input
+                      disabled={busy}
+                      required
+                      maxLength={200}
+                      value={formDraft.model}
+                      onChange={(event) => editForm({ model: event.target.value })}
+                    />
+                  </label>
+                  <label>
                     Maximum work in progress
                     <input
                       disabled={busy}
@@ -1036,8 +1048,8 @@ export function App() {
                   </label>
                   {editing && (
                     <p className="subtle-note">
-                      Prompt changes apply to future runs. Existing work will finish before a lower
-                      work limit takes effect.
+                      Prompt and model changes apply to future runs. Existing work will finish
+                      before a lower work limit takes effect.
                     </p>
                   )}
                   {formError && (

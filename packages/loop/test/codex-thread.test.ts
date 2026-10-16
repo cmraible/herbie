@@ -85,3 +85,22 @@ for (const failure of ["close", "error", "timeout", "send"]) {
     },
   );
 }
+
+test("uses the project model with the Daytona provider", async (t) => {
+  const { stdout, lines, sent, send } = connection(t);
+  const started = startCodexThread(lines, send, "/fixture", 1000, true, "custom-model");
+  assert.deepEqual(sent, [
+    {
+      id: 1,
+      method: "thread/start",
+      params: {
+        cwd: "/fixture",
+        ephemeral: true,
+        model: "custom-model",
+        modelProvider: "daytona_openai",
+      },
+    },
+  ]);
+  stdout.write(JSON.stringify({ id: 1, result: { thread: { id: "thread-1" } } }) + "\n");
+  assert.equal(await started, "thread-1");
+});

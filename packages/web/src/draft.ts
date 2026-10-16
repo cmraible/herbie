@@ -5,18 +5,26 @@ export const draftSchema = z.object({
   repository: z.string(),
   name: z.string().optional(),
   prompt: z.string(),
+  model: z.string().default("gpt-6-luna"),
   maxWip: z.string().default("1"),
   requestId: z.string().uuid(),
 });
 export type Draft = z.infer<typeof draftSchema>;
 export function newDraft(repository = ""): Draft {
-  return { repository, prompt: "", maxWip: "1", requestId: crypto.randomUUID() };
+  return {
+    repository,
+    prompt: "",
+    model: "gpt-6-luna",
+    maxWip: "1",
+    requestId: crypto.randomUUID(),
+  };
 }
 export function parseDraft(draft: Draft) {
   const input = projectInput.safeParse({
     repository: draft.repository,
     ...(draft.name?.trim() ? { name: draft.name } : {}),
     prompt: draft.prompt,
+    model: draft.model,
     maxWip: Number(draft.maxWip),
   });
   if (!input.success)
