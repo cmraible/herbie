@@ -27,11 +27,11 @@ credentials:
 docker compose up --build -d --wait
 ```
 
-Open your HTTPS hostname and sign in with GitHub. To run goals, set
-`HERBIE_EXECUTION_ENABLED=true` in `.env` and rerun the command. Goals consume
+Open your HTTPS hostname and sign in with GitHub. To run projects, set
+`HERBIE_EXECUTION_ENABLED=true` in `.env` and rerun the command. Projects consume
 Daytona/OpenAI usage and can publish real PRs.
 
-Rerun the same command after code or configuration changes. Pause goals and let
+Rerun the same command after code or configuration changes. Pause projects and let
 active attempts finish before rebuilding or stopping.
 
 ```sh

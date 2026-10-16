@@ -9,7 +9,7 @@ import { runCodexTurn } from "./codex-turn.js";
 type ProcessOptions = { signal?: AbortSignal; timeoutMs?: number; shutdownMs?: number };
 type AttemptOptions = ProcessOptions & {
   cwd: string;
-  goal: string;
+  project: string;
   turnTimeoutMs?: number;
   onActivity?: (message: Record<string, unknown>) => void;
   interruptTimeoutMs?: number;
@@ -26,7 +26,7 @@ export function initializeCodexProcess(
   return runCodexProcess(command, args, { signal, timeoutMs, shutdownMs });
 }
 
-// One initialized thread and goal, followed by owned-group cleanup on every outcome.
+// One initialized thread and project, followed by owned-group cleanup on every outcome.
 export function runCodexAttempt(
   command: string,
   args: readonly string[],
@@ -141,7 +141,7 @@ async function runCodexProcess(
         "disposableDaytona" in options && options.disposableDaytona,
       ),
     ]);
-    if ("goal" in options) {
+    if ("project" in options) {
       if (signal?.aborted) throw cancellation;
       const threadId = await Promise.race([
         failure.promise,
@@ -152,7 +152,7 @@ async function runCodexProcess(
       try {
         await Promise.race([
           failure.promise,
-          runCodexTurn(lines, send, threadId, options.goal, {
+          runCodexTurn(lines, send, threadId, options.project, {
             signal,
             timeoutMs: options.turnTimeoutMs,
             interruptTimeoutMs: options.interruptTimeoutMs,

@@ -1,12 +1,18 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
-import { goalInput, goalUpdate, type Goal, type GoalEvent, type Attempt } from "@herbie/contracts";
+import {
+  projectInput,
+  projectUpdate,
+  type Project,
+  type ProjectEvent,
+  type Attempt,
+} from "@herbie/contracts";
 
 const repository = "acme/storefront";
 const date = (hour: number, minute = 0) =>
   new Date(Date.UTC(2026, 9, 15, hour, minute)).toISOString();
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-export const previewGoalId = id(1);
+export const previewProjectId = id(1);
 
 function fixtures() {
   const attempts: Attempt[] = [
@@ -38,8 +44,8 @@ function fixtures() {
       },
     },
   ];
-  const base: Goal = {
-    id: previewGoalId,
+  const base: Project = {
+    id: previewProjectId,
     ownerId: "local-preview",
     repository,
     name: "Make signup errors helpful",
@@ -58,7 +64,7 @@ function fixtures() {
     pullRequest: attempts[2]!.pullRequest,
     pullRequests: attempts.flatMap((a) => (a.pullRequest ? [a.pullRequest] : [])),
   };
-  const goals: Goal[] = [
+  const projects: Project[] = [
     base,
     {
       ...base,
@@ -103,14 +109,14 @@ function fixtures() {
     },
   ];
   let sequence = 0;
-  const events: GoalEvent[] = [];
+  const events: ProjectEvent[] = [];
   const log = (
-    goalId: string,
+    projectId: string,
     attemptId: string | null,
     type: string,
     message: string,
     createdAt = new Date().toISOString(),
-  ) => events.push({ id: ++sequence, goalId, attemptId, type, message, createdAt });
+  ) => events.push({ id: ++sequence, projectId, attemptId, type, message, createdAt });
   log(base.id, null, "queued", "Run #1 queued", date(12, 45));
   for (const a of attempts) {
     const hour = 12 + a.number;
@@ -133,7 +139,7 @@ function fixtures() {
         date(hour, 9),
       );
     } else {
-      log(base.id, a.id, "attempt", "Goal completed in sandbox preview", date(hour, 7));
+      log(base.id, a.id, "attempt", "Project completed in sandbox preview", date(hour, 7));
       log(base.id, a.id, "attempt", "Publication phase: state_persistence", date(hour, 12));
       log(
         base.id,
@@ -154,7 +160,7 @@ function fixtures() {
         );
     }
   }
-  for (const g of goals.slice(1)) {
+  for (const g of projects.slice(1)) {
     log(g.id, g.attempts![0]!.id, "attempt_started", "Run #1 started", g.attempts![0]!.createdAt);
     log(
       g.id,
@@ -163,17 +169,17 @@ function fixtures() {
       g.state === "running"
         ? "Attempt stage: model_execution"
         : g.state === "paused"
-          ? "Goal completed in sandbox preview"
+          ? "Project completed in sandbox preview"
           : "Attempt stage: sandbox_deletion",
       date(15, 25),
     );
   }
-  return { goals, events, log };
+  return { projects, events, log };
 }
 
 // Local development transport only. Fixture mutations remain in memory and reset on restart.
 export function fixtureApi(): Plugin {
-  const { goals, events, log } = fixtures();
+  const { projects, events, log } = fixtures();
   return {
     name: "herbie-ui-fixtures",
     configureServer(server) {
@@ -197,11 +203,11 @@ export function fixtureApi(): Plugin {
             for await (const chunk of request) raw += chunk;
             body = JSON.parse(raw || "{}");
           }
-          if (url.pathname === "/api/goals") {
-            if (request.method === "GET") return send(goals);
-            const input = goalInput.parse(body);
+          if (url.pathname === "/api/projects") {
+            if (request.method === "GET") return send(projects);
+            const input = projectInput.parse(body);
             const now = new Date().toISOString();
-            const goal: Goal = {
+            const project: Project = {
               ...input,
               id: randomUUID(),
               name: input.name ?? input.prompt.split(/[.!?\n]/)[0]!.slice(0, 80),
@@ -218,39 +224,40 @@ export function fixtureApi(): Plugin {
               cleanupStatus: "not_required",
               error: null,
             };
-            goals.unshift(goal);
-            log(goal.id, null, "queued", "Run #1 queued");
-            return send(goal);
+            projects.unshift(project);
+            log(project.id, null, "queued", "Run #1 queued");
+            return send(project);
           }
-          const match = /^\/api\/goals\/([^/]+)(?:\/(\w+))?$/.exec(url.pathname);
-          const goal = goals.find((g) => g.id === match?.[1]);
-          if (!goal) return send({ error: "Not found" }, 404);
+          const match = /^\/api\/projects\/([^/]+)(?:\/(\w+))?$/.exec(url.pathname);
+          const project = projects.find((g) => g.id === match?.[1]);
+          if (!project) return send({ error: "Not found" }, 404);
           const action = match?.[2];
           if (action === "events")
             return send(
               events.filter(
-                (e) => e.goalId === goal.id && e.id > Number(url.searchParams.get("after") ?? 0),
+                (e) =>
+                  e.projectId === project.id && e.id > Number(url.searchParams.get("after") ?? 0),
               ),
             );
-          if (request.method === "GET") return send(goal);
-          if (goal.state === "cancelled")
-            return send({ error: "Cancelled goals cannot be edited" }, 409);
-          if (!action) Object.assign(goal, goalUpdate.parse(body));
-          else if (action === "pause") goal.state = "paused";
-          else if (action === "resume" || action === "retry") goal.state = "queued";
+          if (request.method === "GET") return send(project);
+          if (project.state === "cancelled")
+            return send({ error: "Cancelled projects cannot be edited" }, 409);
+          if (!action) Object.assign(project, projectUpdate.parse(body));
+          else if (action === "pause") project.state = "paused";
+          else if (action === "resume" || action === "retry") project.state = "queued";
           else if (action === "cancel") {
-            goal.state = "cancelled";
-            for (const attempt of goal.attempts ?? [])
+            project.state = "cancelled";
+            for (const attempt of project.attempts ?? [])
               if (!["completed", "failed"].includes(attempt.state)) attempt.state = "cancelled";
           } else return send({ error: "Not available in this preview" }, 404);
-          goal.updatedAt = new Date().toISOString();
+          project.updatedAt = new Date().toISOString();
           log(
-            goal.id,
+            project.id,
             null,
             action ?? "updated",
-            action ? `Goal ${goal.state}` : "Goal settings updated",
+            action ? `Project ${project.state}` : "Project settings updated",
           );
-          return send(goal);
+          return send(project);
         } catch {
           return send({ error: "Invalid request" }, 400);
         }

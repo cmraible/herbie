@@ -15,7 +15,7 @@ export function attachRealtime(
   tokenFor: (request: IncomingMessage) => string | undefined,
 ) {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 });
-  const subscribers = new Set<(goalId: string, after?: number) => void>();
+  const subscribers = new Set<(projectId: string, after?: number) => void>();
   let listener: Promise<PoolClient> | undefined;
   let stopped = false;
   let stopListener: (() => void) | undefined;
@@ -67,9 +67,9 @@ export function attachRealtime(
       const token = tokenFor(request);
       const session = token ? await auth.session(token) : null;
       if (!session || !token) return reject(401);
-      const selected = url.searchParams.get("goal");
+      const selected = url.searchParams.get("project");
       if (selected && !z.string().uuid().safeParse(selected).success) return reject(400);
-      if (selected && !(await store.getGoal(selected, session.user.id))) return reject(404);
+      if (selected && !(await store.getProject(selected, session.user.id))) return reject(404);
       await listen(); // Subscribe before reading snapshots so concurrent commits cannot be lost.
       if (connection.destroyed || stopped) return connection.destroy();
       sockets.handleUpgrade(request, connection, head, (socket) => {
@@ -104,14 +104,14 @@ export function attachRealtime(
                 socket.close(1008, "Login required");
                 return;
               }
-              const goals = await store.listGoals(session!.user.id);
-              owned = new Set(goals.map((goal) => goal.id));
-              send({ type: "goals", goals });
+              const projects = await store.listProjects(session!.user.id);
+              owned = new Set(projects.map((project) => project.id));
+              send({ type: "projects", projects });
               if (selected && owned.has(selected)) {
                 // Drain all pages, including histories longer than the REST page limit.
                 while (socket.readyState === WebSocket.OPEN) {
                   const events = await store.events(selected, cursor);
-                  send({ type: "events", goalId: selected, events });
+                  send({ type: "events", projectId: selected, events });
                   if (events.length) cursor = events[events.length - 1]!.id;
                   if (events.length < 1000) break;
                 }
@@ -125,13 +125,13 @@ export function attachRealtime(
           }
         }
         const notify = (id: string, after?: number) => {
-          // Unknown IDs can be newly created goals; the owner-scoped query is authoritative.
+          // Unknown IDs can be newly created projects; the owner-scoped query is authoritative.
           if (owned.has(id)) void flush(id === selected ? after : undefined);
           else
             void store
-              .getGoal(id, session!.user.id)
-              .then((goal) => {
-                if (goal) void flush(id === selected ? after : undefined);
+              .getProject(id, session!.user.id)
+              .then((project) => {
+                if (project) void flush(id === selected ? after : undefined);
               })
               .catch(() => socket.terminate());
         };

@@ -4,7 +4,7 @@ import { safeStartupCauses, type StartupProgress } from "./startup-progress.js";
 import { StartupConfigurationError, startupDiagnostic } from "./startup-diagnostic.js";
 import { readConfig } from "./config.js";
 import { Store } from "./store.js";
-import { createGoalNamer } from "./goal-name.js";
+import { createProjectNamer } from "./project-name.js";
 import { PgAuthStore } from "./auth-store.js";
 import { createBetterAuth } from "./better-auth.js";
 import { createAuth } from "./auth.js";
@@ -40,7 +40,7 @@ export async function createRuntime(startup?: StartupProgress) {
     pool,
     Math.random,
     config.mode === "live"
-      ? createGoalNamer(config.openaiApiKey!, config.goalNameModel)
+      ? createProjectNamer(config.openaiApiKey!, config.projectNameModel)
       : undefined,
   );
   try {

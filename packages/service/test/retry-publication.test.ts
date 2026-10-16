@@ -6,7 +6,7 @@ import { PatchPublicationError } from "@herbie/loop/publish-patch";
 import { runWorkerOnce } from "../src/worker.js";
 import {
   activityMessage,
-  goalErrorMessage,
+  projectErrorMessage,
   errorReference,
 } from "../../web/src/activity-message.js";
 import { Store } from "../src/store.js";
@@ -124,11 +124,11 @@ async function fixture(
     });
     return { cookie: "herbie_session=" + token, origin, "content-type": "application/json" };
   }
-  async function retryableGoal(ownerId = "7", goalRepository = repository, prewrite = false) {
-    const { goal } = await store.createGoal(
+  async function retryableProject(ownerId = "7", projectRepository = repository, prewrite = false) {
+    const { project } = await store.createProject(
       ownerId,
       {
-        repository: goalRepository,
+        repository: projectRepository,
         name: "Synthetic retry fixture",
         prompt: "Synthetic retry fixture",
       },
@@ -138,7 +138,7 @@ async function fixture(
     const worker = "fixture-worker";
     const job = await store.claim(worker, 30_000, "live");
     assert.ok(job);
-    assert.equal(job.goal.id, goal.id);
+    assert.equal(job.project.id, project.id);
     const patch = Buffer.from("synthetic tested patch\n");
     const baseCommit = "a".repeat(40);
     const artifact = {
@@ -146,7 +146,7 @@ async function fixture(
       patch,
       verification: {
         version: 3 as const,
-        repoUrl: "https://github.com/" + goalRepository + ".git",
+        repoUrl: "https://github.com/" + projectRepository + ".git",
         baseCommit,
         patchSha256: createHash("sha256").update(patch).digest("hex"),
         goalCompleted: true as const,
@@ -162,10 +162,10 @@ async function fixture(
         ? "Publication remains unconfirmed during preflight_reconciliation (unexpected); reconciliation will check GitHub."
         : "Publication remains unconfirmed during branch_push (git_push_uncertain); reconciliation will check GitHub.",
     );
-    return { goal, jobId: job.id, artifact };
+    return { project, jobId: job.id, artifact };
   }
-  async function reconciledGoal(prewrite = true) {
-    const result = await retryableGoal("7", repository, prewrite);
+  async function reconciledProject(prewrite = true) {
+    const result = await retryableProject("7", repository, prewrite);
     await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [
       result.jobId,
     ]);
@@ -184,13 +184,13 @@ async function fixture(
     "content-type": "application/json",
   });
   return {
-    reconciledGoal,
+    reconciledProject,
     adapters,
     store,
     authStore,
     base,
     session,
-    retryableGoal,
+    retryableProject,
     headersFor,
     get checks() {
       return checks;
@@ -207,11 +207,11 @@ async function fixture(
 test("retry-publication scopes ownership, requires same-origin cookie requests, and queues the saved artifact once", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
-  const { store, base, session, retryableGoal, headersFor } = setup;
-  const own = await retryableGoal("7");
-  const another = await retryableGoal("another-owner", "other-owner/other-project");
+  const { store, base, session, retryableProject, headersFor } = setup;
+  const own = await retryableProject("7");
+  const another = await retryableProject("another-owner", "other-owner/other-project");
   const headers = await session();
-  const path = "/api/goals/" + own.goal.id + "/retry-publication";
+  const path = "/api/projects/" + own.project.id + "/retry-publication";
   const noOrigin = await fetch(base + path, {
     method: "POST",
     headers: { cookie: headers.cookie, "content-type": "application/json" },
@@ -224,7 +224,7 @@ test("retry-publication scopes ownership, requires same-origin cookie requests, 
     body: "{}",
   });
   assert.equal(wrongOrigin.status, 403);
-  const hidden = await fetch(base + "/api/goals/" + another.goal.id + "/retry-publication", {
+  const hidden = await fetch(base + "/api/projects/" + another.project.id + "/retry-publication", {
     method: "POST",
     headers,
     body: "{}",
@@ -252,16 +252,16 @@ test("retry-publication scopes ownership, requires same-origin cookie requests, 
 test("retry-publication respects the reconciliation lease and cannot race a claimed reconciler", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
-  const { store, base, session, retryableGoal } = setup;
-  const { goal } = await retryableGoal();
-  await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE goal_id=$1", [
-    goal.id,
+  const { store, base, session, retryableProject } = setup;
+  const { project } = await retryableProject();
+  await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE project_id=$1", [
+    project.id,
   ]);
   const claimed = await store.claim("reconciler", 30_000, "live");
   assert.ok(claimed);
   assert.equal(claimed.stage, "publishing");
   const headers = await session();
-  const response = await fetch(base + "/api/goals/" + goal.id + "/retry-publication", {
+  const response = await fetch(base + "/api/projects/" + project.id + "/retry-publication", {
     method: "POST",
     headers,
     body: "{}",
@@ -284,10 +284,10 @@ test("retry-publication respects the reconciliation lease and cannot race a clai
 test("execution-disabled service rejects saved-publication retry before repository checks", async (t) => {
   const setup = await fixture(t, { executionEnabled: false });
   if (!setup) return;
-  const { base, session, retryableGoal } = setup;
-  const { goal } = await retryableGoal();
+  const { base, session, retryableProject } = setup;
+  const { project } = await retryableProject();
   const headers = await session();
-  const response = await fetch(base + "/api/goals/" + goal.id + "/retry-publication", {
+  const response = await fetch(base + "/api/projects/" + project.id + "/retry-publication", {
     method: "POST",
     headers,
     body: "{}",
@@ -308,10 +308,10 @@ test("retry and cancel serialize safely while repository checks are in flight", 
     },
   });
   if (!setup) return;
-  const { base, session, retryableGoal } = setup;
-  const { goal } = await retryableGoal();
+  const { base, session, retryableProject } = setup;
+  const { project } = await retryableProject();
   const headers = await session();
-  const retry = fetch(base + "/api/goals/" + goal.id + "/retry-publication", {
+  const retry = fetch(base + "/api/projects/" + project.id + "/retry-publication", {
     method: "POST",
     headers,
     body: "{}",
@@ -319,7 +319,7 @@ test("retry and cancel serialize safely while repository checks are in flight", 
   await entered.promise;
   let cancelBeforeQueue: Response;
   try {
-    cancelBeforeQueue = await fetch(base + "/api/goals/" + goal.id + "/cancel", {
+    cancelBeforeQueue = await fetch(base + "/api/projects/" + project.id + "/cancel", {
       method: "POST",
       headers,
       body: "{}",
@@ -330,7 +330,7 @@ test("retry and cancel serialize safely while repository checks are in flight", 
   assert.equal(cancelBeforeQueue.status, 200, "cancellation does not wait for remote preflight");
   const queued = await retry;
   assert.equal(queued.status, 409);
-  const cancelAfterQueue = await fetch(base + "/api/goals/" + goal.id + "/cancel", {
+  const cancelAfterQueue = await fetch(base + "/api/projects/" + project.id + "/cancel", {
     method: "POST",
     headers,
     body: "{}",
@@ -345,7 +345,7 @@ test("retry and cancel serialize safely while repository checks are in flight", 
   const row = await setup.store.pool.query<{
     stage: string;
     artifact: Record<string, unknown> | null;
-  }>("SELECT stage,artifact FROM jobs WHERE goal_id=$1", [goal.id]);
+  }>("SELECT stage,artifact FROM jobs WHERE project_id=$1", [project.id]);
   assert.equal(row.rows[0]?.stage, "cancelled");
   assert.ok(row.rows[0]?.artifact);
   assert.equal(setup.attempts, 0);
@@ -362,18 +362,22 @@ test("cancel confirmed unpublished work checks ownership and CSRF, preserves evi
     },
   });
   if (!setup) return;
-  const { store, base, session, reconciledGoal } = setup;
-  const { goal, jobId } = await reconciledGoal();
+  const { store, base, session, reconciledProject } = setup;
+  const { project, jobId } = await reconciledProject();
   const headers = await session();
-  const path = base + "/api/goals/" + goal.id + "/cancel";
+  const path = base + "/api/projects/" + project.id + "/cancel";
   assert.equal(
     (await fetch(path, { method: "POST", headers: { cookie: headers.cookie } })).status,
     403,
   );
-  const other = await setup.retryableGoal("other-owner", "other-owner/other-project");
+  const other = await setup.retryableProject("other-owner", "other-owner/other-project");
   assert.equal(
-    (await fetch(base + "/api/goals/" + other.goal.id + "/cancel", { method: "POST", headers }))
-      .status,
+    (
+      await fetch(base + "/api/projects/" + other.project.id + "/cancel", {
+        method: "POST",
+        headers,
+      })
+    ).status,
     404,
   );
   assert.equal(checks, 0);
@@ -388,13 +392,13 @@ test("cancel confirmed unpublished work checks ownership and CSRF, preserves evi
   assert.equal(after.rows[0].stage, "cancelled");
   assert.deepEqual(after.rows[0].artifact, before.rows[0].artifact);
   assert.ok(
-    (await store.events(goal.id)).some(
+    (await store.events(project.id)).some(
       (e) => e.type === "cancel" && e.message.includes("retained"),
     ),
   );
   assert.ok(
     (
-      await store.createGoal(
+      await store.createProject(
         "7",
         { repository, name: "Next fixture", prompt: "Next fixture" },
         "live",
@@ -415,14 +419,14 @@ for (const remote of ["pull_request_exists", "branch_exists", "error"] as const)
       },
     });
     if (!setup) return;
-    const { goal, jobId } = await setup.reconciledGoal();
-    const response = await fetch(setup.base + "/api/goals/" + goal.id + "/cancel", {
+    const { project, jobId } = await setup.reconciledProject();
+    const response = await fetch(setup.base + "/api/projects/" + project.id + "/cancel", {
       method: "POST",
       headers: await setup.session(),
     });
     assert.equal(response.status, 200);
-    assert.equal((await setup.store.getGoal(goal.id))?.state, "cancelled");
-    assert.equal((await setup.store.getGoal(goal.id))?.cleanupStatus, "needs_attention");
+    assert.equal((await setup.store.getProject(project.id))?.state, "cancelled");
+    assert.equal((await setup.store.getProject(project.id))?.cleanupStatus, "needs_attention");
     assert.equal(
       (await setup.store.pool.query("SELECT stage FROM jobs WHERE id=$1", [jobId])).rows[0].stage,
       "cancelled",
@@ -434,7 +438,7 @@ for (const needsAttention of [false, true])
     const setup = await fixture(t);
     if (!setup) return;
     const { store, base, session } = setup;
-    const { goal } = await store.createGoal(
+    const { project } = await store.createProject(
       "7",
       { repository, name: "Retry attempt", prompt: "Finish the task" },
       "live",
@@ -444,7 +448,7 @@ for (const needsAttention of [false, true])
     assert.ok(old);
     await store.fail(old.id, "old-worker", "Synthetic failure", needsAttention);
     const headers = await session();
-    const path = base + "/api/goals/" + goal.id + "/retry";
+    const path = base + "/api/projects/" + project.id + "/retry";
     const responses = await Promise.all([
       fetch(path, { method: "POST", headers }),
       fetch(path, { method: "POST", headers }),
@@ -459,8 +463,8 @@ for (const needsAttention of [false, true])
     assert.ok(next);
     assert.notEqual(next.id, old.id);
     assert.notEqual(next.branch, old.branch);
-    assert.equal(next.goal.id, goal.id);
-    assert.equal(next.goal.attemptCount, 2);
+    assert.equal(next.project.id, project.id);
+    assert.equal(next.project.attemptCount, 2);
     assert.equal(await store.claim("duplicate", 30_000, "live"), null);
     await assert.rejects(
       store.saveArtifact(old.id, "old-worker", {
@@ -468,14 +472,14 @@ for (const needsAttention of [false, true])
         patch: Buffer.from("stale"),
       }),
     );
-    assert.equal((await store.events(goal.id)).filter((e) => e.type === "retry").length, 1);
+    assert.equal((await store.events(project.id)).filter((e) => e.type === "retry").length, 1);
   });
 
 test("retry preserves saved publication instead of starting another attempt", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
-  const { goal, jobId } = await setup.retryableGoal();
-  const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry", {
+  const { project, jobId } = await setup.retryableProject();
+  const response = await fetch(setup.base + "/api/projects/" + project.id + "/retry", {
     method: "POST",
     headers: await setup.session(),
   });
@@ -484,54 +488,54 @@ test("retry preserves saved publication instead of starting another attempt", as
   assert.ok(next);
   assert.equal(next.id, jobId);
   assert.equal(next.stage, "ready");
-  assert.equal(next.goal.attemptCount, 1);
+  assert.equal(next.project.attemptCount, 1);
 });
 
 test("retry is owner scoped, CSRF protected, and cannot revive cancellation", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
-  const { goal } = await setup.store.createGoal(
+  const { project } = await setup.store.createProject(
     "7",
     { repository, name: "Retry fixture", prompt: "Retry fixture" },
     "live",
     randomUUID(),
   );
-  const path = setup.base + "/api/goals/" + goal.id + "/retry";
+  const path = setup.base + "/api/projects/" + project.id + "/retry";
   const headers = await setup.session();
   assert.equal(
     (await fetch(path, { method: "POST", headers: { cookie: headers.cookie } })).status,
     403,
   );
-  const other = await setup.store.createGoal(
+  const other = await setup.store.createProject(
     "other",
-    { repository, name: "Other goal", prompt: "Other goal" },
+    { repository, name: "Other project", prompt: "Other project" },
     "live",
     randomUUID(),
   );
   assert.equal(
     (
-      await fetch(setup.base + "/api/goals/" + other.goal.id + "/retry", {
+      await fetch(setup.base + "/api/projects/" + other.project.id + "/retry", {
         method: "POST",
         headers,
       })
     ).status,
     404,
   );
-  await setup.store.control(goal.id, "7", "cancel");
+  await setup.store.control(project.id, "7", "cancel");
   assert.equal((await fetch(path, { method: "POST", headers })).status, 409);
-  assert.equal((await setup.store.getGoal(goal.id))?.state, "cancelled");
+  assert.equal((await setup.store.getProject(project.id))?.state, "cancelled");
 });
 
 test("execution-disabled service rejects attempt retry", async (t) => {
   const setup = await fixture(t, { executionEnabled: false });
   if (!setup) return;
-  const { goal } = await setup.store.createGoal(
+  const { project } = await setup.store.createProject(
     "7",
     { repository, name: "Retry fixture", prompt: "Retry fixture" },
     "live",
     randomUUID(),
   );
-  const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry", {
+  const response = await fetch(setup.base + "/api/projects/" + project.id + "/retry", {
     method: "POST",
     headers: await setup.session(),
   });
@@ -542,7 +546,7 @@ test("retry recovers an expired worker lease while fencing its late result", asy
   const setup = await fixture(t);
   if (!setup) return;
   const { store } = setup;
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "7",
     { repository, name: "Retry fixture", prompt: "Retry fixture" },
     "live",
@@ -555,8 +559,8 @@ test("retry recovers an expired worker lease while fencing its late result", asy
     [old.id],
   );
   await store.recoverExpired();
-  assert.equal((await store.getGoal(goal.id))?.state, "needs_attention");
-  const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry", {
+  assert.equal((await store.getProject(project.id))?.state, "needs_attention");
+  const response = await fetch(setup.base + "/api/projects/" + project.id + "/retry", {
     method: "POST",
     headers: await setup.session(),
   });
@@ -565,22 +569,22 @@ test("retry recovers an expired worker lease while fencing its late result", asy
   assert.ok(next);
   assert.notEqual(next.id, old.id);
   await assert.rejects(store.fail(old.id, "expired-worker", "Late failure"));
-  assert.equal((await store.getGoal(goal.id))?.state, "running");
+  assert.equal((await store.getProject(project.id))?.state, "running");
 });
 
 for (const conflict of ["branch_exists", "pull_request_exists", "base_changed"] as const)
   test(`retry cannot discard saved publication on ${conflict}`, async (t) => {
     const setup = await fixture(t, { check: async () => conflict });
     if (!setup) return;
-    const { goal, jobId } = await setup.retryableGoal();
-    const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry", {
+    const { project, jobId } = await setup.retryableProject();
+    const response = await fetch(setup.base + "/api/projects/" + project.id + "/retry", {
       method: "POST",
       headers: await setup.session(),
     });
     assert.equal(response.status, 409);
     const { rows } = await setup.store.pool.query(
-      "SELECT id,stage,artifact FROM jobs WHERE goal_id=$1",
-      [goal.id],
+      "SELECT id,stage,artifact FROM jobs WHERE project_id=$1",
+      [project.id],
     );
     assert.equal(rows.length, 1);
     assert.equal(rows[0].id, jobId);
@@ -592,7 +596,7 @@ for (const missing of ["workflow", "installation"] as const)
   test(`${missing} permission rejection blocks retries, reaches the UI, and resumes the saved patches`, async (t) => {
     const setup = await fixture(t);
     if (!setup) return;
-    const { goal, jobId } = await setup.retryableGoal();
+    const { project, jobId } = await setup.retryableProject();
     const publish = setup.adapters.publish;
     setup.adapters.publish = async () => {
       if (missing === "installation")
@@ -616,18 +620,20 @@ for (const missing of ["workflow", "installation"] as const)
       jobId,
     ]);
     await runWorkerOnce(setup.store, setup.adapters, "permission-worker");
-    const saved = await setup.store.getGoal(goal.id);
+    const saved = await setup.store.getProject(project.id);
     assert.ok(saved);
     assert.equal(saved.state, "needs_attention");
     assert.match(saved.error!, /workflow_permission_missing|installation_permissions_missing/);
     assert.doesNotMatch(saved.error!, /private|Retrying automatically/);
     assert.ok(errorReference(saved.error!));
-    const event = (await setup.store.events(goal.id)).find((e) => e.type === "publication_blocked");
+    const event = (await setup.store.events(project.id)).find(
+      (e) => e.type === "publication_blocked",
+    );
     assert.ok(event);
-    assert.equal(activityMessage(saved, event), goalErrorMessage(saved));
-    assert.match(goalErrorMessage(saved), /Workflows/);
+    assert.equal(activityMessage(saved, event), projectErrorMessage(saved));
+    assert.match(projectErrorMessage(saved), /Workflows/);
     if (missing === "workflow")
-      assert.match(goalErrorMessage(saved), /\.github\/workflows\/ci-deploy.yml/);
+      assert.match(projectErrorMessage(saved), /\.github\/workflows\/ci-deploy.yml/);
     assert.equal(errorReference(event.message), errorReference(saved.error!));
     const row = (
       await setup.store.pool.query("SELECT publication_blocked,artifact FROM jobs WHERE id=$1", [
@@ -639,14 +645,17 @@ for (const missing of ["workflow", "installation"] as const)
     assert.equal(await runWorkerOnce(setup.store, setup.adapters, "automatic-retry"), false);
 
     setup.adapters.publish = publish;
-    const response = await fetch(setup.base + "/api/goals/" + goal.id + "/retry-publication", {
-      method: "POST",
-      headers: await setup.session(),
-      body: "{}",
-    });
+    const response = await fetch(
+      setup.base + "/api/projects/" + project.id + "/retry-publication",
+      {
+        method: "POST",
+        headers: await setup.session(),
+        body: "{}",
+      },
+    );
     assert.equal(response.status, 200);
     await runWorkerOnce(setup.store, setup.adapters, "permission-fixed-worker");
-    const resumed = await setup.store.getGoal(goal.id);
+    const resumed = await setup.store.getProject(project.id);
     assert.equal(resumed?.state, "awaiting_review");
     assert.equal(resumed?.attemptCount, 1);
     assert.equal(setup.attempts, 0);

@@ -28,14 +28,14 @@ async function fakeCodex(t: TestContext) {
   return { directory, record, env: { ...process.env, PATH: directory, CODEX_TEST_RECORD: record } };
 }
 
-test("runs one Codex attempt with the repository and goal, exposing both output streams", async (t) => {
+test("runs one Codex attempt with the repository and project, exposing both output streams", async (t) => {
   const { env, record, directory } = await fakeCodex(t);
   const repo = join(directory, "my project");
   await mkdir(repo);
-  const result = runCli(["--repo", repo, "--goal", "Improve error messages"], env);
+  const result = runCli(["--repo", repo, "--project", "Improve error messages"], env);
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`Repository: ${repo}`));
-  assert.match(result.stdout, /Goal: Improve error messages/);
+  assert.match(result.stdout, /Project: Improve error messages/);
   assert.match(result.stdout, /Codex test output/);
   assert.match(result.stderr, /Codex test diagnostics/);
   const args: unknown = JSON.parse(await readFile(record, "utf8"));
@@ -46,19 +46,19 @@ test("runs one Codex attempt with the repository and goal, exposing both output 
     "--sandbox",
     "workspace-write",
     [
-      "Make one small improvement aligned with the goal below.",
+      "Make one small improvement aligned with the project below.",
       "Read the repository instructions, implement the change, and run proportionate tests.",
       "Keep the code minimal and readable. Summarize the change and verification.",
       "Leave changes local. Do not commit, push, create a pull request, or merge.",
       "",
-      "Goal: Improve error messages",
+      "Project: Improve error messages",
     ].join("\n"),
   ]);
 });
 
 test("preserves a failed Codex exit status", async (t) => {
   const { env, directory } = await fakeCodex(t);
-  const result = runCli(["--repo", directory, "--goal", "Improve errors"], {
+  const result = runCli(["--repo", directory, "--project", "Improve errors"], {
     ...env,
     CODEX_TEST_EXIT: "7",
   });
@@ -68,7 +68,7 @@ test("preserves a failed Codex exit status", async (t) => {
 
 test("reports a child terminated by a signal as failure", async (t) => {
   const { env, directory } = await fakeCodex(t);
-  const result = runCli(["--repo", directory, "--goal", "Improve errors"], {
+  const result = runCli(["--repo", directory, "--project", "Improve errors"], {
     ...env,
     CODEX_TEST_SIGNAL: "1",
   });
@@ -79,7 +79,7 @@ test("reports a child terminated by a signal as failure", async (t) => {
 test("reports a missing Codex executable", async (t) => {
   const { env, directory } = await fakeCodex(t);
   await rm(join(directory, "codex"));
-  const result = runCli(["--repo", directory, "--goal", "Improve errors"], env);
+  const result = runCli(["--repo", directory, "--project", "Improve errors"], env);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Could not start Codex/);
 });
@@ -87,7 +87,7 @@ test("reports a missing Codex executable", async (t) => {
 test("rejects a missing repository or a file before starting Codex", async (t) => {
   const { env, directory, record } = await fakeCodex(t);
   for (const repo of [join(directory, "missing"), entrypoint]) {
-    const result = runCli(["--repo", repo, "--goal", "Improve errors"], env);
+    const result = runCli(["--repo", repo, "--project", "Improve errors"], env);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /ENOENT|must point to a directory/);
     await assert.rejects(readFile(record), { code: "ENOENT" });
@@ -97,14 +97,14 @@ test("rejects a missing repository or a file before starting Codex", async (t) =
 test("help explains the required inputs", () => {
   const result = runCli(["--help"]);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /--repo <path> --goal <goal>/);
+  assert.match(result.stdout, /--repo <path> --project <project>/);
 });
 
 test("streams output before Codex finishes and inherits stdin", { timeout: 10_000 }, async (t) => {
   const { env, directory } = await fakeCodex(t);
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", entrypoint, "--repo", directory, "--goal", "Improve errors"],
+    ["--import", "tsx", entrypoint, "--repo", directory, "--project", "Improve errors"],
     { env: { ...env, CODEX_TEST_WAIT: "1" }, stdio: ["pipe", "pipe", "pipe"] },
   );
   t.after(() => child.kill());
@@ -128,9 +128,9 @@ test("rejects missing, blank, and unknown inputs", () => {
   for (const args of [
     [],
     ["--repo", "/tmp/project"],
-    ["--goal", "Improve errors"],
-    ["--repo", " ", "--goal", "Improve errors"],
-    ["--repo", "/tmp/project", "--goal", " "],
+    ["--project", "Improve errors"],
+    ["--repo", " ", "--project", "Improve errors"],
+    ["--repo", "/tmp/project", "--project", " "],
     ["--unknown"],
   ]) {
     const result = runCli(args);

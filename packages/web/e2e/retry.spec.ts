@@ -5,7 +5,7 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
   test(`Retry recovers ${scenario} and persists after reload`, async ({ page }) => {
     const workflow = scenario === "workflow_permission_missing";
     const retryLabel = workflow ? "Retry publication" : "Retry";
-    let goal = {
+    let project = {
       id: randomUUID(),
       ownerId: "fixture",
       repository: "fixture/project",
@@ -31,17 +31,17 @@ for (const scenario of ["failed", "needs_attention", "workflow_permission_missin
     await page.route("**/api/session", (r) =>
       r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
     );
-    await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
-    await page.route("**/api/goals/*/events**", (r) => r.fulfill(json([])));
-    await page.route(`**/api/goals/*/${workflow ? "retry-publication" : "retry"}`, async (r) => {
+    await page.route("**/api/projects", (r) => r.fulfill(json([project])));
+    await page.route("**/api/projects/*/events**", (r) => r.fulfill(json([])));
+    await page.route(`**/api/projects/*/${workflow ? "retry-publication" : "retry"}`, async (r) => {
       retries++;
       if (retries === 1)
         return r.fulfill({
           status: 503,
           ...json({ error: "Temporarily unavailable. Try again." }),
         });
-      goal = { ...goal, state: "queued", error: null };
-      return r.fulfill(json(goal));
+      project = { ...project, state: "queued", error: null };
+      return r.fulfill(json(project));
     });
     await page.goto("/");
     await expect(page.getByText("Synthetic attempt failure")).toHaveCount(0);
@@ -80,7 +80,7 @@ for (const canRetry of [true, false])
       branch: "repair",
       draft: true,
     };
-    let goal = {
+    let project = {
       id: randomUUID(),
       ownerId: "fixture",
       repository: "fixture/project",
@@ -114,20 +114,20 @@ for (const canRetry of [true, false])
     await page.route("**/api/session", (r) =>
       r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
     );
-    await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
-    await page.route("**/api/goals/*/events**", (r) => r.fulfill(json([])));
+    await page.route("**/api/projects", (r) => r.fulfill(json([project])));
+    await page.route("**/api/projects/*/events**", (r) => r.fulfill(json([])));
     let retries = 0;
-    await page.route("**/api/goals/*/retry-repair", (r) => {
+    await page.route("**/api/projects/*/retry-repair", (r) => {
       expect(r.request().postDataJSON()).toEqual({ repairId });
       retries++;
-      goal = {
-        ...goal,
-        attempts: goal.attempts.map((attempt) => ({
+      project = {
+        ...project,
+        attempts: project.attempts.map((attempt) => ({
           ...attempt,
           ciRepair: { id: randomUUID(), state: "waiting", canRetry: false },
         })),
       };
-      return r.fulfill(json(goal));
+      return r.fulfill(json(project));
     });
     await page.goto("/");
     await page.getByRole("button", { name: /Repair fixture/ }).click();

@@ -19,7 +19,7 @@ export function createDemoAdapters(): Adapters {
     },
     async attempt(execution, report) {
       await report("DEMO: deterministic attempt started; no sandbox or model was used.");
-      if (execution.goal.prompt.includes("[demo:fail]"))
+      if (execution.project.prompt.includes("[demo:fail]"))
         throw new KnownAttemptFailure(
           "DEMO: requested simulated attempt failure; no publication occurred.",
         );
@@ -40,14 +40,14 @@ export function createDemoAdapters(): Adapters {
       };
     },
     async reconcile(execution) {
-      return execution.goal.pullRequests.find((pr) => pr.branch === execution.branch) ?? null;
+      return execution.project.pullRequests.find((pr) => pr.branch === execution.branch) ?? null;
     },
   };
 }
 
-export function demoGoalName(prompt: string): string {
+export function demoProjectName(prompt: string): string {
   return (
     Array.from(prompt.replaceAll("[demo:fail]", "").trim()).slice(0, 120).join("").trim() ||
-    "Demo goal"
+    "Demo project"
   );
 }

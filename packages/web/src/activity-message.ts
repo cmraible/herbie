@@ -1,13 +1,13 @@
-import { githubPermissionsMessage, type Goal, type GoalEvent } from "@herbie/contracts";
+import { githubPermissionsMessage, type Project, type ProjectEvent } from "@herbie/contracts";
 
 export function errorReference(message: string): string | null {
   return /Reference:\s*([a-z0-9-]+)/i.exec(message)?.[1] ?? null;
 }
 
-export function activityMessage(goal: Goal, event: GoalEvent): string | null {
-  const run = goal.attempts?.find((attempt) => attempt.id === event.attemptId);
+export function activityMessage(project: Project, event: ProjectEvent): string | null {
+  const run = project.attempts?.find((attempt) => attempt.id === event.attemptId);
   const runNumber = run?.number ?? Number(/Run #(\d+)/.exec(event.message)?.[1] ?? 1);
-  const pullRequest = run?.pullRequest ?? goal.pullRequests.at(-1) ?? goal.pullRequest;
+  const pullRequest = run?.pullRequest ?? project.pullRequests.at(-1) ?? project.pullRequest;
   const prNumber = pullRequest?.number;
 
   switch (event.type) {
@@ -32,11 +32,12 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
     case "ci_repair": {
       const stage = /Attempt stage: ([a-z_]+)/.exec(event.message)?.[1];
       if (stage === "sandbox_creation") return "Preparing the agent's environment";
-      if (stage === "repository_clone") return `Cloning ${goal.repository}`;
+      if (stage === "repository_clone") return `Cloning ${project.repository}`;
       if (stage === "model_execution") return "Agent started working";
       if (stage === "runtime_preparation" || stage === "runtime_upload") return null;
       if (stage === "artifact_download" || stage === "sandbox_deletion") return null;
-      if (event.message.startsWith("Goal completed in sandbox ")) return "Preparing pull request";
+      if (event.message.startsWith("Project completed in sandbox "))
+        return "Preparing pull request";
       return null;
     }
     case "publication_phase":
@@ -105,12 +106,12 @@ export function activityMessage(goal: Goal, event: GoalEvent): string | null {
   }
 }
 
-export function goalErrorMessage(goal: Goal): string {
-  const error = goal.error ?? "";
+export function projectErrorMessage(project: Project): string {
+  const error = project.error ?? "";
   const permission = workflowPermissionMessage(error);
   if (permission) return permission;
   if (error.includes("Worker connection was lost during an attempt"))
-    return `Run #${goal.attemptCount} was interrupted. Retry to start a new run`;
+    return `Run #${project.attemptCount} was interrupted. Retry to start a new run`;
   if (error.includes("saved artifact lacks matching test and cleanup evidence"))
     return "Run failed. Your patches are saved.";
   if (error.startsWith("Run failed.")) return error.split(" Reference:")[0];

@@ -1,4 +1,4 @@
-import type { GoalEvent } from "@herbie/contracts";
+import type { ProjectEvent } from "@herbie/contracts";
 import { agentActivity, activityText } from "./agent-activity.js";
 
 const labels: Record<string, string> = {
@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
   plan: "Plan",
 };
 
-export function AgentTranscript({ events }: { events: GoalEvent[] }) {
+export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
   const records = events.filter((event) => event.type === "agent");
   if (!records.length) return null;
   const download = () => {

@@ -22,7 +22,7 @@ test("repository setup runs during onboarding, refreshes access, and survives Ba
       ? route.fulfill({ json: { user: { id: "7", login: "fixture-owner" }, mode: "live" } })
       : route.fulfill({ status: 401, json: { error: "Sign in required" } }),
   );
-  await page.route("**/api/goals", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/projects", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/repositories", (route) => {
     repositoryRequests++;
     return route.fulfill({

@@ -36,7 +36,7 @@ for (const scenario of [
       await admin.end();
     });
     await store.migrate();
-    const { goal } = await store.createGoal(
+    const { project } = await store.createProject(
       "demo-user",
       { repository: "demo/example", prompt: "Fix arithmetic" },
       "demo",
@@ -44,9 +44,9 @@ for (const scenario of [
     );
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "initial");
-    await store.pool.query("UPDATE goals SET mode='live' WHERE id=$1", [goal.id]);
+    await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
     const [job] = await store.reviewJobs("live");
-    const pr = job!.goal.pullRequests[0]!;
+    const pr = job!.project.pullRequests[0]!;
     let attempts = 0;
     let pushes = 0;
     let statusFailed = false;
@@ -99,28 +99,31 @@ for (const scenario of [
     };
     await store.requestCiReview();
     await runCiRepairOnce(store, adapters, "repair");
-    const repair = (await store.getGoal(goal.id))!.attempts![0]!.ciRepair!;
+    const repair = (await store.getProject(project.id))!.attempts![0]!.ciRepair!;
     assert.equal(repair.state, "failed");
     assert.equal(repair.canRetry, scenario !== "cleanup-unknown");
     await store.requestCiReview();
     await runCiRepairOnce(store, adapters, "automatic");
     assert.equal(attempts, 1, "failures must not automatically retry");
-    await assert.rejects(store.retryCiRepair(goal.id, "other-owner", repair.id), /Goal not found/);
+    await assert.rejects(
+      store.retryCiRepair(project.id, "other-owner", repair.id),
+      /Project not found/,
+    );
     if (scenario === "publication")
       await store.pool.query("UPDATE ci_repairs SET publication_started=true WHERE id=$1", [
         repair.id,
       ]);
-    if (scenario === "paused") await store.control(goal.id, "demo-user", "pause");
+    if (scenario === "paused") await store.control(project.id, "demo-user", "pause");
     if (scenario === "closed") await store.reconcile(job!.id, "closed");
     if (["cleanup-unknown", "publication", "paused", "closed"].includes(scenario)) {
-      await assert.rejects(store.retryCiRepair(goal.id, "demo-user", repair.id));
+      await assert.rejects(store.retryCiRepair(project.id, "demo-user", repair.id));
       assert.equal((await store.pool.query("SELECT * FROM ci_repairs")).rowCount, 1);
       return;
     }
     if (scenario === "legacy") {
       await store.pool.query("UPDATE ci_repairs SET retryable=false WHERE id=$1", [repair.id]);
       await store.migrate();
-      assert.equal((await store.getGoal(goal.id))!.attempts![0]!.ciRepair!.canRetry, true);
+      assert.equal((await store.getProject(project.id))!.attempts![0]!.ciRepair!.canRetry, true);
     }
     const server = createApiServer({
       store,
@@ -132,7 +135,7 @@ for (const scenario of [
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const address = server.address();
     assert.ok(address && typeof address === "object");
-    const url = `http://127.0.0.1:${address.port}/api/goals/${goal.id}/retry-repair`;
+    const url = `http://127.0.0.1:${address.port}/api/projects/${project.id}/retry-repair`;
     const headers = {
       "content-type": "application/json",
       authorization: `Bearer ${testSessionToken}`,
@@ -167,9 +170,9 @@ for (const scenario of [
     await runCiRepairOnce(store, adapters, "manual");
     assert.equal(attempts, scenario === "changed-head" ? 1 : 2);
     assert.equal(pushes, scenario === "changed-head" ? 0 : 1);
-    assert.ok((await store.events(goal.id)).some((event) => event.type === "ci_repair_failed"));
+    assert.ok((await store.events(project.id)).some((event) => event.type === "ci_repair_failed"));
     assert.ok(
-      (await store.events(goal.id)).some((event) => event.type === "ci_repair_retry_queued"),
+      (await store.events(project.id)).some((event) => event.type === "ci_repair_retry_queued"),
     );
   });
 }

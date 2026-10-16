@@ -13,7 +13,7 @@ export function runCodexTurn(
   lines: Interface,
   send: (message: unknown) => void,
   threadId: string,
-  goal: string,
+  project: string,
   {
     timeoutMs = 60_000,
     signal,
@@ -130,7 +130,7 @@ export function runCodexTurn(
         method: "turn/start",
         params: {
           threadId,
-          input: [{ type: "text", text: goal }],
+          input: [{ type: "text", text: project }],
           ...(disposableDaytona
             ? {
                 model: "gpt-6-luna",

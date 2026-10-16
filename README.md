@@ -1,8 +1,8 @@
 # Herbie
 
-Herbie runs ongoing coding goals through a durable service. The React web UI and
+Herbie runs ongoing coding projects through a durable service. The React web UI and
 CLI use the same authenticated API; a separate worker continues after either client
-exits. Postgres owns goals, attempts, jobs, captured artifacts, PRs and events.
+exits. Postgres owns projects, attempts, jobs, captured artifacts, PRs and events.
 
 ## Service, web UI and CLI
 
@@ -33,7 +33,7 @@ docker compose up --build -d --wait
 
 Open the configured HTTPS hostname and sign in with GitHub. Execution defaults to
 disabled; set `HERBIE_EXECUTION_ENABLED=true` and rerun Compose when ready to run
-a real goal.
+a real project.
 
 The optional CLI client requires Node.js 24+ and pnpm 10:
 
@@ -43,29 +43,29 @@ pnpm cli login --url https://herbie-dev.example.com
 pnpm cli repositories
 pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
 pnpm cli status
-pnpm cli status GOAL_ID
-pnpm cli rename GOAL_ID --name "Improve arithmetic"
-pnpm cli edit GOAL_ID --prompt "Also cover subtraction with regression tests"
-pnpm cli logs GOAL_ID
-pnpm cli pause GOAL_ID
-pnpm cli resume GOAL_ID
-pnpm cli cancel GOAL_ID
+pnpm cli status PROJECT_ID
+pnpm cli rename PROJECT_ID --name "Improve arithmetic"
+pnpm cli edit PROJECT_ID --prompt "Also cover subtraction with regression tests"
+pnpm cli logs PROJECT_ID
+pnpm cli pause PROJECT_ID
+pnpm cli resume PROJECT_ID
+pnpm cli cancel PROJECT_ID
 ```
 
-`maxWip` defaults to 1 and limits each goal's outstanding work: open PRs plus
+`maxWip` defaults to 1 and limits each project's outstanding work: open PRs plus
 any queued or running attempt. Attempts run sequentially, filling available
 capacity without waiting for merges. Each merge frees capacity for the next
 attempt. For example, `--max-wip 2` keeps up to two PRs outstanding until the
-goal is paused, cancelled, or stopped by a failure or an unmerged close.
-The goal view lists every published PR. Use **Edit goal** to update its name,
+project is paused, cancelled, or stopped by a failure or an unmerged close.
+The project view lists every published PR. Use **Edit project** to update its name,
 prompt, and maximum work in progress together. Prompt changes apply to future
 attempts; lowering the limit keeps existing work and delays new attempts until
-capacity is available. The repository stays fixed for the life of the goal.
+capacity is available. The repository stays fixed for the life of the project.
 
 CLI responses are JSON. Login stores only a Herbie bearer session in a private
 0600 file (`HERBIE_CONFIG` or `~/.config/herbie/session.json`). For an interrupted
 start, repeat the same input with the request ID printed to stderr using
-`--request-id UUID`; the service returns the original goal. The browser retains
+`--request-id UUID`; the service returns the original project. The browser retains
 its request ID for retries too. `pnpm cli logout` revokes the session.
 
 See [service operations and live setup](docs/service.md) for recovery behavior,
@@ -92,7 +92,7 @@ environment approval and disabled execution until separately approved.
 
 The workspace retains the original foreground experiments:
 
-- **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement attempt for a local repository and goal.
+- **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement attempt for a local repository and project.
 - **`@herbie/demo`** (`packages/demo`): the local ChatGPT sign-in and streaming demo. See its [README](packages/demo/README.md).
 
 ### Foreground experiment setup
@@ -101,7 +101,7 @@ Requires Node.js 24+ and pnpm.
 
 ```sh
 pnpm install
-pnpm start --repo /path/to/checkout --goal "Improve error messages"
+pnpm start --repo /path/to/checkout --project "Improve error messages"
 pnpm demo    # Run the web demo at http://127.0.0.1:3210
 ```
 
@@ -138,13 +138,13 @@ import { runCodexAttempt } from "./packages/loop/dist/codex-process.js";
 const controller = new AbortController();
 await runCodexAttempt("codex", ["app-server"], {
   cwd: "/path/to/checkout",
-  goal: "Fix the failing addition test",
+  project: "Fix the failing addition test",
   signal: controller.signal, // optional AbortController owned by the caller
 });
 ```
 
 This starts Codex in the checkout, initializes it, creates one ephemeral thread,
-runs the goal, waits for terminal completion, and cleans up its process group.
+runs the project, waits for terminal completion, and cleans up its process group.
 It resolves only after successful completion and cleanup; either failure rejects.
 `timeoutMs` bounds each initialization/thread-start phase (default ten seconds),
 `turnTimeoutMs` bounds the turn (default sixty seconds), and `interruptTimeoutMs`
@@ -172,7 +172,7 @@ or change groups, remote work, and termination of Herbie itself are not. Unreape
 zombies can keep group cleanup unconfirmed. Windows is rejected before spawning.
 The eventual disposable Daytona sandbox needs confirmed deletion as the stronger
 boundary for escaped descendants. `initializeCodexProcess` remains an initialization
-probe; `runCodexAttempt` adds the thread and goal using the same process owner.
+probe; `runCodexAttempt` adds the thread and project using the same process owner.
 
 ### Opt-in real Codex smoke test
 
@@ -189,7 +189,7 @@ and CI; its TypeScript is checked by `pnpm typecheck`. It does not change authen
 or Codex sandbox settings and does not retry a failed run.
 
 The test creates a temporary local Git repository with no remote, commits an arithmetic
-bug and two tests, and confirms both tests fail. It runs `pnpm start --repo … --goal …`,
+bug and two tests, and confirms both tests fail. It runs `pnpm start --repo … --project …`,
 then independently requires exit 0, both tests passing, byte-for-byte unchanged tests,
 unchanged HEAD, and only the expected one-line subtraction-to-addition edit. Extra
 tracked, untracked, or ignored files also fail verification.
@@ -204,7 +204,7 @@ inspect them before sharing. Successful runs remove only their own temporary dir
 After building:
 
 ```sh
-node packages/loop/dist/index.js --repo /path/to/checkout --goal "Improve error messages"
+node packages/loop/dist/index.js --repo /path/to/checkout --project "Improve error messages"
 node packages/demo/dist/index.js
 ```
 
@@ -241,10 +241,10 @@ Capture console output if you need a record. This command is excluded from defau
 tests and CI, but typechecked. `pnpm test` runs its mocked lifecycle and error-output tests without
 credentials, provisioning, or charges.
 
-### Callable Daytona goal attempt (not run by default tests)
+### Callable Daytona project attempt (not run by default tests)
 
 After `pnpm build`, `runDaytonaAttempt` in
-`packages/loop/dist/daytona-attempt.js` connects the repo and goal flow to Daytona:
+`packages/loop/dist/daytona-attempt.js` connects the repo and project flow to Daytona:
 
 ```js
 import { runDaytonaAttempt } from "./packages/loop/dist/daytona-attempt.js";
@@ -256,7 +256,7 @@ const changes = await runDaytonaAttempt(
     // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
     repoUrl: "https://github.com/your-org/test-repo.git",
     // commit: 'full commit SHA', // optional; otherwise clones the default branch
-    goal: "Fix the failing addition test",
+    project: "Fix the failing addition test",
     // Default organization networking is inherited; no network override is required.
     secrets: { OPENAI_API_KEY: "existing-organization-secret-name" },
     // outboundProxyUrl: 'http://approved-proxy:8080',
@@ -285,7 +285,7 @@ It inherits Daytona's organization network policy by default. `domainAllowList` 
 optional and should only be supplied if the organization's policy permits it. Setup
 needs the Ubuntu package repositories, nodejs.org, registry.npmjs.org, and GitHub
 release downloads (`github.com` and `release-assets.githubusercontent.com`);
-Python package installation needs pypi.org and files.pythonhosted.org. The goal
+Python package installation needs pypi.org and files.pythonhosted.org. The project
 needs the public Git repository and api.openai.com. A blocked setup fails and deletes
 the sandbox rather than changing network policy.
 
@@ -310,12 +310,12 @@ fallback or retry.
 
 Creation is bounded at 120 seconds; each upload at 30 seconds; fresh runtime setup at
 240 seconds (snapshot configuration at 30); the turn at 20 minutes; each patch-extraction
-Git command and artifact download at 30 seconds; sandbox goal execution at 22 minutes;
+Git command and artifact download at 30 seconds; sandbox project execution at 22 minutes;
 and confirmed deletion at 60 seconds. Other SDK requests, including clone, use the
 caller's client timeout. A 35-minute sandbox TTL is a fallback. As in the lifecycle
 smoke, ambiguous creation is reported by its unique name without retries; a handle
 is required for explicit deletion. Failed deletion rejects even after a successful
-goal. Reported phase messages omit command output and SDK details; inspect error
+project. Reported phase messages omit command output and SDK details; inspect error
 causes privately rather than dumping them into logs.
 
 On success, the adapter returns `{ baseCommit, patch }` after confirmed deletion.
@@ -328,10 +328,10 @@ decoded patch must be at most 8 MiB. The artifact is downloaded into host memory
 before deletion. If deletion
 fails, the adapter still rejects and exposes the retrieved artifact on
 `DaytonaAttemptError.changes`. The caller owns durable storage of returned/recovered
-artifacts. Goal, extraction, change-artifact download, or malformed-artifact failures
+artifacts. Project, extraction, change-artifact download, or malformed-artifact failures
 reject and still attempt deletion; they do not provide a partial patch.
 
-For initial goal attempts, the agent installs dependencies and runs tests in its
+For initial project attempts, the agent installs dependencies and runs tests in its
 own checkout; there is no separate validation command. For CI repairs, the runner
 requires and executes the agent's verification script after the session exits.
 Only successful local verification and confirmed sandbox deletion allow a repair
@@ -343,9 +343,9 @@ marks the draft PR ready for review without starting another agent session.
 Herbie also processes human PR comments, inline feedback, and submitted reviews.
 The agent chooses to ignore the feedback, reply, or push a locally verified update
 and reply on the existing PR. Bot comments do not trigger runs; duplicate feedback
-is processed once. Feedback processing stops when the goal is paused or cancelled.
+is processed once. Feedback processing stops when the project is paused or cancelled.
 See [service operations](docs/service.md) for subscriptions and failure recovery.
-After goal completion and confirmed sandbox deletion, the host attaches
+After project completion and confirmed sandbox deletion, the host attaches
 `verification` evidence binding the repository URL, base commit and SHA-256 of
 the patch bytes to that attempt. Version 3 records completion and cleanup, not a
 test result. Saved version 2 evidence remains eligible for publication; artifacts
@@ -355,7 +355,7 @@ This preserves the final repository file state, not commit history or ignored fi
 submodule working-tree contents are not bundled. No live sandbox/model call has been made to validate
 this path. One live smoke needs an
 existing scoped Secret/proxy references compatible with the configured OpenAI provider,
-an approved public repo/commit and goal, and explicit authorization for sandbox and
+an approved public repo/commit and project, and explicit authorization for sandbox and
 model spend. Creating/configuring account prerequisites needs separate authorization;
 the adapter does not provision secrets or change account settings.
 
@@ -426,7 +426,7 @@ publication locally; a live attempt followed by native Git push remains unvalida
 ### Agent transcripts
 
 Each live run streams the Codex app-server's thread-scoped notifications into
-Postgres `goal_events` records with type `agent` and the run's `job_id`. The JSON
+Postgres `project_events` records with type `agent` and the run's `job_id`. The JSON
 message is stored without the progress-message truncation limit. The existing
 owner-authenticated WebSocket feed replays these records on reconnect. The run
 view assembles message deltas, reasoning, and tool activity; **Download transcript**

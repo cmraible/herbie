@@ -82,6 +82,7 @@ export const environmentSchema = z
     HERBIE_DAYTONA_OPENAI_SECRET: text.optional(),
     HERBIE_DAYTONA_SNAPSHOT: text.optional(),
     OPENAI_API_KEY: text.optional(),
+    HERBIE_PROJECT_NAME_MODEL: text.optional(),
     HERBIE_GOAL_NAME_MODEL: text.optional(),
     HERBIE_DEPLOYMENT_ID: revision.optional(),
     HERBIE_IMAGE_REVISION: revision.optional(),
@@ -199,7 +200,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseCa: env.HERBIE_DATABASE_CA,
     databaseCaFile: env.HERBIE_DATABASE_CA_FILE,
     openaiApiKey: mode === "live" ? env.OPENAI_API_KEY : undefined,
-    goalNameModel: env.HERBIE_GOAL_NAME_MODEL,
+    projectNameModel: env.HERBIE_PROJECT_NAME_MODEL ?? env.HERBIE_GOAL_NAME_MODEL,
     daytona:
       env.DAYTONA_API_KEY && env.HERBIE_DAYTONA_OPENAI_SECRET
         ? {

@@ -22,7 +22,7 @@ test("worker completes queued work after the initiating client disconnects and d
     await admin.end();
   });
   await store.migrate();
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "demo-user",
     { repository: "demo/example", prompt: "Fix arithmetic" },
     "demo",
@@ -30,11 +30,11 @@ test("worker completes queued work after the initiating client disconnects and d
   );
   const adapters = createDemoAdapters();
   await runWorkerOnce(store, adapters, "worker-one");
-  const after = await store.getGoal(goal.id);
+  const after = await store.getProject(project.id);
   assert.equal(after?.state, "awaiting_review");
   assert.ok(after?.pullRequest);
   await runWorkerOnce(store, adapters, "worker-two");
-  assert.deepEqual((await store.getGoal(goal.id))?.pullRequest, after.pullRequest);
+  assert.deepEqual((await store.getProject(project.id))?.pullRequest, after.pullRequest);
 });
 
 test("merged demo work keeps advancing until cancelled and a simulated failure stops", async (t) => {
@@ -52,7 +52,7 @@ test("merged demo work keeps advancing until cancelled and a simulated failure s
     await admin.end();
   });
   await store.migrate();
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "demo-user",
     { repository: "demo/example", prompt: "Fix arithmetic" },
     "demo",
@@ -62,31 +62,31 @@ test("merged demo work keeps advancing until cancelled and a simulated failure s
   await runWorkerOnce(store, adapters, "worker-one");
   const [job] = await store.reviewJobs();
   assert.ok(job);
-  const first = (await store.getGoal(goal.id))?.pullRequest;
+  const first = (await store.getProject(project.id))?.pullRequest;
   assert.ok(first);
   await store.reconcile(job.id, "merged");
   await runWorkerOnce(store, adapters, "restarted-worker");
-  const next = await store.getGoal(goal.id);
+  const next = await store.getProject(project.id);
   assert.equal(next?.state, "awaiting_review");
   assert.equal(next.attemptCount, 2);
   assert.notEqual(next.pullRequest?.branch, first.branch);
   const [second] = await store.reviewJobs();
   assert.ok(second);
   await store.reconcile(second.id, "merged");
-  assert.equal((await store.getGoal(goal.id))?.state, "queued");
+  assert.equal((await store.getProject(project.id))?.state, "queued");
   await runWorkerOnce(store, adapters, "worker-one");
-  assert.equal((await store.getGoal(goal.id))?.attemptCount, 3);
-  await store.control(goal.id, "demo-user", "cancel");
+  assert.equal((await store.getProject(project.id))?.attemptCount, 3);
+  await store.control(project.id, "demo-user", "cancel");
   assert.equal(await runWorkerOnce(store, adapters, "worker-one"), false);
-  const { goal: failed } = await store.createGoal(
+  const { project: failed } = await store.createProject(
     "demo-user",
     { repository: "demo/example", prompt: "[demo:fail]" },
     "demo",
     randomUUID(),
   );
   await runWorkerOnce(store, adapters, "worker-one");
-  assert.equal((await store.getGoal(failed.id))?.state, "failed");
-  assert.equal((await store.getGoal(failed.id))?.pullRequest, null);
+  assert.equal((await store.getProject(failed.id))?.state, "failed");
+  assert.equal((await store.getProject(failed.id))?.pullRequest, null);
 });
 
 test("worker retains raw redacted causes privately and persists safe attempt reference without retry", async (t) => {
@@ -105,7 +105,7 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
     await admin.end();
   });
   await store.migrate();
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "fixture-user",
     { repository: "demo/example", prompt: "Fixture" },
     "demo",
@@ -133,7 +133,7 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
     },
   };
   await runWorkerOnce(store, adapters, "fixture-worker");
-  const saved = await store.getGoal(goal.id);
+  const saved = await store.getProject(project.id);
   assert.equal(saved?.state, "needs_attention");
   assert.match(
     saved?.error ?? "",
@@ -141,7 +141,7 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   );
   const record = JSON.parse(output.find((line) => line.includes("herbie_failure"))!);
   assert.ok(saved?.error?.includes(record.errorId));
-  assert.equal(record.context.goalId, goal.id);
+  assert.equal(record.context.projectId, project.id);
   assert.match(JSON.stringify(record), /useful synthetic failure/);
   assert.ok(!JSON.stringify(record).includes("hidden-fixture-token"));
   assert.ok(!saved?.error?.includes("repository_clone"));

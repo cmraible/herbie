@@ -2,13 +2,13 @@ import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 
-const usage = "Usage: pnpm start --repo <path> --goal <goal>";
+const usage = "Usage: pnpm start --repo <path> --project <project>";
 
 function main(): void {
   const { values } = parseArgs({
     options: {
       repo: { type: "string" },
-      goal: { type: "string" },
+      project: { type: "string" },
       help: { type: "boolean" },
     },
   });
@@ -18,8 +18,8 @@ function main(): void {
     return;
   }
 
-  if (!values.repo?.trim() || !values.goal?.trim()) {
-    throw new Error("Both --repo and --goal must be nonempty.");
+  if (!values.repo?.trim() || !values.project?.trim()) {
+    throw new Error("Both --repo and --project must be nonempty.");
   }
 
   if (!statSync(values.repo).isDirectory()) {
@@ -27,18 +27,18 @@ function main(): void {
   }
 
   console.log(`Repository: ${values.repo}`);
-  console.log(`Goal: ${values.goal}`);
-  runCodex(values.repo, values.goal);
+  console.log(`Project: ${values.project}`);
+  runCodex(values.repo, values.project);
 }
 
-function runCodex(repo: string, goal: string): void {
+function runCodex(repo: string, project: string): void {
   const prompt = [
-    "Make one small improvement aligned with the goal below.",
+    "Make one small improvement aligned with the project below.",
     "Read the repository instructions, implement the change, and run proportionate tests.",
     "Keep the code minimal and readable. Summarize the change and verification.",
     "Leave changes local. Do not commit, push, create a pull request, or merge.",
     "",
-    `Goal: ${goal}`,
+    `Project: ${project}`,
   ].join("\n");
 
   const result = spawnSync(

@@ -52,7 +52,7 @@ test("hosted API leaves queued work untouched when execution is disabled", async
   if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
   const app = await fixture(database);
   const runtime = await app.runtime(false);
-  const { goal } = await runtime.store.createGoal(
+  const { project } = await runtime.store.createProject(
     "demo-user",
     { repository: "demo/example", prompt: "Queued for an operator to enable execution" },
     "demo",
@@ -67,7 +67,7 @@ test("hosted API leaves queued work untouched when execution is disabled", async
   const client = clientFor(service, token);
   assert.equal((await client.health()).mode, "live");
   await delay(1100);
-  assert.equal((await client.goal(goal.id)).state, "queued");
+  assert.equal((await client.project(project.id)).state, "queued");
   await service.close();
   await service.close();
   await assert.rejects(client.health());
@@ -97,7 +97,7 @@ test("hosted shutdown stops HTTP first and lets the active bounded attempt persi
   });
   const token = testSessionToken;
   const client = clientFor(service, token);
-  const goal = await client.start(
+  const project = await client.start(
     { repository: "demo/example", prompt: "Finish cleanup even when deployment stops" },
     randomUUID(),
   );
@@ -113,7 +113,7 @@ test("hosted shutdown stops HTTP first and lets the active bounded attempt persi
   await closing;
   const restarted = await startHostedService(await app.runtime(false));
   try {
-    const after = await clientFor(restarted, token).goal(goal.id);
+    const after = await clientFor(restarted, token).project(project.id);
     assert.equal(after.state, "awaiting_review");
     assert.equal(after.attemptCount, 1);
     assert.ok(after.pullRequest);
@@ -128,7 +128,7 @@ test("overlapping hosted processes keep exactly one coordinator during a rollout
   const app = await fixture(database);
   const runtimes = await Promise.all([app.runtime(true), app.runtime(true)]);
   for (const [index, runtime] of runtimes.entries()) {
-    await runtime.store.createGoal(
+    await runtime.store.createProject(
       "demo-user",
       { repository: "demo/example", prompt: `Exclusive coordinator ${index}` },
       "demo",

@@ -23,11 +23,11 @@ function killGroup(pid: number | undefined): void {
 }
 
 async function runHerbie(repo: string, directory: string): Promise<void> {
-  const goal =
+  const project =
     "Fix only add.mjs: change return a - b; to return a + b; so add returns the arithmetic sum. " +
     "Keep add.test.mjs byte-for-byte unchanged and run node --test add.test.mjs. " +
     "Do not create or modify any other files, commit, push, or use a remote.";
-  const args = ["start", "--repo", repo, "--goal", goal];
+  const args = ["start", "--repo", repo, "--project", project];
   writeFileSync(
     join(directory, "invocation.json"),
     JSON.stringify({ command: "pnpm", args, timeoutMs }, null, 2),

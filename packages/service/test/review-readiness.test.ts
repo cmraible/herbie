@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { goalSchema } from "@herbie/contracts";
+import { projectSchema } from "@herbie/contracts";
 import { createLiveAdapters } from "../src/live.js";
 import type { Github } from "../src/github.js";
 import type { CiStatus, PullRequest } from "../src/adapters.js";
@@ -43,7 +43,7 @@ for (const outcome of [
       },
     } as unknown as Github;
     const adapters = createLiveAdapters(undefined, github, { userToken: async () => "unused" });
-    const goal = goalSchema.parse({
+    const project = projectSchema.parse({
       id: "00000000-0000-4000-8000-000000000001",
       ownerId: "owner",
       repository: "owner/repo",
@@ -60,10 +60,10 @@ for (const outcome of [
       error: null,
     });
     const current = await adapters.reconcile({
-      goal,
+      project,
       branch: pr.branch,
-      attemptId: goal.id,
-      repository: { repository: goal.repository, installationId: 1, defaultBranch: "main" },
+      attemptId: project.id,
+      repository: { repository: project.repository, installationId: 1, defaultBranch: "main" },
     });
     assert.equal(current?.checksPassed, outcome === "passed");
   });
@@ -73,7 +73,7 @@ test("a failed review request stays pending and reconciliation retries it before
   const { runCiRepairOnce } = await import("../src/ci-repair.js");
   const { reconcileReviews } = await import("../src/worker.js");
   const { createDemoAdapters } = await import("../src/demo.js");
-  const goal = goalSchema.parse({
+  const project = projectSchema.parse({
     id: "00000000-0000-4000-8000-000000000001",
     ownerId: "7",
     repository: "demo/example",
@@ -96,8 +96,8 @@ test("a failed review request stays pending and reconciliation retries it before
       },
     ],
   });
-  const pr = goal.pullRequests[0]!;
-  const job = { id: goal.id, attemptId: goal.id, goal, branch: pr.branch };
+  const pr = project.pullRequests[0]!;
+  const job = { id: project.id, attemptId: project.id, project, branch: pr.branch };
   let pending = false;
   let ready = false;
   let requests = 0;

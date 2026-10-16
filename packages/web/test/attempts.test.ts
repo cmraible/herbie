@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { goalSchema, type GoalEvent } from "@herbie/contracts";
+import { projectSchema, type ProjectEvent } from "@herbie/contracts";
 import { groupAttempts } from "../src/attempts.js";
 const first = "00000000-0000-4000-8000-000000000001";
 const second = "00000000-0000-4000-8000-000000000002";
-const goal = goalSchema.parse({
+const project = projectSchema.parse({
   id: first,
   ownerId: "fixture",
   repository: "demo/example",
-  name: "Goal",
-  prompt: "Goal",
+  name: "Project",
+  prompt: "Project",
   mode: "demo",
   state: "awaiting_review",
   attemptCount: 2,
@@ -31,17 +31,17 @@ function event(
   type: string,
   message: string,
   attemptId: string | null = null,
-): GoalEvent {
-  return { id, goalId: goal.id, type, message, attemptId, createdAt: "2026-10-15" };
+): ProjectEvent {
+  return { id, projectId: project.id, type, message, attemptId, createdAt: "2026-10-15" };
 }
-test("explicit attribution keeps late events with the older attempt and retains goal history", () => {
+test("explicit attribution keeps late events with the older attempt and retains project history", () => {
   const events = [
     event(1, "attempt", "First", first),
     event(2, "attempt", "Second", second),
     event(3, "pull_request_merged", "Merged", first),
-    event(4, "renamed", "Goal renamed"),
+    event(4, "renamed", "Project renamed"),
   ];
-  const result = groupAttempts(goal, events);
+  const result = groupAttempts(project, events);
   assert.deepEqual(
     result.attempts.map((a) => a.number),
     [2, 1],
@@ -63,7 +63,7 @@ test("execution events follow numbered run starts; ambiguous PR events stay in h
     event(4, "attempt", "Second"),
     event(5, "pull_request_merged", "Pull request merged"),
   ];
-  const result = groupAttempts(goal, events);
+  const result = groupAttempts(project, events);
   assert.deepEqual(
     result.attempts[0]!.events.map((e) => e.id),
     [3, 4],

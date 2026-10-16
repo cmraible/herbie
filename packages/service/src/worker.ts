@@ -17,9 +17,9 @@ import type { PublicationPhase } from "./adapters.js";
 
 async function executionFor(adapters: Adapters, job: Job, readOnly: boolean): Promise<Execution> {
   const repository = readOnly
-    ? await adapters.reconciliationRepository(job.goal.repository)
-    : await adapters.authorize(job.goal.ownerId, job.goal.repository);
-  return { goal: job.goal, repository, attemptId: job.attemptId, branch: job.branch };
+    ? await adapters.reconciliationRepository(job.project.repository)
+    : await adapters.authorize(job.project.ownerId, job.project.repository);
+  return { project: job.project, repository, attemptId: job.attemptId, branch: job.branch };
 }
 
 // One claim per tick. Saved publication retries require lease and remote-state checks.
@@ -50,7 +50,11 @@ export async function runWorkerOnce(
       })
       .catch((error) => {
         loseLease();
-        logFailure(error, { component: "worker-heartbeat", goalId: job.goal.id, jobId: job.id });
+        logFailure(error, {
+          component: "worker-heartbeat",
+          projectId: job.project.id,
+          jobId: job.id,
+        });
       })
       .finally(() => {
         renewing = false;
@@ -91,7 +95,7 @@ export async function runWorkerOnce(
       await reportPublicationPhase("preflight_reconciliation");
       const existing = await adapters.reconcile(execution);
       if (!existing) {
-        if (!changes || !hasValidPublicationEvidence(job.goal.repository, changes)) {
+        if (!changes || !hasValidPublicationEvidence(job.project.repository, changes)) {
           await store.blockPublication(
             job.id,
             workerId,
@@ -153,10 +157,10 @@ export async function runWorkerOnce(
       changes = await adapters.attempt(
         {
           ...execution,
-          onActivity: (message) => store.appendEvent(job.goal.id, "agent", message, job.id),
+          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
         },
         async (message) => {
-          await store.appendEvent(job.goal.id, "attempt", message.slice(0, 2000), job.id);
+          await store.appendEvent(job.project.id, "attempt", message.slice(0, 2000), job.id);
         },
       );
       await requireLease();
@@ -185,7 +189,7 @@ export async function runWorkerOnce(
     if (!existing) await reportPublicationPhase("state_persistence");
     await store.completePublication(job.id, workerId, result);
   } catch (error) {
-    const cancelled = await store.getGoal(job.goal.id);
+    const cancelled = await store.getProject(job.project.id);
     if (cancelled?.state === "cancelled") {
       controller.abort();
       await store.finishCancelled(
@@ -204,7 +208,7 @@ export async function runWorkerOnce(
     }
     const errorId = logFailure(error, {
       component: publishing ? "publication" : "attempt",
-      goalId: job.goal.id,
+      projectId: job.project.id,
       jobId: job.id,
       stage: publishing
         ? publicationPhase
@@ -240,7 +244,7 @@ export async function runWorkerOnce(
     } catch (saveError) {
       logFailure(saveError, {
         component: "failure-persistence",
-        goalId: job.goal.id,
+        projectId: job.project.id,
         jobId: job.id,
       });
       // A stale worker must not overwrite the new owner's recovery decision.
@@ -253,18 +257,18 @@ export async function runWorkerOnce(
 }
 
 export async function reconcileReviews(store: Store, adapters: Adapters): Promise<void> {
-  // Recovery of a past write must not depend on current CI, goal state, or PR state.
+  // Recovery of a past write must not depend on current CI, project state, or PR state.
   if (adapters.readinessState)
     for (const job of await store.reviewJobs(adapters.mode, true)) {
       try {
         const state = await adapters.readinessState(await executionFor(adapters, job, true));
         if (
           state === "closed" ||
-          (state === "draft" && ["cancelled", "completed", "failed"].includes(job.goal.state))
+          (state === "draft" && ["cancelled", "completed", "failed"].includes(job.project.state))
         )
           await store.cancelReadiness(job.id);
         if (state === "ready") {
-          const pr = job.goal.pullRequests.find((pr) => pr.branch === job.branch);
+          const pr = job.project.pullRequests.find((pr) => pr.branch === job.branch);
           if (pr) {
             await adapters.requestReview?.(await executionFor(adapters, job, true));
             await store.confirmReadiness(job.id, pr.url);
@@ -273,7 +277,7 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
       } catch (error) {
         logFailure(error, {
           component: "readiness-reconciliation",
-          goalId: job.goal.id,
+          projectId: job.project.id,
           jobId: job.id,
         });
       }
@@ -286,7 +290,11 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
       else if (current && current.state !== "open")
         await store.reconcile(job.id, current.state, current);
     } catch (error) {
-      logFailure(error, { component: "review-reconciliation", goalId: job.goal.id, jobId: job.id });
+      logFailure(error, {
+        component: "review-reconciliation",
+        projectId: job.project.id,
+        jobId: job.id,
+      });
       // Transient GitHub failures do not change the durable review state. Poll again later.
     }
   }

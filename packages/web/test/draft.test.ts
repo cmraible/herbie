@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { draftSchema, newDraft, parseDraft } from "../src/draft.js";
 
-test("a new goal needs only a repository and prompt", () => {
+test("a new project needs only a repository and prompt", () => {
   const draft = { ...newDraft("demo/example"), prompt: "Add regression coverage" };
   assert.deepEqual(parseDraft(draft), {
     repository: "demo/example",

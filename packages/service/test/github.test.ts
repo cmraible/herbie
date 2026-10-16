@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createAuth, AuthError } from "../src/auth.js";
 import { migrateAuth, PgAuthStore } from "../src/auth-store.js";
 import { createLiveAdapters } from "../src/live.js";
-import { goalSchema } from "@herbie/contracts";
+import { projectSchema } from "@herbie/contracts";
 
 export async function githubFixture(t: TestContext) {
   const requests: { path: string; authorization: string; body: unknown }[] = [];
@@ -367,7 +367,7 @@ test("publication recovery permits main to advance while retaining the original 
     github,
     { userToken: async () => "ghu_fixture" },
   );
-  const goal = goalSchema.parse({
+  const project = projectSchema.parse({
     id: randomUUID(),
     ownerId: "7",
     repository: "alice/project",
@@ -383,17 +383,17 @@ test("publication recovery permits main to advance while retaining the original 
     error: "uncertain",
   });
   const execution = {
-    goal,
+    project,
     repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
     attemptId: randomUUID(),
-    branch: "herbie/synthetic-goal/synthetic-job",
+    branch: "herbie/synthetic-project/synthetic-job",
   };
   const changes = { baseCommit: "0".repeat(40), patch: Buffer.from("fixture") };
   assert.equal(await live.checkPublicationRetry?.(execution, changes), "ready");
   assert.ok(
     requests.some(
       (request) =>
-        request.path === "/repos/alice/project/branches/herbie%2Fsynthetic-goal%2Fsynthetic-job",
+        request.path === "/repos/alice/project/branches/herbie%2Fsynthetic-project%2Fsynthetic-job",
     ),
   );
   assert.ok(
@@ -423,7 +423,7 @@ test("cancellation absence checks use read-only reconciliation access after arch
       throw new Error("Read-only cancellation must not require write authorization");
     },
   });
-  const goal = goalSchema.parse({
+  const project = projectSchema.parse({
     id: randomUUID(),
     ownerId: "7",
     repository: "alice/project",
@@ -439,8 +439,8 @@ test("cancellation absence checks use read-only reconciliation access after arch
     error: "uncertain",
   });
   const execution = {
-    goal,
-    repository: await live.reconciliationRepository(goal.repository),
+    project,
+    repository: await live.reconciliationRepository(project.repository),
     attemptId: randomUUID(),
     branch: "herbie/attempt-1",
   };
@@ -485,7 +485,7 @@ for (const state of ["open", "closed", "merged"] as const)
       github,
       { userToken: async () => "ghu_fixture" },
     );
-    const goal = goalSchema.parse({
+    const project = projectSchema.parse({
       id: randomUUID(),
       ownerId: "7",
       repository: "alice/project",
@@ -501,7 +501,7 @@ for (const state of ["open", "closed", "merged"] as const)
       error: null,
     });
     const execution = {
-      goal,
+      project,
       repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
       attemptId: randomUUID(),
       branch: "herbie/attempt-1",
@@ -820,7 +820,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
     },
   });
   const repository = await live.reconciliationRepository("alice/project");
-  const goal = goalSchema.parse({
+  const project = projectSchema.parse({
     id: randomUUID(),
     ownerId: "7",
     repository: "alice/project",
@@ -835,7 +835,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
     pullRequest: null,
     error: null,
   });
-  const execution = { goal, repository, attemptId: randomUUID(), branch: "herbie/attempt-1" };
+  const execution = { project, repository, attemptId: randomUUID(), branch: "herbie/attempt-1" };
   assert.equal(await live.reconcile(execution), null);
   fixture.pr = true;
   assert.equal((await live.reconcile(execution))?.state, "open");
@@ -875,7 +875,7 @@ test("live publication rejects a legacy artifact without verification evidence b
     github,
     { userToken: async () => "ghu_fixture" },
   );
-  const goal = goalSchema.parse({
+  const project = projectSchema.parse({
     id: randomUUID(),
     ownerId: "7",
     repository: "alice/project",
@@ -893,7 +893,7 @@ test("live publication rejects a legacy artifact without verification evidence b
   await assert.rejects(
     live.publish(
       {
-        goal,
+        project,
         repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
         attemptId: randomUUID(),
         branch: "herbie/attempt-1",
@@ -901,7 +901,8 @@ test("live publication rejects a legacy artifact without verification evidence b
       { baseCommit: "0".repeat(40), patch: Buffer.from("patch") },
       async () => {},
     ),
-    (error) => error instanceof Error && /successful goal and cleanup evidence/.test(error.message),
+    (error) =>
+      error instanceof Error && /successful project and cleanup evidence/.test(error.message),
   );
   assert.equal(
     requests.filter((request) => request.path === "/repos/alice/project/pulls").length,

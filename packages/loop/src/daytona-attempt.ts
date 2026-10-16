@@ -45,7 +45,7 @@ type Request = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboundProxyU
   domainAllowList?: string;
   repoUrl: string;
   commit?: string;
-  goal: string;
+  project: string;
   verifyLocally?: boolean;
   onActivity?: (message: string) => Promise<void>;
   feedback?: boolean;
@@ -59,7 +59,7 @@ export interface DaytonaAttemptChanges {
   pullRequestBody?: string;
   // Optional only for artifacts saved before agent-authored titles.
   pullRequestTitle?: string;
-  // Issued by the host only after the goal and sandbox deletion succeed.
+  // Issued by the host only after the project and sandbox deletion succeed.
   verification?: {
     // Version 2 also recorded tests; version 3 records completion and cleanup only.
     // Unversioned legacy artifacts remain ineligible for publication.
@@ -147,9 +147,9 @@ export async function runDaytonaAttempt(
   if (
     (request.snapshot !== undefined && !request.snapshot.trim()) ||
     (request.domainAllowList !== undefined && !request.domainAllowList.trim()) ||
-    !request.goal.trim()
+    !request.project.trim()
   ) {
-    throw new Error("Goal and any supplied snapshot or domain allowlist must not be empty");
+    throw new Error("Project and any supplied snapshot or domain allowlist must not be empty");
   }
   const runtime = await Promise.all(
     [
@@ -242,7 +242,7 @@ export async function runDaytonaAttempt(
       Buffer.from(
         JSON.stringify({
           cwd,
-          goal: request.goal,
+          project: request.project,
           verifyLocally: request.verifyLocally,
           feedback: request.feedback,
         }),
@@ -253,8 +253,8 @@ export async function runDaytonaAttempt(
     await begin("repository_clone");
     await sandbox.git.clone(repo.href, cwd, undefined, request.commit);
     await begin("model_execution");
-    await emit(`Running goal in sandbox ${sandbox.id}`);
-    // Only the generated UUID path enters the shell. The goal and repo URL never do.
+    await emit(`Running project in sandbox ${sandbox.id}`);
+    // Only the generated UUID path enters the shell. The project and repo URL never do.
     request.signal?.throwIfAborted();
     const execution = sandbox.process.executeCommand(
       `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} node ${directory}/daytona-runner.js`,
@@ -295,8 +295,8 @@ export async function runDaytonaAttempt(
     const result = outcome.value;
     if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
     if (result.result !== "herbie-attempt-completed\n")
-      throw new AttemptResultError("Invalid goal completion marker", result.result);
-    await emit(`Goal completed in sandbox ${sandbox.id}`);
+      throw new AttemptResultError("Invalid project completion marker", result.result);
+    await emit(`Project completed in sandbox ${sandbox.id}`);
     await begin("artifact_download");
     const artifact: unknown = JSON.parse(
       (await downloadBounded(sandbox, `${directory}/changes.json`, MAX_ARTIFACT_BYTES)).toString(

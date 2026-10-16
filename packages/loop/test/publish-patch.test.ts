@@ -88,7 +88,7 @@ async function fixture(t: TestContext, extraFiles = false) {
       snapshot: "fixture",
       domainAllowList: "github.com",
       repoUrl: "https://github.com/example/repo.git",
-      goal: "Fix addition",
+      project: "Fix addition",
     },
     () => {},
     pathToFileURL(runtime + "/"),
@@ -180,7 +180,7 @@ test("accepts Git identity and authentication configuration only for this public
 for (const invalid of [
   "unverified",
   "missing evidence version",
-  "incomplete goal",
+  "incomplete project",
   "unconfirmed cleanup",
   "changed bytes",
   "changed base",
@@ -191,7 +191,7 @@ for (const invalid of [
     const { changes, scratch, createPullRequest, publish } = await fixture(t);
     if (invalid === "missing evidence version") delete changes.verification!.version;
     if (invalid === "unverified") delete changes.verification;
-    if (invalid === "incomplete goal")
+    if (invalid === "incomplete project")
       Object.assign(changes.verification!, { goalCompleted: false });
     if (invalid === "unconfirmed cleanup")
       Object.assign(changes.verification!, { sandboxDeleted: false });

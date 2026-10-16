@@ -47,7 +47,7 @@ for (const outcome of [
       await admin.end();
     });
     await store.migrate();
-    const { goal } = await store.createGoal(
+    const { project } = await store.createProject(
       "demo-user",
       { repository: "demo/example", prompt: "Fix arithmetic" },
       "demo",
@@ -55,24 +55,25 @@ for (const outcome of [
     );
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "original");
-    await store.pool.query("UPDATE goals SET mode='live' WHERE id=$1", [goal.id]);
+    await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
-    const pr = job.goal.pullRequests[0]!;
+    const pr = job.project.pullRequests[0]!;
     if (outcome === "retry-at-capacity") {
-      await store.pool.query("UPDATE goals SET state='failed',error='synthetic' WHERE id=$1", [
-        goal.id,
+      await store.pool.query("UPDATE projects SET state='failed',error='synthetic' WHERE id=$1", [
+        project.id,
       ]);
       await assert.rejects(
-        store.retryAttempt(goal.id, "demo-user"),
+        store.retryAttempt(project.id, "demo-user"),
         /Review or close an open pull request before retrying this project/,
       );
-      assert.equal((await store.getGoal(goal.id))?.state, "failed");
+      assert.equal((await store.getProject(project.id))?.state, "failed");
       assert.equal(
         (
-          await store.pool.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='retry'", [
-            goal.id,
-          ])
+          await store.pool.query(
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='retry'",
+            [project.id],
+          )
         ).rowCount,
         0,
       );
@@ -83,8 +84,8 @@ for (const outcome of [
       const originalBase = "c".repeat(40);
       const originalPatch = "e".repeat(64);
       await store.pool.query(
-        "UPDATE goals SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
-        [goal.id, originalHead, originalBase, originalPatch],
+        "UPDATE projects SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [project.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
         "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
@@ -110,21 +111,21 @@ for (const outcome of [
         }),
       };
       await reconcileReviews(store, adapters);
-      const paused = await store.getGoal(goal.id);
+      const paused = await store.getProject(project.id);
       assert.equal(paused?.state, "paused");
       assert.equal(paused?.attempts?.[0]?.pullRequest?.checksPassed, false);
       assert.equal(paused?.pullRequest?.checksPassed, false);
       draft = true;
       await reconcileReviews(store, adapters);
-      const refreshed = await store.getGoal(goal.id);
+      const refreshed = await store.getProject(project.id);
       assert.equal(refreshed?.attempts?.[0]?.pullRequest?.draft, true);
       assert.equal(refreshed?.pullRequest?.draft, true);
       assert.equal(refreshed?.pullRequest?.headSha, originalHead);
       assert.equal(
         (
           await store.pool.query(
-            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='external_change_paused'",
-            [goal.id],
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='external_change_paused'",
+            [project.id],
           )
         ).rowCount,
         1,
@@ -136,8 +137,8 @@ for (const outcome of [
       const originalBase = "c".repeat(40);
       const originalPatch = "e".repeat(64);
       await store.pool.query(
-        "UPDATE goals SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
-        [goal.id, originalHead, originalBase, originalPatch],
+        "UPDATE projects SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [project.id, originalHead, originalBase, originalPatch],
       );
       await store.pool.query(
         "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
@@ -151,13 +152,13 @@ for (const outcome of [
         }),
         false,
       );
-      assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
-      assert.equal((await store.getGoal(goal.id))?.pullRequests[0]?.headSha, "b".repeat(40));
+      assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
+      assert.equal((await store.getProject(project.id))?.pullRequests[0]?.headSha, "b".repeat(40));
       return;
     }
     if (outcome.startsWith("audit-")) {
       await store.beginReadiness(job.id);
-      if (outcome === "audit-cancelled") await store.control(goal.id, "demo-user", "cancel");
+      if (outcome === "audit-cancelled") await store.control(project.id, "demo-user", "cancel");
       else if (outcome !== "audit-pending") await store.reconcile(job.id, "closed");
       const adapters: Adapters = {
         ...demo,
@@ -183,8 +184,8 @@ for (const outcome of [
       assert.equal(
         (
           await store.pool.query(
-            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='pull_request_ready'",
-            [goal.id],
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='pull_request_ready'",
+            [project.id],
           )
         ).rowCount,
         ["audit-abandoned", "audit-cancelled"].includes(outcome) ? 0 : 1,
@@ -193,15 +194,15 @@ for (const outcome of [
     }
     if (outcome === "queue") {
       for (let i = 0; i < 2; i++) {
-        await store.createGoal(
+        await store.createProject(
           "demo-user",
-          { repository: "demo/example", prompt: "Other goal" },
+          { repository: "demo/example", prompt: "Other project" },
           "demo",
           randomUUID(),
         );
         await runWorkerOnce(store, demo, "original");
       }
-      await store.pool.query("UPDATE goals SET mode='live'");
+      await store.pool.query("UPDATE projects SET mode='live'");
       await store.requestCiReview();
       await runCiRepairOnce(
         store,
@@ -269,7 +270,7 @@ for (const outcome of [
         assert.equal(execution.ciRepair?.head, head);
         assert.equal(execution.branch, job.branch);
         if (outcome === "failure") throw new Error("Verification failed");
-        if (outcome === "cancel") await store.control(goal.id, "demo-user", "cancel");
+        if (outcome === "cancel") await store.control(project.id, "demo-user", "cancel");
         if (outcome === "lease")
           await store.pool.query(
             "UPDATE ci_repairs SET lease_expires_at=clock_timestamp()-interval '1 second'",
@@ -307,7 +308,7 @@ for (const outcome of [
       await runCiRepairOnce(store, adapters, "duplicate");
       assert.equal(attempts, 1);
     }
-    assert.equal((await store.getGoal(goal.id))?.pullRequests.length, 1);
+    assert.equal((await store.getProject(project.id))?.pullRequests.length, 1);
     if (outcome.startsWith("rerun-")) {
       if (outcome === "rerun-crash" || outcome === "rerun-publishing-crash") {
         const id = await store.startCiRepair(job.id, head, "interrupted");
@@ -332,7 +333,7 @@ for (const outcome of [
         );
         return;
       }
-      if (outcome === "rerun-cancelled") await store.control(goal.id, "demo-user", "cancel");
+      if (outcome === "rerun-cancelled") await store.control(project.id, "demo-user", "cancel");
       else if (outcome === "rerun-closed") await store.reconcile(job.id, "closed");
       else {
         if (outcome === "rerun-passed")
@@ -350,12 +351,15 @@ for (const outcome of [
         await runCiRepairOnce(store, adapters, "discard");
       }
       const terminal = await store.pool.query(
-        "SELECT message FROM goal_events WHERE goal_id=$1 AND type=$2",
-        [goal.id, outcome === "rerun-changed" ? "external_change_paused" : "ci_repair_completed"],
+        "SELECT message FROM project_events WHERE project_id=$1 AND type=$2",
+        [
+          project.id,
+          outcome === "rerun-changed" ? "external_change_paused" : "ci_repair_completed",
+        ],
       );
       if (outcome === "rerun-changed") {
         assert.equal(terminal.rowCount, 1);
-        assert.equal((await store.getGoal(goal.id))?.state, "paused");
+        assert.equal((await store.getProject(project.id))?.state, "paused");
       } else assert.ok(terminal.rows.some((row) => row.message.includes("discarded")));
       assert.equal(
         (await store.pool.query("SELECT state FROM ci_repairs WHERE head=$1", ["a".repeat(40)]))
@@ -380,7 +384,7 @@ for (const outcome of [
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "new-head");
       assert.equal(attempts, 1, "external changes pause further repairs");
-      assert.equal((await store.getGoal(goal.id))?.state, "paused");
+      assert.equal((await store.getProject(project.id))?.state, "paused");
     }
 
     if (outcome === "success") {
@@ -424,8 +428,8 @@ for (const outcome of [
       assert.equal(
         (
           await store.pool.query(
-            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='pull_request_ready'",
-            [goal.id],
+            "SELECT 1 FROM project_events WHERE project_id=$1 AND type='pull_request_ready'",
+            [project.id],
           )
         ).rowCount,
         1,
@@ -440,12 +444,12 @@ for (const outcome of [
       await runCiRepairOnce(store, adapters, "already-ready");
       assert.equal(redundantWrites, 0);
       assert.equal(await store.ciReviewActive(job.id), true);
-      await store.control(goal.id, "demo-user", "pause");
+      await store.control(project.id, "demo-user", "pause");
       assert.equal(await store.ciReviewActive(job.id), false);
     }
     const events = await store.pool.query<{ type: string }>(
-      "SELECT type FROM goal_events WHERE goal_id=$1",
-      [goal.id],
+      "SELECT type FROM project_events WHERE project_id=$1",
+      [project.id],
     );
     assert.ok(
       events.rows.some(

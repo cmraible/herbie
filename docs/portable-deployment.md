@@ -92,10 +92,10 @@ release check, not a claim that a generic secret scan can prove absence of secre
   `maxSurge: 1`, and no autoscaler. During a rollout, both pods may serve HTTP,
   but a PostgreSQL session advisory lock permits only one background coordinator.
   The old coordinator drains before releasing ownership to the replacement.
-  During an upgrade from before `maxWip` support, keep new goals at the default
+  During an upgrade from before `maxWip` support, keep new projects at the default
   WIP of 1 until every HTTP replica is upgraded. Clients omit that default field
   for older strict APIs; larger limits require the new API and are never silently
-  downgraded. New clients request version 2 goal responses; older clients keep
+  downgraded. New clients request version 2 project responses; older clients keep
   receiving the original shape without the new fields. A database trigger mirrors old coordinators' PR writes into job
   history throughout the overlap, including publications after migration.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
@@ -124,7 +124,7 @@ publication; stop new submissions and drain the old coordinator. Confirm it cann
 restart or run reconciliation. Only then start the new coordinator with execution
 disabled, verify exact revision and database readiness, switch ingress and GitHub
 App callback/setup/webhook URLs, test owner authentication, and explicitly enable
-execution. Do not trigger a paid smoke goal without separate authorization.
+execution. Do not trigger a paid smoke project without separate authorization.
 
 Rollback must drain and stop the new coordinator first, restore routing and GitHub
 App URLs, and resume only a schema-compatible old image. Never run old and new

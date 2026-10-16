@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { goalInput, actionSchema } from "@herbie/contracts";
+import { projectInput, actionSchema } from "@herbie/contracts";
 import { createClient, ApiError } from "@herbie/contracts/client";
 
 const savedSession = z.object({ baseUrl: z.string().url(), token: z.string().min(1) }).strict();
@@ -137,12 +137,12 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
       return 0;
     }
     if (command === "status") {
-      print(id ? await client.goal(id) : await client.goals());
+      print(id ? await client.project(id) : await client.projects());
       return 0;
     }
     if (command === "start") {
       if (id) throw new Error("start accepts options, not a project ID");
-      const input = goalInput.parse({
+      const input = projectInput.parse({
         repository: values.repo,
         name: values.name,
         prompt: values.prompt,

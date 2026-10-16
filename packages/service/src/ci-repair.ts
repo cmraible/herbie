@@ -20,10 +20,10 @@ export async function runCiRepairOnce(
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      goal: job.goal,
+      project: job.project,
       branch: job.branch,
       attemptId: job.attemptId,
-      repository: await adapters.authorize(job.goal.ownerId, job.goal.repository),
+      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
       signal: controller.signal,
     };
     const failure = await adapters.ciStatus(execution);
@@ -48,7 +48,7 @@ export async function runCiRepairOnce(
       controller.signal.throwIfAborted();
       if (!(await store.heartbeatCiRepair(id!, workerId))) {
         controller.abort();
-        throw new Error("CI repair lease lost or goal stopped");
+        throw new Error("CI repair lease lost or project stopped");
       }
       controller.signal.throwIfAborted();
     };
@@ -69,9 +69,9 @@ export async function runCiRepairOnce(
       changes = await adapters.attempt(
         {
           ...execution,
-          onActivity: (message) => store.appendEvent(job.goal.id, "agent", message, job.id),
+          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
         },
-        (message) => store.appendEvent(job.goal.id, "ci_repair", message.slice(0, 2000), job.id),
+        (message) => store.appendEvent(job.project.id, "ci_repair", message.slice(0, 2000), job.id),
       );
       cleanupConfirmed = changes.verification?.sandboxDeleted === true;
       await requireLease();
@@ -112,7 +112,7 @@ export async function runCiRepairOnce(
     }
     const reference = logFailure(error, {
       component: "ci-repair",
-      goalId: job.goal.id,
+      projectId: job.project.id,
       jobId: job.id,
     });
     if (id)

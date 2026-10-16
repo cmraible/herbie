@@ -8,9 +8,9 @@ import { getEventListeners } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { initializeCodexProcess, runCodexAttempt } from "../src/codex-process.js";
 
-const fixture = fileURLToPath(new URL("./fixtures/goal-attempt.ts", import.meta.url));
+const fixture = fileURLToPath(new URL("./fixtures/project-attempt.ts", import.meta.url));
 const posix = { skip: process.platform === "win32", timeout: 10_000 };
-const goal = "Fix addition without changing the tests";
+const project = "Fix addition without changing the tests";
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -72,7 +72,7 @@ test(
   posix,
   async (t) => {
     const { cwd, record, events, gone } = await setup(t);
-    const options = { cwd, goal, shutdownMs: 100 };
+    const options = { cwd, project, shutdownMs: 100 };
     await initializeCodexProcess(process.execPath, [fixture, "success", record], options);
     const logged = await events();
     assert.deepEqual(
@@ -90,13 +90,13 @@ test(
 );
 
 test(
-  "runs initialize → thread → goal → completion and cleans up its process group",
+  "runs initialize → thread → project → completion and cleans up its process group",
   posix,
   async (t) => {
     const { cwd, record, events, gone } = await setup(t);
     await runCodexAttempt(process.execPath, [fixture, "success", record], {
       cwd: relative(process.cwd(), cwd),
-      goal,
+      project,
       shutdownMs: 100,
     });
     const logged = await events();
@@ -116,7 +116,7 @@ test(
         {
           id: 2,
           method: "turn/start",
-          params: { threadId: "thread-1", input: [{ type: "text", text: goal }] },
+          params: { threadId: "thread-1", input: [{ type: "text", text: project }] },
         },
       ],
     );
@@ -139,7 +139,7 @@ for (const [mode, expected] of [
     await assert.rejects(
       runCodexAttempt(process.execPath, [fixture, mode, record], {
         cwd,
-        goal,
+        project,
         turnTimeoutMs: 200,
         interruptTimeoutMs: 200,
         shutdownMs: 100,
@@ -173,7 +173,7 @@ test("abort interrupts the active turn before closing its transport", posix, asy
   const rejected = assert.rejects(
     runCodexAttempt(process.execPath, [fixture, "cancel", record], {
       cwd,
-      goal,
+      project,
       signal: controller.signal,
       shutdownMs: 100,
     }),
@@ -205,7 +205,7 @@ test(
     // Only the fake protocol executable runs on the host, never paid execution.
     await runCodexAttempt(process.execPath, [fixture, "high-usage", record], {
       cwd,
-      goal,
+      project,
       disposableDaytona: true,
       turnTimeoutMs: 3_000,
       shutdownMs: 100,

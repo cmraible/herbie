@@ -8,11 +8,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   actionSchema,
-  goalUpdate,
-  goalInput,
-  goalPromptEdit,
-  goalRename,
-  type Goal,
+  projectUpdate,
+  projectInput,
+  projectPromptEdit,
+  projectRename,
+  type Project,
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { Store, StoreError } from "./store.js";
@@ -103,10 +103,10 @@ export function createApiServer(options: ApiOptions) {
     );
     const url = new URL(request.url ?? "/", origin);
     const method = request.method ?? "GET";
-    function goalJson(status: number, value: Goal | Goal[]): void {
-      const compatible = (goal: Goal) => {
-        if (request.headers["x-herbie-goal-version"] === "2") return goal;
-        const { maxWip: _maxWip, pullRequests: _pullRequests, ...legacy } = goal;
+    function projectJson(status: number, value: Project | Project[]): void {
+      const compatible = (project: Project) => {
+        if (request.headers["x-herbie-project-version"] === "2") return project;
+        const { maxWip: _maxWip, pullRequests: _pullRequests, ...legacy } = project;
         return legacy;
       };
       json(response, status, Array.isArray(value) ? value.map(compatible) : compatible(value));
@@ -364,38 +364,38 @@ export function createApiServer(options: ApiOptions) {
         } else json(response, 200, await adapters.repositories(userId));
         return;
       }
-      if (method === "GET" && url.pathname === "/api/goals") {
-        goalJson(200, await store.listGoals(userId));
+      if (method === "GET" && url.pathname === "/api/projects") {
+        projectJson(200, await store.listProjects(userId));
         return;
       }
-      if (method === "POST" && url.pathname === "/api/goals") {
+      if (method === "POST" && url.pathname === "/api/projects") {
         requireExecution();
-        const input = goalInput.parse(await readJson(request));
+        const input = projectInput.parse(await readJson(request));
         const key = z.string().uuid().parse(request.headers["idempotency-key"]);
         await adapters.authorize(userId, input.repository);
-        const result = await store.createGoal(userId, input, adapters.mode, key);
-        goalJson(result.created ? 201 : 200, result.goal);
+        const result = await store.createProject(userId, input, adapters.mode, key);
+        projectJson(result.created ? 201 : 200, result.project);
         return;
       }
-      const goalPath = url.pathname.match(
-        /^\/api\/goals\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|retry-repair|name|prompt))?$/,
+      const projectPath = url.pathname.match(
+        /^\/api\/projects\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|retry-repair|name|prompt))?$/,
       );
-      if (goalPath) {
-        const id = z.string().uuid().parse(goalPath[1]);
-        const goal = await store.getGoal(id, userId);
-        if (!goal) throw new HttpError(404, "Goal not found");
-        if (method === "POST" && !goalPath[2]) {
-          goalJson(
+      if (projectPath) {
+        const id = z.string().uuid().parse(projectPath[1]);
+        const project = await store.getProject(id, userId);
+        if (!project) throw new HttpError(404, "Project not found");
+        if (method === "POST" && !projectPath[2]) {
+          projectJson(
             200,
-            await store.updateGoal(id, userId, goalUpdate.parse(await readJson(request))),
+            await store.updateProject(id, userId, projectUpdate.parse(await readJson(request))),
           );
           return;
         }
-        if (method === "GET" && !goalPath[2]) {
-          goalJson(200, goal);
+        if (method === "GET" && !projectPath[2]) {
+          projectJson(200, project);
           return;
         }
-        if (method === "GET" && goalPath[2] === "events") {
+        if (method === "GET" && projectPath[2] === "events") {
           const after = z.coerce
             .number()
             .int()
@@ -405,38 +405,38 @@ export function createApiServer(options: ApiOptions) {
           json(response, 200, await store.events(id, after));
           return;
         }
-        if (method === "POST" && goalPath[2] && goalPath[2] !== "events") {
-          if (goalPath[2] === "prompt") {
-            const { prompt } = goalPromptEdit.parse(await readJson(request));
-            goalJson(200, await store.editGoalPrompt(id, userId, prompt));
+        if (method === "POST" && projectPath[2] && projectPath[2] !== "events") {
+          if (projectPath[2] === "prompt") {
+            const { prompt } = projectPromptEdit.parse(await readJson(request));
+            projectJson(200, await store.editProjectPrompt(id, userId, prompt));
             return;
           }
-          if (goalPath[2] === "name") {
-            const { name } = goalRename.parse(await readJson(request));
-            goalJson(200, await store.renameGoal(id, userId, name));
+          if (projectPath[2] === "name") {
+            const { name } = projectRename.parse(await readJson(request));
+            projectJson(200, await store.renameProject(id, userId, name));
             return;
           }
-          if (goalPath[2] === "retry-repair") {
+          if (projectPath[2] === "retry-repair") {
             requireExecution();
             const { repairId } = z
               .object({ repairId: z.string().uuid() })
               .strict()
               .parse(await readJson(request));
-            await adapters.authorize(userId, goal.repository);
-            goalJson(200, await store.retryCiRepair(id, userId, repairId));
+            await adapters.authorize(userId, project.repository);
+            projectJson(200, await store.retryCiRepair(id, userId, repairId));
             return;
           }
-          if (goalPath[2] === "retry" || goalPath[2] === "retry-publication") {
+          if (projectPath[2] === "retry" || projectPath[2] === "retry-publication") {
             requireExecution();
             const candidate = await store.publicationRetryCandidate(id, userId);
-            if (!candidate) throw new HttpError(404, "Goal not found");
+            if (!candidate) throw new HttpError(404, "Project not found");
             if (candidate.kind === "already_queued" || candidate.kind === "in_progress") {
-              goalJson(200, candidate.goal);
+              projectJson(200, candidate.project);
               return;
             }
-            if (goalPath[2] === "retry" && candidate.kind === "unavailable") {
-              await adapters.authorize(userId, goal.repository);
-              goalJson(200, await store.retryAttempt(id, userId));
+            if (projectPath[2] === "retry" && candidate.kind === "unavailable") {
+              await adapters.authorize(userId, project.repository);
+              projectJson(200, await store.retryAttempt(id, userId));
               return;
             }
             if (adapters.mode !== "live" || !adapters.checkPublicationRetry)
@@ -444,14 +444,14 @@ export function createApiServer(options: ApiOptions) {
             if (candidate.kind !== "retryable")
               throw new HttpError(409, "No saved publication is eligible for a safe retry.");
             const job = candidate.job;
-            if (!job.artifact || !hasValidPublicationEvidence(job.goal.repository, job.artifact))
+            if (!job.artifact || !hasValidPublicationEvidence(job.project.repository, job.artifact))
               throw new HttpError(
                 409,
                 "The saved artifact does not meet publication verification requirements.",
               );
-            const repository = await adapters.reconciliationRepository(job.goal.repository);
+            const repository = await adapters.reconciliationRepository(job.project.repository);
             const check = await adapters.checkPublicationRetry(
-              { goal: job.goal, repository, attemptId: job.attemptId, branch: job.branch },
+              { project: job.project, repository, attemptId: job.attemptId, branch: job.branch },
               job.artifact,
             );
             if (check === "pull_request_exists")
@@ -469,7 +469,7 @@ export function createApiServer(options: ApiOptions) {
                 409,
                 "The repository history no longer contains the original base; the saved artifact cannot be published without a new attempt.",
               );
-            goalJson(
+            projectJson(
               200,
               await store.queueSavedPublication(
                 job.id,
@@ -480,9 +480,9 @@ export function createApiServer(options: ApiOptions) {
             );
             return;
           }
-          const action = actionSchema.parse(goalPath[2]);
+          const action = actionSchema.parse(projectPath[2]);
           if (action === "resume") requireExecution();
-          goalJson(200, await store.control(id, userId, action));
+          projectJson(200, await store.control(id, userId, action));
           return;
         }
       }
