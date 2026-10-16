@@ -64,11 +64,15 @@ h3 {
   display: flex;
   flex-direction: column;
 }
+.app-header,
+.workspace,
+.error-banner {
+  width: calc(100% - 32px);
+}
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: min(100% - 48px, 880px);
   margin: 0 auto 40px;
   padding: 24px 0;
   border-bottom: 1px solid #292929;
@@ -100,7 +104,6 @@ h3 {
   gap: 8px;
 }
 .workspace {
-  width: min(100% - 48px, 880px);
   margin: 0 auto 100px;
 }
 h1 {
@@ -534,9 +537,6 @@ h2 {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
-.error-banner {
-  width: min(100% - 48px, 720px);
-}
 .error-banner button {
   border: 0;
   padding: 0 5px;
@@ -619,10 +619,6 @@ textarea::placeholder {
 }
 
 @media (max-width: 560px) {
-  .workspace,
-  .app-header {
-    width: calc(100% - 36px);
-  }
   .app-header {
     margin-bottom: 28px;
     padding: 18px 0;
@@ -656,9 +652,6 @@ textarea::placeholder {
   }
   .welcome {
     margin-top: 76px;
-  }
-  .error-banner {
-    width: calc(100% - 36px);
   }
 }
 
