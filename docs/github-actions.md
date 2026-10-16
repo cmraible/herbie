@@ -54,16 +54,18 @@ Every push to `main` calls the portable workflow with its monotonically increasi
 run number. It finds the candidate for main's exact tree and verifies the image's
 source-tree label. It then copies the existing manifest to the main commit and
 ordered channel tags using `docker buildx imagetools create --prefer-index=false`.
-There is no rebuild, test run, image pull, or layer upload on main. Promotion still
+When the candidate exists, main needs no rebuild, test run, image pull, or layer upload. Promotion still
 requires `HERBIE_IMAGE_PUBLISH_ENABLED=true` and the `homelab-image` environment.
 Both PR upload and main promotion use the short-lived GitHub token with
 `packages: write`; other PR checks have read-only access.
 
-A missing or mismatched candidate fails promotion. The default-branch ruleset
-requires PRs to be current with main and **All tests passed** before merging.
-If another merge changes the resulting
-tree, update the PR and rerun its checks before merging. Direct pushes and fork PRs
-need a matching image built on a same-repository PR; there is no fallback build.
+Branches may merge without being current with main. If an intervening merge
+changes the tree and no candidate exists, main builds its exact checkout, runs
+the same isolated container smoke test as PRs, and uploads the candidate before
+promotion. Build, smoke-test, or upload failure stops the release. An existing
+candidate with a mismatched source-tree label still fails without rebuilding.
+The same fallback covers direct pushes and fork PRs; branch protection still
+requires **All tests passed** on PRs.
 
 After promotion, the job announces an OCI release artifact tagged
 `0.0.<CI-run-number>`, containing the existing image digest and main commit SHA.
@@ -74,7 +76,8 @@ node image pulls, and pod startup still determine rollout latency.
 
 A manual dispatch on `main` with `publish=true` retags the matching PR image for
 recovery without announcing an automatic OCI release. With `publish=false`, it
-only builds and verifies the container.
+only builds and verifies the container. Recovery with `publish=true` also builds
+and smoke-tests the current checkout if its candidate is missing.
 
 See [portable deployment](portable-deployment.md) for runtime configuration,
 revision metadata, rollout verification and OCI rollback. There is no Git

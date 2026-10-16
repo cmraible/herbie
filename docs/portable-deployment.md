@@ -15,11 +15,14 @@ PR uploads stage candidates only; they do not deploy production.
 
 Every push to main promotes the candidate matching its exact Git tree, including
 verification of the image's source-tree label. Promotion copies only the existing
-manifest to the main commit SHA and ordered channel tags: no rebuild, tests,
-image pull, or layer upload. This also works for squash/rebase merges with the
-same final contents. A missing or mismatched image fails without a fallback build;
-update PRs against main and wait for their image uploads before merging. Direct
-pushes and fork contributions need an image prepared through a same-repository PR.
+manifest to the main commit SHA and ordered channel tags. With a matching
+candidate, no rebuild, tests, image pull, or layer upload is needed. This also
+works for squash/rebase merges with the same final contents. If main advanced
+since the PR checks, the merged tree may have no candidate. Main then builds
+and smoke-tests its exact checkout using the same script as PRs, uploads the
+image, and promotes it. Any failed build, smoke test, or upload stops delivery.
+Existing candidates with mismatched source-tree labels are still rejected.
+This recovery also handles direct pushes and fork contributions.
 
 Promotion retains the `HERBIE_IMAGE_PUBLISH_ENABLED=true` repository gate and
 existing `homelab-image` environment restrictions. The job rejects a commit if

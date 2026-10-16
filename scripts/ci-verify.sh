@@ -148,7 +148,7 @@ run_build() {
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
   # avoids serializing the package test scripts behind the longest suite.
-  run_step release-artifact node --test scripts/build-release-artifact.test.mjs
+  run_step release-artifact node --test scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs
   run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
