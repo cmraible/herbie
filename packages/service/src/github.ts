@@ -671,6 +671,42 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         .parse(await request(`/repos/${repository}/pulls/${number}`, token));
       return !pr.draft ? "ready" : pr.state === "closed" ? "closed" : "draft";
     },
+    async requestReview(token: string, repository: string, number: number, ownerId: string) {
+      const user = z.object({ id: z.number().int(), login: z.string() });
+      const path = `/repos/${repository}/pulls/${number}`;
+      const pr = z
+        .object({
+          state: z.string(),
+          draft: z.boolean(),
+          user,
+          requested_reviewers: z.array(user),
+        })
+        .parse(await request(path, token));
+      if (pr.state !== "open") return;
+      if (pr.draft) throw new Error("Cannot request review while PR is draft");
+      // Retrying a lost response must not notify someone who already reviewed.
+      if (
+        String(pr.user.id) === ownerId ||
+        pr.requested_reviewers.some((u) => String(u.id) === ownerId)
+      )
+        return;
+      for (let page = 1; ; page++) {
+        const reviews = z
+          .array(z.object({ user: user.nullable(), state: z.string() }))
+          .parse(await request(`${path}/reviews?per_page=100&page=${page}`, token));
+        if (
+          reviews.some(
+            (review) => String(review.user?.id) === ownerId && review.state !== "PENDING",
+          )
+        )
+          return;
+        if (reviews.length < 100) break;
+      }
+      const reviewer = user.parse(await request(`/user/${encodeURIComponent(ownerId)}`, token));
+      if (String(reviewer.id) !== ownerId)
+        throw new Error("GitHub reviewer did not match project owner");
+      await request(`${path}/requested_reviewers`, token, { reviewers: [reviewer.login] });
+    },
     async markReady(
       token: string,
       repository: string,
@@ -690,8 +726,8 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         })
         .parse(await request(`/repos/${repository}/pulls/${number}`, token));
       if (pr.state !== "open" || pr.head.sha !== head || pr.head.ref !== branch) return false;
-      if (!pr.draft) return true; // Reconcile a prior successful mutation after a lost response.
       await beforeWrite();
+      if (!pr.draft) return true; // Reconcile a prior successful mutation after a lost response.
       // GitHub has no expected-head argument for this mutation; recheck immediately above.
       const result = z
         .object({

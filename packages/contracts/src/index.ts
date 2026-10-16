@@ -48,6 +48,7 @@ export const pullRequestMetadataSchema = z.object({
   title: z.string().optional(),
   body: z.string().nullable().optional(),
   draft: z.boolean().optional(),
+  checksPassed: z.boolean().optional(),
   additions: z.number().int().nonnegative().optional(),
   deletions: z.number().int().nonnegative().optional(),
   changedFiles: z.number().int().nonnegative().optional(),

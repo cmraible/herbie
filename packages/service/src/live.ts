@@ -45,6 +45,16 @@ export function createLiveAdapters(
     mode: "live",
     ...(config
       ? {
+          async requestReview(execution: Execution) {
+            const pr = execution.goal.pullRequests.find((pr) => pr.branch === execution.branch);
+            if (!pr) return;
+            const access = await github.authorize(
+              await auth.userToken(execution.goal.ownerId),
+              execution.repository.repository,
+            );
+            const token = await github.installationToken(access.installationId, access.repository);
+            await github.requestReview(token, access.repository, pr.number, execution.goal.ownerId);
+          },
           async readinessState(execution: Execution): Promise<"ready" | "draft" | "closed"> {
             const pr = execution.goal.pullRequests.find((pr) => pr.branch === execution.branch);
             if (!pr) return "closed";
@@ -260,7 +270,34 @@ Inspect these branches before choosing your change. Make one small, independentl
         execution.repository.repository,
         "read",
       );
-      return github.findPullRequest(token, execution.repository.repository, execution.branch);
+      const pr = await github.findPullRequest(
+        token,
+        execution.repository.repository,
+        execution.branch,
+      );
+      if (!pr || pr.state !== "open") return pr;
+      pr.checksPassed = false;
+      if (pr.draft === false) {
+        try {
+          const ciToken = await github.installationToken(
+            execution.repository.installationId,
+            execution.repository.repository,
+            "read",
+            true,
+          );
+          const status = await github.ciStatus(
+            ciToken,
+            execution.repository.repository,
+            pr.number,
+            execution.branch,
+          );
+          pr.checksPassed =
+            status?.state === "passed" && !status.draft && status.head === pr.headSha;
+        } catch {
+          // Unknown checks must not leave a previously ready PR showing as ready.
+        }
+      }
+      return pr;
     },
     async checkUnpublished(execution) {
       // The owner-authenticated API already obtained this repository with the

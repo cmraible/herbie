@@ -46,3 +46,18 @@ export function groupAttempts(goal: Goal, events: GoalEvent[]) {
   }
   return { attempts: attempts.reverse(), history };
 }
+
+export function reviewLabel(pr: Goal["pullRequest"]): string {
+  return pr?.state === "open" && pr.draft === false && pr.checksPassed === true
+    ? "Ready for review"
+    : "Waiting for checks";
+}
+
+export function goalReadyForReview(goal: Goal): boolean {
+  return (
+    goal.state === "awaiting_review" &&
+    (goal.pullRequests.length ? goal.pullRequests : [goal.pullRequest]).some(
+      (pr) => reviewLabel(pr) === "Ready for review",
+    )
+  );
+}
