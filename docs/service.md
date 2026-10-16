@@ -81,7 +81,7 @@ Check the project's events and `docker compose logs herbie` first.
 
 - **Publication failure:** Herbie retries saved changes with backoff, without rerunning
   the model. Fix credentials or connectivity and let recovery proceed. After resolving
-  a blocking conflict, `pnpm cli retry-publication GOAL_ID` requests another checked
+  a blocking conflict, `pnpm cli retry-publication PROJECT_ID` requests another checked
   publication attempt; it does not retry sandbox execution.
 - **CI repair failure:** The project shows **Retry repair** when environment cleanup
   was confirmed and publication never started. This queues a fresh repair on the

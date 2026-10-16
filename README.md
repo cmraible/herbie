@@ -43,13 +43,13 @@ pnpm cli login --url https://herbie-dev.example.com
 pnpm cli repositories
 pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
 pnpm cli status
-pnpm cli status GOAL_ID
-pnpm cli rename GOAL_ID --name "Improve arithmetic"
-pnpm cli edit GOAL_ID --prompt "Also cover subtraction with regression tests"
-pnpm cli logs GOAL_ID
-pnpm cli pause GOAL_ID
-pnpm cli resume GOAL_ID
-pnpm cli cancel GOAL_ID
+pnpm cli status PROJECT_ID
+pnpm cli rename PROJECT_ID --name "Improve arithmetic"
+pnpm cli edit PROJECT_ID --prompt "Also cover subtraction with regression tests"
+pnpm cli logs PROJECT_ID
+pnpm cli pause PROJECT_ID
+pnpm cli resume PROJECT_ID
+pnpm cli cancel PROJECT_ID
 ```
 
 `maxWip` defaults to 1 and limits each project's outstanding work: open PRs plus

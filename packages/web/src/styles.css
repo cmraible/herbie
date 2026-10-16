@@ -417,7 +417,7 @@ h2 {
 .run-select:focus-visible::after {
   outline: 2px solid currentColor;
 }
-.run-row .goal-meta {
+.run-row .project-meta {
   margin: 0;
 }
 .run-pr-link {
