@@ -26,12 +26,6 @@ $project_rename$;
 -- Renamed tables keep their old triggers; replace them with project-named ones.
 DROP INDEX IF EXISTS goals_one_active_repository;
 DROP INDEX IF EXISTS goal_events_goal;
-DROP TRIGGER IF EXISTS sync_goal_pull_request ON projects;
-DROP TRIGGER IF EXISTS notify_goal_change ON projects;
-DROP TRIGGER IF EXISTS notify_goal_change ON jobs;
-DROP TRIGGER IF EXISTS notify_goal_change ON project_events;
-DROP FUNCTION IF EXISTS sync_goal_pull_request();
-DROP FUNCTION IF EXISTS notify_goal_change();
 
 CREATE TABLE IF NOT EXISTS projects (
   id uuid PRIMARY KEY,
@@ -79,6 +73,13 @@ CREATE TABLE IF NOT EXISTS project_events (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS project_events_project ON project_events(project_id, id);
+
+DROP TRIGGER IF EXISTS sync_goal_pull_request ON projects;
+DROP TRIGGER IF EXISTS notify_goal_change ON projects;
+DROP TRIGGER IF EXISTS notify_goal_change ON jobs;
+DROP TRIGGER IF EXISTS notify_goal_change ON project_events;
+DROP FUNCTION IF EXISTS sync_goal_pull_request();
+DROP FUNCTION IF EXISTS notify_goal_change();
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS cleanup_status text NOT NULL DEFAULT 'not_required' CHECK (cleanup_status IN ('not_required','pending','complete','needs_attention'));
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cancelled_worker text;
