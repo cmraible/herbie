@@ -155,7 +155,13 @@ Inspect these branches before choosing your change. Make one small, independentl
         execution.repository.repository,
       );
       await reportPhase?.("installation_token");
-      const token = await github.installationToken(access.installationId, access.repository);
+      const token = await github.installationToken(
+        access.installationId,
+        access.repository,
+        "write",
+        false,
+        true,
+      );
       await reportPhase?.("existing_pr_check");
       const existing = await github.findPullRequest(token, access.repository, execution.branch);
       if (execution.ciRepair) {

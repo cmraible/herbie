@@ -37,6 +37,7 @@ const installationSchema = z.object({
     checks: z.string().optional(),
     statuses: z.string().optional(),
     actions: z.string().optional(),
+    workflows: z.string().optional(),
   }),
 });
 function requiredPermissions({ permissions }: z.infer<typeof installationSchema>): boolean {
@@ -314,6 +315,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     repository: string,
     permission: "read" | "write" = "write",
     ci = false,
+    workflows = false,
   ) {
     if (
       !Number.isSafeInteger(installationId) ||
@@ -321,6 +323,13 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       !/^[\w.-]+\/[\w.-]+$/.test(repository)
     )
       throw new Error("Invalid repository installation");
+    // Request this optional permission only when the installation has granted it.
+    // Otherwise ordinary patches must remain publishable with existing installations.
+    const workflowWrite =
+      workflows &&
+      permission === "write" &&
+      installationSchema.parse(await request(`/repos/${repository}/installation`, jwt()))
+        .permissions.workflows === "write";
     // Installation tokens can be stateless ghs_APPID_JWT values (base64url + dots).
     // Accept bearer-token characters without assuming GitHub's opaque token layout.
     const value = z
@@ -331,6 +340,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           permissions: {
             contents: permission,
             pull_requests: permission,
+            ...(workflowWrite ? { workflows: "write" } : {}),
             ...(ci ? { checks: "read", statuses: "read", actions: "read" } : {}),
           },
         }),
