@@ -18,7 +18,7 @@ export HERBIE_CI_PORT="${HERBIE_CI_PORT:-18787}"
 export HERBIE_CI_ARTIFACT_DIR="${HERBIE_CI_ARTIFACT_DIR:-$repo_dir/artifacts/ci}"
 export CI=true
 
-for executable in node pnpm curl setsid; do
+for executable in node pnpm curl setsid jq; do
   command -v "$executable" >/dev/null || { printf 'Missing required command: %s\n' "$executable" >&2; exit 1; }
 done
 HERBIE_REQUIRE_DATABASE="$needs_database" node --input-type=module <<'JS'
@@ -44,6 +44,8 @@ JS
 
 artifact_dir="$(node -e 'process.stdout.write(require("node:path").resolve(process.env.HERBIE_CI_ARTIFACT_DIR))')"
 mkdir -p "$artifact_dir"
+source scripts/verify-timing.sh
+timing_started="$(jq -nr now)"
 processes=()
 playwright_install_pid=''
 cleanup() {
@@ -74,6 +76,8 @@ cleanup() {
     cp -R packages/web/test-results/. "$artifact_dir/browser/"
   fi
   printf 'CI verification exit status: %s\n' "$status" > "$artifact_dir/result.txt"
+  record_timing "" workspace_checks "$timing_started" "$status"
+  timing_report "$status" "$timing_started"
   if ((status != 0)); then printf 'Verification failed; logs are in %s\n' "$artifact_dir" >&2; fi
   exit "$status"
 }
@@ -85,7 +89,7 @@ run_step() {
   local name=$1
   shift
   printf 'Running %s\n' "$name"
-  "$@" 2>&1 | tee "$artifact_dir/$name.log"
+  time_step workspace_checks "$name" "$@" 2>&1 | tee "$artifact_dir/$name.log"
 }
 start_server() {
   local name=$1
@@ -112,7 +116,7 @@ playwright_install_log="$artifact_dir/playwright-install.log"
 start_browser_install() {
   # The workflow restores this browser cache. On a cold cache, install while
   # TypeScript builds run so the download is off the browser-test critical path.
-  setsid pnpm --filter @herbie/web exec playwright install chromium --only-shell >"$playwright_install_log" 2>&1 &
+  setsid bash -Eeuo pipefail -c 'artifact_dir=$HERBIE_CI_ARTIFACT_DIR; source scripts/verify-timing.sh; time_step workspace_checks playwright-install pnpm --filter @herbie/web exec playwright install chromium --only-shell' >"$playwright_install_log" 2>&1 &
   playwright_install_pid=$!
 }
 wait_browser_install() {
@@ -126,24 +130,24 @@ wait_browser_install() {
 run_build() {
   run_step lint pnpm lint
   run_step format pnpm format:check
-  run_step build pnpm build
-  run_step typecheck pnpm typecheck
+  run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
+  run_step typecheck node scripts/verify-timing.mjs workspace_checks.typecheck -r typecheck
 }
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
   # avoids serializing the package test scripts behind the longest suite.
-  run_step release-artifact node --test scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs scripts/ship-watch.test.mjs
-  run_step unit-tests pnpm -r --parallel --workspace-concurrency=2 test
+  run_step release-artifact node --test scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs scripts/ship-watch.test.mjs scripts/verify-timing.test.mjs
+  run_step unit-tests node scripts/verify-timing.mjs workspace_checks.unit-tests -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
-  run_step build pnpm build
+  run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
   run_unit_tests
 }
 start_web_preview() {
   export HERBIE_E2E_URL="http://127.0.0.1:$HERBIE_CI_PORT"
   start_server web-preview pnpm --filter @herbie/web exec vite preview \
     --host 127.0.0.1 --port "$HERBIE_CI_PORT" --strictPort
-  wait_http "$server_pid" "$HERBIE_E2E_URL/" web-preview
+  time_step workspace_checks web-preview-startup wait_http "$server_pid" "$HERBIE_E2E_URL/" web-preview
 }
 run_browser() {
   run_step browser-e2e pnpm --filter @herbie/web test:e2e
@@ -157,7 +161,7 @@ case "$stage" in
     run_unit
     ;;
   cli)
-    run_step build pnpm build
+    run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
     run_step cli-tests pnpm --filter @herbie/cli test
     ;;
   core)
@@ -167,7 +171,7 @@ case "$stage" in
   browser)
     start_browser_install
     # CLI consent scenarios use the service; include its workspace dependencies.
-    run_step build pnpm --filter @herbie/web... --filter @herbie/service... build
+    run_step build node scripts/verify-timing.mjs workspace_checks.build --filter @herbie/web... --filter @herbie/service... -r build
     wait_browser_install
     start_web_preview
     run_browser
