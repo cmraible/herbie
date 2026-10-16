@@ -47,6 +47,36 @@ function clientFor(service: Awaited<ReturnType<typeof startHostedService>>, toke
   });
 }
 
+test("hosted model discovery uses the configured API key", async (t) => {
+  const request = globalThis.fetch;
+  let calls = 0;
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (String(input) !== "https://api.openai.com/v1/models") return request(input, init);
+      calls++;
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer fixture-key");
+      return Response.json({ data: [{ id: "gpt-6-luna" }] });
+    },
+  );
+  const service = await startHostedService({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      publicUrl: "http://127.0.0.1:8787",
+      executionEnabled: false,
+      openaiApiKey: "fixture-key",
+    },
+    store: { close: async () => {} } as Store,
+    auth: testAuth(),
+    adapters: createDemoAdapters(),
+  });
+  t.after(() => service.close());
+  assert.deepEqual(await clientFor(service, testSessionToken).models(), ["gpt-6-luna"]);
+  assert.equal(calls, 1);
+});
+
 test("hosted API leaves queued work untouched when execution is disabled", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
   if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
