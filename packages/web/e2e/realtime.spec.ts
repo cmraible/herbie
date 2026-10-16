@@ -102,13 +102,21 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     }),
   );
   stream!.send(JSON.stringify({ type: "events", projectId: id, events }));
+  await expect(page.getByText("Checking the implementation", { exact: true })).not.toBeVisible();
+  await page.locator(".transcript-reasoning summary").click();
   await expect(page.getByText("Checking the implementation", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Implemented <script>alert(1)</script> safely", { exact: true }),
+    page.locator(".transcript-message").filter({ hasText: "Implemented" }),
   ).toBeVisible();
   await expect(
     page.locator(".agent-transcript pre").filter({ hasText: "All tests passed" }),
   ).toBeVisible();
+  await expect(page.locator(".transcript-message script")).toHaveCount(0);
+  await page.getByRole("searchbox", { name: "Search transcript" }).fill("pnpm test");
+  await expect(page.locator(".transcript-item")).toHaveCount(1);
+  await page.getByRole("searchbox", { name: "Search transcript" }).fill("no matching update");
+  await expect(page.getByText("No matching updates.")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search transcript" }).fill("");
   const downloaded = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download transcript" }).click();
   const download = await downloaded;
@@ -126,16 +134,14 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   project.attempts[0]!.state = "completed";
   stream!.send(JSON.stringify({ type: "projects", projects: [project] }));
   await expect(page.getByRole("link", { name: "Merged project" })).toBeVisible();
-  await expect(
-    page.locator(".run-panel-heading").getByText("Merged", { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".pr-metadata .status-merged")).toBeVisible();
   stream!.close({ code: 1012, reason: "Service restart" });
   await expect.poll(() => connections).toBe(2);
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
   await expect(page.getByText("Checking the implementation", { exact: true })).toHaveCount(1);
-  await expect(
-    page.getByText("Implemented <script>alert(1)</script> safely", { exact: true }),
-  ).toHaveCount(1);
+  await expect(page.locator(".transcript-message").filter({ hasText: "Implemented" })).toHaveCount(
+    1,
+  );
   // Exceed both former polling intervals.
   await page.waitForTimeout(2500);
   expect(projectReads).toBe(1);

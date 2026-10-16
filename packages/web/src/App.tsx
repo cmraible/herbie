@@ -604,7 +604,11 @@ export function App() {
                           <>
                             <a href={`#${project.id}`}>{project.name}</a>
                             <span aria-hidden="true">&gt;</span>
-                            <span aria-current="page">Run details</span>
+                            <span aria-current="page">
+                              {selectedRun === "project-activity"
+                                ? "Project activity"
+                                : `Run ${project.attempts?.find((attempt) => attempt.id === selectedRun)?.number ?? "details"}`}
+                            </span>
                           </>
                         ) : (
                           <span aria-current="page">{project.repository}</span>

@@ -1,3 +1,6 @@
+import { useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ProjectEvent } from "@herbie/contracts";
 import { agentActivity, activityText } from "./agent-activity.js";
 
@@ -14,7 +17,15 @@ const labels: Record<string, string> = {
 };
 
 export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
+  const [query, setQuery] = useState("");
+  const timeline = useRef<HTMLDivElement>(null);
   const records = events.filter((event) => event.type === "agent");
+  const items = agentActivity(records);
+  const visible = items.filter((item) =>
+    `${labels[item.type] ?? item.type} ${activityText(item)}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
   if (!records.length) return null;
   const download = () => {
     const url = URL.createObjectURL(
@@ -30,26 +41,78 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
   };
   return (
     <section className="agent-transcript" aria-label="Agent transcript">
-      <div className="run-panel-heading">
-        <h3>Agent transcript</h3>
+      <div className="transcript-heading">
+        <h3>
+          Agent transcript <span>{items.length} updates</span>
+        </h3>
         <button onClick={download}>Download transcript</button>
       </div>
-      {agentActivity(records).map((item) => (
-        <article key={item.id}>
-          <strong>{labels[item.type] ?? item.type}</strong>
-          {item.type === "agentMessage" || item.type === "reasoning" || item.type === "plan" ? (
-            <pre>{activityText(item)}</pre>
-          ) : (
-            <details open={item.status === "inProgress"}>
-              <summary>
-                {typeof item.command === "string" ? item.command : (labels[item.type] ?? item.type)}
-                {typeof item.status === "string" ? ` · ${item.status}` : ""}
-              </summary>
-              <pre>{activityText(item)}</pre>
-            </details>
-          )}
-        </article>
-      ))}
+      <div className="transcript-toolbar">
+        <input
+          type="search"
+          aria-label="Search transcript"
+          placeholder="Search transcript…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <button
+          onClick={() =>
+            timeline.current?.scrollTo({ top: timeline.current.scrollHeight, behavior: "smooth" })
+          }
+        >
+          Jump to latest ↓
+        </button>
+      </div>
+      <div
+        className="transcript-timeline"
+        ref={timeline}
+        tabIndex={0}
+        role="region"
+        aria-label="Transcript updates"
+      >
+        {!visible.length && (
+          <p className="subtle-note">
+            {query ? "No matching updates." : "Waiting for agent updates…"}
+          </p>
+        )}
+        {visible.map((item) => (
+          <article key={item.id} className={`transcript-item transcript-${item.type}`}>
+            {item.type === "agentMessage" || item.type === "plan" ? (
+              <>
+                <span className="transcript-label">{labels[item.type]}</span>
+                <div className="pr-description transcript-message">
+                  <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+                    {activityText(item)}
+                  </Markdown>
+                </div>
+              </>
+            ) : (
+              <details open={item.status === "inProgress" || !!query}>
+                <summary>
+                  <span className="transcript-label">{labels[item.type] ?? item.type}</span>
+                  {typeof item.command === "string" && (
+                    <code className="transcript-command">{item.command}</code>
+                  )}
+                  {typeof item.status === "string" && (
+                    <span className="transcript-status">
+                      {item.status === "inProgress" ? "Running" : item.status}
+                    </span>
+                  )}
+                </summary>
+                {item.type === "reasoning" ? (
+                  <div className="pr-description transcript-message">
+                    <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+                      {activityText(item)}
+                    </Markdown>
+                  </div>
+                ) : (
+                  <pre>{activityText(item)}</pre>
+                )}
+              </details>
+            )}
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
