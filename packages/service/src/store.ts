@@ -19,7 +19,7 @@ import {
   type GoalEvent,
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
-import type { PublicationPhase } from "./adapters.js";
+import type { PullRequestFeedback, PublicationPhase } from "./adapters.js";
 import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
 
 const goalColumns = `id, owner_id AS "ownerId", repository, name, prompt,
@@ -977,6 +977,189 @@ export class Store {
     });
   }
 
+  async startFeedback(
+    jobId: string,
+    context: PullRequestFeedback[],
+    workerId: string,
+  ): Promise<{ id: string; item: PullRequestFeedback } | null> {
+    const items = context.filter((item) => !item.bot);
+    return this.transaction(async (client) => {
+      const { row, goal } = await lockJob(client, jobId);
+      if (
+        row.stage !== "awaiting_review" ||
+        goal.stopRequested ||
+        !["queued", "running", "awaiting_review"].includes(goal.state)
+      )
+        return null;
+      const blocked = await client.query(
+        `SELECT 1 FROM pr_feedback WHERE job_id=$1 AND state IN ('running','failed')
+         UNION ALL SELECT 1 FROM ci_repairs WHERE job_id=$1 AND state IN ('running','waiting','failed')`,
+        [jobId],
+      );
+      if (blocked.rowCount) return null;
+      // API reads are authoritative: deleted or edited pending feedback is superseded.
+      const keys = items.map((item) => `${item.kind}:${item.id}:${item.revision}`);
+      await client.query(
+        `UPDATE pr_feedback SET state='completed' WHERE job_id=$1 AND state='pending'
+        AND NOT (kind || ':' || external_id || ':' || revision = ANY($2::text[]))`,
+        [jobId, keys],
+      );
+      for (const item of items)
+        await client.query(
+          `INSERT INTO pr_feedback(id,job_id,kind,external_id,revision,state)
+          VALUES($1,$2,$3,$4,$5,'pending') ON CONFLICT DO NOTHING`,
+          [randomUUID(), jobId, item.kind, item.id, item.revision],
+        );
+      const selected = await client.query<{
+        id: string;
+        kind: string;
+        external_id: string;
+        revision: string;
+      }>(
+        `SELECT id,kind,external_id,revision FROM pr_feedback WHERE job_id=$1 AND state='pending' ORDER BY created_at,id LIMIT 1`,
+        [jobId],
+      );
+      const next = selected.rows[0];
+      if (!next) return null;
+      const item = items.find(
+        (item) =>
+          item.kind === next.kind &&
+          String(item.id) === next.external_id &&
+          item.revision === next.revision,
+      )!;
+      await client.query(
+        `UPDATE pr_feedback SET state='running',lease_owner=$2,lease_expires_at=clock_timestamp()+interval '30 seconds' WHERE id=$1`,
+        [next.id, workerId],
+      );
+      await addEvent(
+        client,
+        goal.id,
+        "pr_feedback_started",
+        `Considering ${item.kind} feedback from ${item.author}: ${item.url}`,
+        jobId,
+      );
+      return { id: next.id, item };
+    });
+  }
+
+  async heartbeatFeedback(id: string, workerId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE pr_feedback f SET lease_expires_at=clock_timestamp()+interval '30 seconds'
+      FROM jobs j JOIN goals g ON j.goal_id=g.id
+      WHERE f.id=$1 AND f.lease_owner=$2 AND f.job_id=j.id AND f.state='running' AND f.lease_expires_at>clock_timestamp()
+      AND j.stage='awaiting_review' AND j.pull_request->>'state'='open'
+      AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL`,
+      [id, workerId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async saveFeedbackArtifact(
+    id: string,
+    workerId: string,
+    changes: DaytonaAttemptChanges,
+  ): Promise<void> {
+    const { patch, ...metadata } = changes;
+    const result = await this.pool.query(
+      `UPDATE pr_feedback SET artifact=$3 WHERE id=$1 AND lease_owner=$2
+      AND state='running' AND lease_expires_at>clock_timestamp()`,
+      [id, workerId, JSON.stringify({ ...metadata, patchBase64: patch.toString("base64") })],
+    );
+    if (result.rowCount !== 1) throw conflict("Feedback lease lost");
+  }
+
+  async recordFeedbackPublication(id: string, workerId: string, pr: PullRequest): Promise<void> {
+    await this.transaction(async (client) => {
+      const result = await client.query<{ job_id: string; goal_id: string }>(
+        `SELECT f.job_id,j.goal_id FROM pr_feedback f JOIN jobs j ON f.job_id=j.id
+        WHERE f.id=$1 AND f.lease_owner=$2 AND f.state='running' AND f.lease_expires_at>clock_timestamp() FOR UPDATE OF f`,
+        [id, workerId],
+      );
+      const row = result.rows[0];
+      if (!row) throw conflict("Feedback lease lost");
+      await client.query("UPDATE jobs SET pull_request=$2,ci_review_requested=true WHERE id=$1", [
+        row.job_id,
+        JSON.stringify(pr),
+      ]);
+      await client.query(
+        "UPDATE goals SET pull_request=$2 WHERE id=$1 AND pull_request->>'branch'=$3",
+        [row.goal_id, JSON.stringify(pr), pr.branch],
+      );
+    });
+  }
+
+  async finishFeedback(
+    id: string,
+    workerId: string,
+    succeeded: boolean,
+    message: string,
+  ): Promise<void> {
+    await this.transaction(async (client) => {
+      const result = await client.query<{ job_id: string; goal_id: string }>(
+        `UPDATE pr_feedback f SET state=$3
+        FROM jobs j WHERE f.id=$1 AND f.lease_owner=$2 AND f.state='running' AND f.lease_expires_at>clock_timestamp() AND f.job_id=j.id
+        RETURNING f.job_id,j.goal_id`,
+        [id, workerId, succeeded ? "completed" : "failed"],
+      );
+      if (!result.rows[0]) return;
+      const { job_id, goal_id } = result.rows[0];
+      await client.query("UPDATE jobs SET feedback_requested=true WHERE id=$1", [job_id]);
+      await addEvent(
+        client,
+        goal_id,
+        succeeded ? "pr_feedback_completed" : "pr_feedback_failed",
+        message,
+        job_id,
+      );
+    });
+  }
+
+  async recoverFeedback(): Promise<void> {
+    await this.transaction(async (client) => {
+      const result = await client.query<{
+        job_id: string;
+        goal_id: string;
+      }>(`UPDATE pr_feedback f SET state='failed'
+        FROM jobs j WHERE f.job_id=j.id AND f.state='running' AND f.lease_expires_at<=clock_timestamp() RETURNING f.job_id,j.goal_id`);
+      for (const row of result.rows)
+        await addEvent(
+          client,
+          row.goal_id,
+          "pr_feedback_failed",
+          "Feedback lease expired. Inspect sandbox cleanup and PR writes before manual recovery; feedback will not be replayed.",
+          row.job_id,
+        );
+    });
+  }
+
+  async requestFeedbackReview(repository?: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE jobs j SET feedback_requested=true FROM goals g
+      WHERE j.goal_id=g.id AND g.mode='live' AND j.stage='awaiting_review'
+      AND j.pull_request->>'state'='open' AND ($1::text IS NULL OR lower(g.repository)=lower($1))`,
+      [repository ?? null],
+    );
+  }
+
+  async takeFeedbackReview(): Promise<Job | null> {
+    return this.transaction(async (client) => {
+      const selected = await client.query<{
+        id: string;
+      }>(`SELECT j.id FROM jobs j JOIN goals g ON j.goal_id=g.id
+        WHERE j.feedback_requested AND j.stage='awaiting_review' AND g.mode='live'
+        AND g.state IN ('queued','running','awaiting_review') AND g.stop_requested IS NULL
+        ORDER BY j.feedback_reviewed_at NULLS FIRST,j.created_at,j.id LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`);
+      const id = selected.rows[0]?.id;
+      if (!id) return null;
+      const { row, goal } = await lockJob(client, id);
+      await client.query(
+        "UPDATE jobs SET feedback_requested=false,feedback_reviewed_at=clock_timestamp() WHERE id=$1",
+        [id],
+      );
+      return decodeJob(row, goal);
+    });
+  }
+
   async requestCiReview(repository?: string): Promise<void> {
     await this.pool.query(
       `UPDATE jobs j SET ci_review_requested=true FROM goals g
@@ -1054,6 +1237,15 @@ export class Store {
         row.stage !== "awaiting_review" ||
         goal.stopRequested ||
         !["queued", "running", "awaiting_review"].includes(goal.state)
+      )
+        return null;
+      if (
+        (
+          await client.query(
+            "SELECT 1 FROM pr_feedback WHERE job_id=$1 AND state IN ('running','failed')",
+            [jobId],
+          )
+        ).rowCount
       )
         return null;
       const knownHead = goal.pullRequests.find((pr) => pr.branch === row.branch)?.headSha;
@@ -1345,6 +1537,17 @@ export class Store {
         checksPassed: current.checksPassed === true,
       });
       if (!["queued", "running", "awaiting_review"].includes(goal.state)) return false;
+      // A feedback push can reach GitHub before its confirmed head is saved here.
+      // Its worker checks the head before writes; defer external-change detection until it finishes.
+      if (
+        (
+          await client.query(
+            "SELECT 1 FROM pr_feedback WHERE job_id=$1 AND state='running' AND lease_expires_at>clock_timestamp()",
+            [jobId],
+          )
+        ).rowCount
+      )
+        return false;
       if (pr.patchSha && current.patchSha && pr.patchSha === current.patchSha) {
         await updateTrackedPullRequest();
         return false;

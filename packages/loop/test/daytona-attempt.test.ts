@@ -30,6 +30,7 @@ const runtimeNames = [
   "codex-turn",
   "codex-process",
   "daytona-runner",
+  "feedback-decision",
   "diagnostic-log",
 ];
 const pullRequestTitle = "Fix addition totals";
@@ -912,3 +913,44 @@ test("persists full agent activity while running and drains it before cleanup on
   assert.ok(reads >= 2);
   assert.equal(sandbox.delete.mock.callCount(), 1);
 });
+for (const action of ["ignore", "reply", "update"] as const) {
+  test(`feedback runner returns ${action} with matching verification`, async (t) => {
+    const decision =
+      action === "ignore"
+        ? { action, reason: "Already addressed" }
+        : { action, reply: "Explanation" };
+    const edits =
+      `const fs = await import('node:fs'); fs.writeFileSync('../feedback-decision.json', ${JSON.stringify(JSON.stringify(decision))});` +
+      (action === "update"
+        ? `fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }'); fs.writeFileSync('../verify.sh', 'node --test');`
+        : "");
+    const { run } = await localFixture(t, edits);
+    const result = await run({ feedback: true, verifyLocally: true });
+    assert.deepEqual(result.feedbackDecision, decision);
+    assert.equal(result.patch.length > 0, action === "update");
+    assert.equal(result.verification?.localChecksPassed, action === "update" ? true : undefined);
+  });
+}
+
+for (const outcome of [
+  "missing",
+  "invalid",
+  "reply-with-patch",
+  "update-without-patch",
+  "unverified-update",
+] as const) {
+  test(`feedback runner rejects ${outcome}`, async (t) => {
+    let edits = "const fs = await import('node:fs');";
+    if (outcome !== "missing") {
+      const action =
+        outcome === "invalid" ? "merge" : outcome === "reply-with-patch" ? "reply" : "update";
+      edits += `fs.writeFileSync('../feedback-decision.json', ${JSON.stringify(JSON.stringify({ action, reply: "Done" }))});`;
+    }
+    if (["reply-with-patch", "unverified-update"].includes(outcome))
+      edits += `fs.writeFileSync('add.mjs', 'export function add(a,b) { return a+b; }');`;
+    if (outcome === "update-without-patch") edits += `fs.writeFileSync('../verify.sh', 'true');`;
+    const { run, sandbox } = await localFixture(t, edits);
+    await assert.rejects(run({ feedback: true, verifyLocally: true }));
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+}

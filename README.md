@@ -340,6 +340,11 @@ repairs for tracked PRs, once per head and up to three times per PR; failures st
 further automatic repair. See [setup and recovery](docs/service.md) for the required
 GitHub App subscriptions and permissions. Repository CI still validates each push. Once checks pass, Herbie automatically
 marks the draft PR ready for review without starting another agent session.
+Herbie also processes human PR comments, inline feedback, and submitted reviews.
+The agent chooses to ignore the feedback, reply, or push a locally verified update
+and reply on the existing PR. Bot comments do not trigger runs; duplicate feedback
+is processed once. Feedback processing stops when the goal is paused or cancelled.
+See [service operations](docs/service.md) for subscriptions and failure recovery.
 After goal completion and confirmed sandbox deletion, the host attaches
 `verification` evidence binding the repository URL, base commit and SHA-256 of
 the patch bytes to that attempt. Version 3 records completion and cleanup, not a
