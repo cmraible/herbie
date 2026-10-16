@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { createClient, ApiError } from "@herbie/contracts/client";
 import {
   githubPermissionsMessage,
-  streamMessageSchema,
   type Goal,
   type GoalEvent,
   type GoalAction,
@@ -16,6 +15,7 @@ import { AttemptHistory } from "./AttemptHistory.js";
 import { errorReference, goalErrorMessage, workflowPermissionMessage } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 import { goalReadyForReview } from "./attempts.js";
+import { useGoalStream } from "./useGoalStream.js";
 
 const api = createClient();
 const terminal = new Set(["completed", "cancelled", "failed"]);
@@ -67,7 +67,6 @@ export function App() {
   const [healthState, setHealthState] = useState<"pending" | "ready" | "error">("pending");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupRefresh, setStartupRefresh] = useState(0);
-  const streamRevision = useRef(0);
   const [reconnecting, setReconnecting] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoaded, setGoalsLoaded] = useState(false);
@@ -330,72 +329,19 @@ export function App() {
     };
   }, [selected, session]);
 
-  useEffect(() => {
-    if (!session) return;
-    let disposed = false;
-    let socket: WebSocket;
-    let timer: ReturnType<typeof setTimeout>;
-    let delay = 500;
-    function connect() {
-      const url = new URL("/api/stream", location.href);
-      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      if (selected) url.searchParams.set("goal", selected);
-      socket = new WebSocket(url);
-      socket.onmessage = (event) => {
-        if (disposed) return;
-        try {
-          const update = streamMessageSchema.parse(JSON.parse(event.data));
-          delay = 500;
-          setReconnecting(false);
-          if (update.type === "goals") {
-            streamRevision.current++;
-            setGoals(update.goals);
-            setGoalsLoaded(true);
-            setGoalsError(null);
-          } else if (update.goalId === selected) {
-            setEvents((current) =>
-              [
-                ...new Map([...current, ...update.events].map((item) => [item.id, item])).values(),
-              ].sort((a, b) => a.id - b.id),
-            );
-            setEventsState("loaded");
-            setEventsError(null);
-          }
-        } catch {
-          socket.close();
-        }
-      };
-      socket.onclose = async (event) => {
-        if (disposed) return;
-        if (event.code === 1008) {
-          setSession(null);
-          setSessionState("signed-out");
-          return;
-        }
-        setReconnecting(true);
-        // Browsers hide HTTP 401 upgrade responses behind close code 1006.
-        try {
-          await api.session();
-        } catch (failure) {
-          if (disposed) return;
-          if (failure instanceof ApiError && failure.status === 401) {
-            setSession(null);
-            setSessionState("signed-out");
-            return;
-          }
-        }
-        if (disposed) return;
-        timer = setTimeout(connect, delay + (Math.random() * delay) / 2);
-        delay = Math.min(delay * 2, 30_000);
-      };
-    }
-    connect();
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-      socket.close();
-    };
-  }, [session, selected]);
+  const streamRevision = useGoalStream({
+    session,
+    selected,
+    setSession,
+    setSessionState,
+    setReconnecting,
+    setGoals,
+    setGoalsLoaded,
+    setGoalsError,
+    setEvents,
+    setEventsState,
+    setEventsError,
+  });
 
   function navigateToScreen(id: string, replace = false) {
     if (replace) history.replaceState(null, "", `#${id}`);
