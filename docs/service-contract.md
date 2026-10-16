@@ -2,6 +2,8 @@
 
 HTTP JSON on the same origin as web. Contracts in @herbie/contracts (Zod, source exports). API accepts bearer session or HttpOnly same-site cookie. Mutations with cookie require exact trusted Origin. CLI always bearer. Errors `{error: string}` with 400/401/403/404/409/500. `/api/health` GET unauthenticated returns `{mode:'live'}`. No actual credentials in client contracts.
 
+Project routes and event names replace the former goal vocabulary. Update CLI and service together; older CLI releases still call `/api/goals` and cannot use the renamed service routes.
+
 - GET /api/session -> Session; GET /api/repositories -> Repository[]
 - POST /api/auth/install/start (signed-in browser) -> GitHub App installation URL; GitHub returns to `/api/auth/installation/callback` with one-use state and an untrusted installation ID that the service verifies against the signed-in user's installations.
 - WebSocket /api/stream?project=<uuid> authenticates the browser session cookie and exact Origin. Pushes `{type:"projects",projects:Project[]}` snapshots (version 2, owned only) and `{type:"events",projectId,events:ProjectEvent[]}` batches for an optional owned project. Connections replay the current snapshot and all event pages; clients deduplicate event IDs after reconnect. PostgreSQL commit notifications carry changes between API and worker processes. Session checks, ping/pong heartbeats, and bounded output queues close expired or unhealthy connections.
