@@ -75,33 +75,28 @@ export async function runCiRepairOnce(
       await store.waitForCi(id, workerId, job.id);
       return true;
     }
-    if (current.state !== "failed" || current.head !== failure.head) {
-      await store.finishCiRepair(
-        id,
-        workerId,
-        true,
-        "CI repair discarded: checks or PR head changed.",
-      );
+    if (current.head !== failure.head) {
+      await store.pauseCiRepairForExternalChange(id, job.id);
+      return true;
+    }
+    if (current.state !== "failed") {
+      await store.finishCiRepair(id, workerId, true, "Checks passed; saved fix was not needed.");
       return true;
     }
     await requireLease();
     await store.beginCiPublication(id, workerId);
-    await adapters.publish(execution, changes, requireLease);
+    const published = await adapters.publish(execution, changes, requireLease);
     await requireLease();
     await store.finishCiRepair(
       id,
       workerId,
       true,
       `Locally verified CI fix pushed to ${failure.pullRequest.url}`,
+      published.headSha,
     );
   } catch (error) {
     if (id && error instanceof StaleRepairError) {
-      await store.finishCiRepair(
-        id,
-        workerId,
-        true,
-        "CI repair discarded: PR head changed before publication.",
-      );
+      await store.pauseCiRepairForExternalChange(id, job.id);
       return true;
     }
     const reference = logFailure(error, {

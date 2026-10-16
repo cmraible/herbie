@@ -40,8 +40,9 @@ for (const state of ["failed", "needs_attention"])
       return r.fulfill(json(goal));
     });
     await page.goto("/");
+    await expect(page.getByText("Synthetic attempt failure")).toHaveCount(0);
     await page.getByRole("button", { name: /Retry fixture/ }).click();
-    const details = page.getByRole("region", { name: "Selected goal" });
+    const details = page.getByRole("region", { name: "Selected project" });
     await details.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(
       page.getByRole("alert").filter({ hasText: "Temporarily unavailable" }),

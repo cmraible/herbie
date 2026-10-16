@@ -8,7 +8,7 @@ test("fixture preview uses production UI and supports local edits", async ({ pag
   await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText(
     "acme/storefront",
   );
-  await expect(page.getByRole("button", { name: "Attempt 3 Ready for review" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Run 3 Ready for review" })).toHaveAttribute(
     "aria-expanded",
     "true",
   );
@@ -18,29 +18,36 @@ test("fixture preview uses production UI and supports local edits", async ({ pag
   );
   await expect(page.getByText(/demo|simulat/i)).toHaveCount(0);
   await page.screenshot({ path: "test-results/fixtures-desktop.png", fullPage: true });
-  await page.getByRole("button", { name: "Attempt 2 Failed" }).click();
+  await page.getByRole("button", { name: "Run 2 Failed" }).click();
+  await expect(page.getByText("Run failed. No patches were saved.")).toBeVisible();
   await expect(
-    page.getByText(
-      "The integration suite could not connect to its test database. No pull request was opened.",
-    ),
+    page.getByText("The integration suite could not connect to its test database.", {
+      exact: false,
+    }),
+  ).toHaveCount(0);
+  await page.getByText("Technical details").click();
+  await expect(
+    page.getByText("The integration suite could not connect to its test database.", {
+      exact: false,
+    }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "All goals" }).click();
+  await page.getByRole("button", { name: "All projects" }).click();
   await page.goto("/#00000000-0000-4000-8000-000000000002");
-  await page.getByRole("button", { name: "Goal actions" }).click();
+  await page.getByRole("button", { name: "Project actions" }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByLabel("Goal name", { exact: true }).fill("Reduce search latency");
+  await page.getByLabel("Project name", { exact: true }).fill("Reduce search latency");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("heading", { name: "Reduce search latency" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Reduce search latency" })).toBeVisible();
-  await page.getByRole("button", { name: "Goal actions" }).click();
+  await page.getByRole("button", { name: "Project actions" }).click();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.locator(".detail-heading .badge")).toHaveText("Paused");
-  await page.getByRole("button", { name: "All goals" }).click();
-  await page.getByRole("button", { name: "New goal", exact: true }).click();
+  await page.getByRole("button", { name: "All projects" }).click();
+  await page.getByRole("button", { name: "New project", exact: true }).click();
   await expect(page.getByText(/demo|simulat/i)).toHaveCount(0);
   await page.getByLabel("What should Herbie work on?").fill("Add sorting to the product grid.");
-  await page.getByRole("button", { name: "Start goal" }).click();
+  await page.getByRole("button", { name: "Start project" }).click();
   await expect(
     page.getByRole("heading", { name: "Add sorting to the product grid" }),
   ).toBeVisible();

@@ -12,6 +12,9 @@ for (const outcome of [
   "success",
   "failure",
   "stale",
+  "external-change",
+  "simple-rebase",
+  "retry-at-capacity",
   "cancel",
   "lease",
   "crash",
@@ -56,6 +59,86 @@ for (const outcome of [
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
     const pr = job.goal.pullRequests[0]!;
+    if (outcome === "retry-at-capacity") {
+      await store.pool.query("UPDATE goals SET state='failed',error='synthetic' WHERE id=$1", [
+        goal.id,
+      ]);
+      await assert.rejects(
+        store.retryAttempt(goal.id, "demo-user"),
+        /Review or close an open pull request before retrying this project/,
+      );
+      assert.equal((await store.getGoal(goal.id))?.state, "failed");
+      assert.equal(
+        (
+          await store.pool.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='retry'", [
+            goal.id,
+          ])
+        ).rowCount,
+        0,
+      );
+      return;
+    }
+    if (outcome === "external-change") {
+      const originalHead = "a".repeat(40);
+      const originalBase = "c".repeat(40);
+      const originalPatch = "e".repeat(64);
+      await store.pool.query(
+        "UPDATE goals SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase, originalPatch],
+      );
+      await store.pool.query(
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase, originalPatch],
+      );
+      const adapters: Adapters = {
+        ...demo,
+        mode: "live",
+        reconcile: async () => ({
+          ...pr,
+          state: "open",
+          headSha: "b".repeat(40),
+          baseSha: originalBase,
+          patchSha: "f".repeat(64),
+        }),
+      };
+      await reconcileReviews(store, adapters);
+      await reconcileReviews(store, adapters);
+      assert.equal((await store.getGoal(goal.id))?.state, "paused");
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='external_change_paused'",
+            [goal.id],
+          )
+        ).rowCount,
+        1,
+      );
+      return;
+    }
+    if (outcome === "simple-rebase") {
+      const originalHead = "a".repeat(40);
+      const originalBase = "c".repeat(40);
+      const originalPatch = "e".repeat(64);
+      await store.pool.query(
+        "UPDATE goals SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [goal.id, originalHead, originalBase, originalPatch],
+      );
+      await store.pool.query(
+        "UPDATE jobs SET pull_request=jsonb_set(jsonb_set(jsonb_set(pull_request,'{headSha}',to_jsonb($2::text),true),'{baseSha}',to_jsonb($3::text),true),'{patchSha}',to_jsonb($4::text),true) WHERE id=$1",
+        [job.id, originalHead, originalBase, originalPatch],
+      );
+      assert.equal(
+        await store.reconcilePullRequestHead(job.id, {
+          headSha: "b".repeat(40),
+          baseSha: "d".repeat(40),
+          patchSha: originalPatch,
+        }),
+        false,
+      );
+      assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
+      assert.equal((await store.getGoal(goal.id))?.pullRequests[0]?.headSha, "b".repeat(40));
+      return;
+    }
     if (outcome.startsWith("audit-")) {
       await store.beginReadiness(job.id);
       if (outcome === "audit-cancelled") await store.control(goal.id, "demo-user", "cancel");
@@ -251,10 +334,13 @@ for (const outcome of [
         await runCiRepairOnce(store, adapters, "discard");
       }
       const terminal = await store.pool.query(
-        "SELECT message FROM goal_events WHERE goal_id=$1 AND type='ci_repair_completed'",
-        [goal.id],
+        "SELECT message FROM goal_events WHERE goal_id=$1 AND type=$2",
+        [goal.id, outcome === "rerun-changed" ? "external_change_paused" : "ci_repair_completed"],
       );
-      assert.ok(terminal.rows.some((row) => row.message.includes("discarded")));
+      if (outcome === "rerun-changed") {
+        assert.equal(terminal.rowCount, 1);
+        assert.equal((await store.getGoal(goal.id))?.state, "paused");
+      } else assert.ok(terminal.rows.some((row) => row.message.includes("discarded")));
       assert.equal(
         (await store.pool.query("SELECT state FROM ci_repairs WHERE head=$1", ["a".repeat(40)]))
           .rows[0].state,
@@ -277,7 +363,8 @@ for (const outcome of [
       head = "b".repeat(40);
       await store.requestCiReview();
       await runCiRepairOnce(store, adapters, "new-head");
-      assert.equal(attempts, 2, "a definitive stale head must not disable future repairs");
+      assert.equal(attempts, 1, "external changes pause further repairs");
+      assert.equal((await store.getGoal(goal.id))?.state, "paused");
     }
 
     if (outcome === "success") {
@@ -348,9 +435,11 @@ for (const outcome of [
       events.rows.some(
         (row) =>
           row.type ===
-          (["success", "stale", "late-stale", "rerun"].includes(outcome)
-            ? "ci_repair_completed"
-            : "ci_repair_failed"),
+          (["stale", "late-stale"].includes(outcome)
+            ? "external_change_paused"
+            : ["success", "rerun"].includes(outcome)
+              ? "ci_repair_completed"
+              : "ci_repair_failed"),
       ),
     );
   });

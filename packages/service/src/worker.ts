@@ -98,10 +98,6 @@ export async function runWorkerOnce(
           );
           return true;
         }
-        if (adapters.mode === "live" && !changes.pullRequestBody?.trim())
-          throw new PublicationBlockedError(
-            "Saved artifact has no agent-authored pull request description",
-          );
         if (!adapters.checkPublicationRetry) {
           await store.publicationUncertain(
             job.id,
@@ -174,10 +170,6 @@ export async function runWorkerOnce(
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
     if (!existing) await requireLease();
-    if (!existing && adapters.mode === "live" && !changes.pullRequestBody?.trim())
-      throw new PublicationBlockedError(
-        "Saved artifact has no agent-authored pull request description",
-      );
     if (existing) await reportPublicationPhase("state_persistence");
     const result =
       existing ??
@@ -231,9 +223,10 @@ export async function runWorkerOnce(
           error instanceof KnownAttemptFailure
             ? error.message
             : error instanceof DaytonaAttemptError
-              ? `${error.safeMessage()} Reference: ${errorId}`
-              : `Attempt did not complete safely. Check service diagnostics and sandbox cleanup before starting another goal. Reference: ${errorId}`,
+              ? `Run failed. ${error.changes ? "Your patches are saved." : "No patches were saved."} Reference: ${errorId}`
+              : `Run failed. No patches were saved. Reference: ${errorId}`,
           !(error instanceof KnownAttemptFailure),
+          changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
         );
     } catch (saveError) {
       logFailure(saveError, {
@@ -276,7 +269,9 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
   for (const job of await store.reviewJobs(adapters.mode)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
-      if (current && current.state !== "open") await store.reconcile(job.id, current.state);
+      if (current?.state === "open" && current.headSha)
+        await store.reconcilePullRequestHead(job.id, current);
+      else if (current && current.state !== "open") await store.reconcile(job.id, current.state);
     } catch (error) {
       logFailure(error, { component: "review-reconciliation", goalId: job.goal.id, jobId: job.id });
       // Transient GitHub failures do not change the durable review state. Poll again later.

@@ -59,33 +59,33 @@ test("repository setup runs during onboarding, refreshes access, and survives Ba
   await page.goto("/");
   await page.getByRole("button", { name: "Continue with GitHub" }).click();
   await installStarted;
-  await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect repositories" })).toHaveCount(0);
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
   );
-  await expect(page.getByRole("button", { name: "New goal", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "New project", exact: true })).toBeEnabled();
   releaseInstallStart();
   await expect(
     page.getByText("GitHub connected. Repositories are refreshing.", { exact: true }),
   ).toBeVisible();
   await expect(page).toHaveURL(`${baseUrl}/`);
   expect(repositoryRequests).toBeGreaterThanOrEqual(2);
-  await page.getByRole("button", { name: "New goal", exact: true }).click();
+  await page.getByRole("button", { name: "New project", exact: true }).click();
   await expect(page.locator(".repository-select__single-value")).toHaveText(
     "public-sample / project",
   );
   await expect(page.getByRole("button", { name: "Add repositories" })).toBeVisible();
-  await page.getByRole("button", { name: "Back to goals" }).click();
+  await page.getByRole("button", { name: "Back to projects" }).click();
 
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "Goals", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await expect.poll(() => repositoryRequests).toBeGreaterThanOrEqual(3);
   await expect(page.getByRole("button", { name: "Connect repositories" })).toHaveCount(0);
-  await page.getByRole("button", { name: "New goal", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Back to goals" })).toBeEnabled();
+  await page.getByRole("button", { name: "New project", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Back to projects" })).toBeEnabled();
   await expect(page.locator(".repository-select__single-value")).toHaveText(
     "public-sample / project",
   );

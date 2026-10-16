@@ -9,7 +9,6 @@ import { PgAuthStore } from "./auth-store.js";
 import { createBetterAuth } from "./better-auth.js";
 import { createAuth } from "./auth.js";
 import { createGithub } from "./github.js";
-import { createDemoAdapters } from "./demo.js";
 import { createLiveAdapters } from "./live.js";
 import { createDatabasePoolConfig, prepareDatabase } from "./database.js";
 
@@ -56,10 +55,12 @@ export async function createRuntime(startup?: StartupProgress) {
     startup?.begin("auth-setup");
     const auth = identity?.auth ?? createAuth(config, new PgAuthStore(pool), github);
     startup?.begin("adapter-setup");
-    const adapters =
-      config.mode === "live" && github
-        ? createLiveAdapters(config.executionEnabled ? config.daytona : undefined, github, auth)
-        : createDemoAdapters();
+    if (!github) throw new Error("Live runs require GitHub configuration");
+    const adapters = createLiveAdapters(
+      config.executionEnabled ? config.daytona : undefined,
+      github,
+      auth,
+    );
     return { config, store, auth, adapters, github };
   } catch (error) {
     startup?.failure(error);

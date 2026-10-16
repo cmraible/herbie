@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Goal, GoalEvent } from "@herbie/contracts";
 import { attemptLabels, groupAttempts } from "./attempts.js";
+import { activityMessage, errorReference } from "./activity-message.js";
 
 export function AttemptHistory({
   goal,
@@ -16,29 +17,43 @@ export function AttemptHistory({
   time: (value: string) => string;
 }) {
   const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
-  const { attempts } = groupAttempts(goal, events);
-  const groups = attempts.map((attempt) => ({
-    id: attempt.id,
-    title: `Attempt ${attempt.number}`,
-    status:
-      attempt.pullRequest?.state === "merged"
-        ? "Merged"
-        : attempt.pullRequest?.state === "closed"
-          ? "Closed"
-          : attemptLabels[attempt.state],
-    color:
-      attempt.pullRequest?.state === "merged"
-        ? "completed"
-        : attempt.pullRequest?.state === "closed"
-          ? "cancelled"
-          : attempt.state,
-    events: attempt.events,
-    pullRequests: attempt.pullRequest ? [attempt.pullRequest] : [],
-  }));
+  const { attempts, history } = groupAttempts(goal, events);
+  const groups = [
+    ...(history.length
+      ? [
+          {
+            id: "project-activity",
+            title: "Project activity",
+            status: "",
+            color: "",
+            events: history,
+            pullRequests: [],
+          },
+        ]
+      : []),
+    ...attempts.map((attempt) => ({
+      id: attempt.id,
+      title: `Run ${attempt.number}`,
+      status:
+        attempt.pullRequest?.state === "merged"
+          ? "Merged"
+          : attempt.pullRequest?.state === "closed"
+            ? "Closed"
+            : attemptLabels[attempt.state],
+      color:
+        attempt.pullRequest?.state === "merged"
+          ? "completed"
+          : attempt.pullRequest?.state === "closed"
+            ? "cancelled"
+            : attempt.state,
+      events: attempt.events,
+      pullRequests: attempt.pullRequest ? [attempt.pullRequest] : [],
+    })),
+  ];
   const open = expanded === undefined ? groups[0]?.id : expanded;
   return (
-    <section className="attempts" aria-label="Attempts">
-      <h3>Attempts</h3>
+    <section className="attempts" aria-label="Runs">
+      <h3>Runs</h3>
       {eventsState === "loading" && (
         <p className="subtle-note" role="status">
           Loading activity…
@@ -81,20 +96,40 @@ export function AttemptHistory({
             ))}
             <section className="activity">
               <h3>Activity</h3>
-              {group.events.length === 0 ? (
+              {group.events.every((event) => activityMessage(goal, event) === null) ? (
                 <p className="subtle-note">
                   {eventsState === "loading" ? "Loading activity…" : "No activity yet."}
                 </p>
               ) : (
                 <ol>
-                  {group.events.map((event) => (
-                    <li key={event.id}>
-                      <span>{event.message}</span>
-                      <time>
-                        {time(event.createdAt)} · {event.type.replaceAll("_", " ")}
-                      </time>
-                    </li>
-                  ))}
+                  {group.events.map((event) => {
+                    const text = activityMessage(goal, event);
+                    if (!text) return null;
+                    const number = /Pull request #(\d+)/.exec(text)?.[1];
+                    const pullRequest = group.pullRequests.find(
+                      (pr) => pr.number === Number(number),
+                    );
+                    return (
+                      <li key={event.id}>
+                        <span>
+                          {pullRequest ? (
+                            <a href={pullRequest.url} target="_blank" rel="noreferrer">
+                              {text}
+                            </a>
+                          ) : (
+                            text
+                          )}
+                        </span>
+                        <time>{time(event.createdAt)}</time>
+                        {errorReference(event.message) && (
+                          <details>
+                            <summary>Error reference</summary>
+                            <p>{errorReference(event.message)}</p>
+                          </details>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </section>

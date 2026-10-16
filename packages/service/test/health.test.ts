@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 import { Store } from "../src/store.js";
-import { createAuth } from "../src/auth.js";
-import { PgAuthStore } from "../src/auth-store.js";
 import { createApiServer } from "../src/http.js";
 import { createDemoAdapters } from "../src/demo.js";
+import { testAuth } from "./test-auth.js";
 
 test("database failure removes readiness while process liveness remains healthy", async (t) => {
   const database = process.env.HERBIE_TEST_DATABASE_URL;
@@ -16,14 +15,7 @@ test("database failure removes readiness while process liveness remains healthy"
   t.after(async () => {
     if (!closed) await store.close();
   });
-  const auth = createAuth(
-    {
-      mode: "demo",
-      publicUrl: "http://127.0.0.1",
-      credentialKey: Buffer.alloc(32, 7).toString("base64"),
-    },
-    new PgAuthStore(pool),
-  );
+  const auth = testAuth();
   const server = createApiServer({
     store,
     auth,
@@ -46,7 +38,7 @@ test("database failure removes readiness while process liveness remains healthy"
   const ready = await fetch(url);
   assert.equal(ready.status, 200);
   assert.deepEqual(await ready.json(), {
-    mode: "demo",
+    mode: "live",
     executionEnabled: false,
     deploymentId: "release-under-test",
     imageRevision: "image-under-test",

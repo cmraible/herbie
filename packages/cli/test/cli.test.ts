@@ -7,8 +7,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli.js";
 
-async function fixture(handler: (request: IncomingMessage, response: ServerResponse) => void) {
-  const server = createServer(handler);
+async function fixture(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+  defaultAuth = true,
+) {
+  const server = createServer((request, response) => {
+    if (defaultAuth && request.url === "/api/auth/start" && request.method === "POST") {
+      json(response, {
+        url: "https://github.com/login/oauth/authorize",
+        pollToken: "test-poll-token",
+        userCode: "ABCD-EFGH",
+      });
+      return;
+    }
+    if (defaultAuth && request.url?.startsWith("/api/auth/poll?")) {
+      json(response, { status: "complete", token: "private-session" });
+      return;
+    }
+    if (defaultAuth && request.url === "/api/session") {
+      json(response, session);
+      return;
+    }
+    handler(request, response);
+  });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -40,14 +61,10 @@ function json(response: ServerResponse, value: unknown, status = 200) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(value));
 }
-const session = { user: { id: "user-1", login: "octocat" }, mode: "demo" };
+const session = { user: { id: "user-1", login: "octocat" }, mode: "live" };
 
-test("explicit demo login persists a private bearer session and authenticates subsequent status calls", async () => {
+test("GitHub login persists a private bearer session and authenticates subsequent status calls", async () => {
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login" && request.method === "POST") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     if (
       request.url === "/api/goals" &&
       request.headers.authorization === "Bearer private-session"
@@ -58,7 +75,7 @@ test("explicit demo login persists a private bearer session and authenticates su
     json(response, { error: "Unauthorized" }, 401);
   });
   try {
-    assert.equal(await app.invoke(["login", "--demo", "--url", app.baseUrl]), 0);
+    assert.equal(await app.invoke(["login", "--url", app.baseUrl]), 0);
     assert.equal((await stat(app.configPath)).mode & 0o777, 0o600);
     assert.match(await readFile(app.configPath, "utf8"), /private-session/);
     assert.equal(await app.invoke(["status"]), 0);
@@ -90,10 +107,6 @@ const goal = {
 test("start sends a custom name and preserves the request ID on retry", async () => {
   const requests: { key: string | string[] | undefined; body: unknown }[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     if (request.url === "/api/goals" && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
@@ -109,7 +122,7 @@ test("start sends a custom name and preserves the request ID on retry", async ()
     json(response, { error: "Not found" }, 404);
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     const args = [
       "start",
       "--name",
@@ -145,10 +158,6 @@ test("start sends a custom name and preserves the request ID on retry", async ()
 
 test("failed and repeated controls report service truth; events support a cursor", async () => {
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     if (request.url === `/api/goals/${goalId}/pause`) {
       json(response, { error: "Publication already started" }, 409);
       return;
@@ -172,7 +181,7 @@ test("failed and repeated controls report service truth; events support a cursor
     json(response, { error: "Not found" }, 404);
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["pause", goalId]), 1);
     assert.match(app.errors.at(-1) ?? "", /Publication already started/);
     assert.equal(await app.invoke(["cancel", goalId]), 0);
@@ -190,7 +199,7 @@ test("a saved bearer token is never sent to a different service", async () => {
     json(response, { token: "private-session", session }),
   );
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["status", "--url", "https://elsewhere.example"]), 1);
     assert.match(app.errors.at(-1) ?? "", /differs from saved session/);
   } finally {
@@ -201,10 +210,6 @@ test("a saved bearer token is never sent to a different service", async () => {
 test("saved publication recovery sends authenticated POST and reports server refusals", async () => {
   let retryCount = 0;
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     assert.equal(request.url, `/api/goals/${goalId}/retry-publication`);
     assert.equal(request.method, "POST");
     assert.equal(request.headers.authorization, "Bearer private-session");
@@ -222,7 +227,7 @@ test("saved publication recovery sends authenticated POST and reports server ref
       );
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["retry-publication"]), 1);
     assert.equal(await app.invoke(["retry-publication", "invalid-id"]), 1);
     assert.equal(retryCount, 0);
@@ -242,7 +247,7 @@ test("the CLI refuses misspelled options and the removed test command before cre
     json(response, { token: "private-session", session }),
   );
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(
       await app.invoke([
         "start",
@@ -268,7 +273,7 @@ test("an insecure session file is rejected before credentials are read", async (
     json(response, { token: "private-session", session }),
   );
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     const { chmod } = await import("node:fs/promises");
     await chmod(app.configPath, 0o644);
     assert.equal(await app.invoke(["status"]), 1);
@@ -280,14 +285,10 @@ test("an insecure session file is rejected before credentials are read", async (
 
 test("logout clears a locally saved session that the service has already expired", async () => {
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "expired-session", session });
-      return;
-    }
     json(response, { error: "Session expired" }, 401);
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["logout"]), 0);
     await assert.rejects(stat(app.configPath), { code: "ENOENT" });
     assert.deepEqual(JSON.parse(app.output.at(-1) ?? ""), { ok: true });
@@ -297,15 +298,11 @@ test("logout clears a locally saved session that the service has already expired
 });
 
 test("logout clears local credentials during a network outage and reports unconfirmed remote sign-out", async () => {
-  const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
+  const app = await fixture((request) => {
     request.socket.destroy();
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["logout"]), 1);
     await assert.rejects(stat(app.configPath), { code: "ENOENT" });
     assert.match(
@@ -347,7 +344,7 @@ test("CLI login shows its service and approval code, saving no session until bro
       return;
     }
     json(response, { error: "Not found" }, 404);
-  });
+  }, false);
   const login = app.invoke(["login", "--url", app.baseUrl]);
   try {
     await pending.promise;
@@ -391,7 +388,7 @@ test("rejecting pending CLI authorization stops polling without saving a session
       return;
     }
     json(response, { error: "No session should be issued" }, 401);
-  });
+  }, false);
   const login = app.invoke(["login", "--url", app.baseUrl]);
   try {
     await pending.promise;
@@ -420,7 +417,7 @@ test("CLI authorization without a user approval code is refused before polling",
     }
     polls++;
     json(response, { status: "complete", token: "unapproved-session" });
-  });
+  }, false);
   try {
     assert.equal(await app.invoke(["login", "--url", app.baseUrl]), 1);
     assert.match(app.errors.at(-1) ?? "", /did not provide a CLI approval code; no session saved/);
@@ -434,10 +431,6 @@ test("CLI authorization without a user approval code is refused before polling",
 test("rename sends a validated name for the selected goal", async () => {
   const names: unknown[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     if (request.url === `/api/goals/${goalId}/name` && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
@@ -454,7 +447,7 @@ test("rename sends a validated name for the selected goal", async () => {
     json(response, { error: "Not found" }, 404);
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["rename", goalId, "--name", "   "]), 1);
     assert.equal(await app.invoke(["rename", goalId, "--name", "  Better coverage  "]), 0);
     assert.deepEqual(names, [{ name: "Better coverage" }]);
@@ -467,10 +460,6 @@ test("rename sends a validated name for the selected goal", async () => {
 test("edit sends a validated prompt for the selected goal", async () => {
   const prompts: unknown[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === "/api/demo/login") {
-      json(response, { token: "private-session", session });
-      return;
-    }
     if (request.url === `/api/goals/${goalId}/prompt` && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
@@ -487,7 +476,7 @@ test("edit sends a validated prompt for the selected goal", async () => {
     json(response, { error: "Not found" }, 404);
   });
   try {
-    await app.invoke(["login", "--demo", "--url", app.baseUrl]);
+    await app.invoke(["login", "--url", app.baseUrl]);
     assert.equal(await app.invoke(["edit", goalId, "--prompt", "   "]), 1);
     assert.equal(await app.invoke(["edit", goalId, "--prompt", "  Better coverage  "]), 0);
     assert.deepEqual(prompts, [{ prompt: "Better coverage" }]);

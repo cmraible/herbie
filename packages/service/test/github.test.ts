@@ -7,7 +7,6 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { createAuth, AuthError } from "../src/auth.js";
 import { migrateAuth, PgAuthStore } from "../src/auth-store.js";
-import { PublicationBlockedError } from "../src/adapters.js";
 import { createLiveAdapters } from "../src/live.js";
 import { goalSchema } from "@herbie/contracts";
 
@@ -29,6 +28,7 @@ export async function githubFixture(t: TestContext) {
     prState: "open" as "open" | "closed",
     mergedAt: null as string | null,
     losePrResponse: false,
+    patch: "@@ -1 +1 @@\n-old\n+new",
     prBranch: "herbie/attempt-1",
     comparisonBase: "0".repeat(40),
     branchHeads: new Map<string, string>([["main", "0".repeat(40)]]),
@@ -104,14 +104,16 @@ export async function githubFixture(t: TestContext) {
           expires_at: new Date(Date.now() + 3600000).toISOString(),
         }),
       );
+    else if (path.startsWith("/repos/alice/project/pulls/8/files"))
+      res.end(JSON.stringify([{ filename: "file.txt", status: "modified", patch: fixture.patch }]));
     else if (path.startsWith("/repos/alice/project/pulls")) {
       const pr = {
         number: 8,
         html_url: "https://github.com/alice/project/pull/8",
         state: fixture.prState,
         merged_at: fixture.mergedAt,
-        head: { ref: fixture.prBranch },
-        base: { ref: "main" },
+        head: { ref: fixture.prBranch, sha: "1".repeat(40) },
+        base: { ref: "main", sha: "2".repeat(40) },
       };
       if (req.method === "POST") {
         fixture.pr = true;
@@ -292,6 +294,25 @@ test("recovers a successful PR creation with a lost response and never duplicate
   );
 });
 
+test("pull request patch fingerprints ignore rebase-only hunk offsets", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.pr = true;
+  fixture.patch = "@@ -1,3 +1,3 @@\n function alpha() {\n-old\n+new\n }";
+  const before = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  fixture.patch = "@@ -101,3 +101,3 @@\n function alpha() {\n-old\n+new\n }";
+  const after = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.ok(before?.patchSha);
+  assert.equal(after?.patchSha, before.patchSha);
+  fixture.patch = "@@ -101 +101 @@\n---before\n+++after";
+  const edge = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  fixture.patch = "@@ -101 +101 @@\n---before\n+++changed";
+  const changed = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.notEqual(changed?.patchSha, edge?.patchSha);
+  fixture.patch = "@@ -201,3 +201,3 @@\n function beta() {\n-old\n+new\n }";
+  const moved = await github.findPullRequest("ghs_fixture", "alice/project", fixture.prBranch);
+  assert.notEqual(moved?.patchSha, before?.patchSha);
+});
+
 test("review reconciliation uses only repository-scoped read permission after user login expires", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
   fixture.pr = true;
@@ -469,12 +490,16 @@ for (const state of ["open", "closed", "merged"] as const)
       { baseCommit: "0".repeat(40), patch: Buffer.alloc(0) },
       async () => {},
     );
-    assert.deepEqual(pr, {
+    const { headSha, baseSha, patchSha, ...published } = pr;
+    assert.deepEqual(published, {
       url: "https://github.com/alice/project/pull/8",
       number: 8,
       branch: "herbie/attempt-1",
       state,
     });
+    assert.equal(headSha, "1".repeat(40));
+    assert.equal(baseSha, "2".repeat(40));
+    assert.match(patchSha ?? "", /^[a-f0-9]{64}$/);
     assert.equal(
       requests.filter((request) => request.path === "/repos/alice/project/pulls").length,
       0,
@@ -486,7 +511,7 @@ test(
   "durable OAuth binds web callbacks to the browser and CLI tokens are delivered once across restarts",
   { skip: !process.env.HERBIE_TEST_DATABASE_URL },
   async (t) => {
-    const { auth, restart, pool, config } = await authFixture(t);
+    const { auth, restart, pool } = await authFixture(t);
     const web = await auth.start("web");
     const state = new URL(web.url).searchParams.get("state");
     assert.ok(state);
@@ -536,16 +561,6 @@ test(
     await restarted.logout(poll.token);
     assert.equal(await auth.session(poll.token), null);
     assert.equal(await auth.userToken("7"), "ghu_fixture");
-    const demo = createAuth(
-      { ...config, mode: "demo", publicUrl: "http://127.0.0.1:3000" },
-      new PgAuthStore(pool),
-    );
-    const demoSession = await demo.demoLogin();
-    assert.equal(
-      await auth.session(demoSession.token),
-      null,
-      "A demo session must never become a live session when using the same database",
-    );
   },
 );
 
@@ -800,7 +815,7 @@ test("reconciliation accepts stateless installation tokens before looking up the
   const lookups = requests.filter((request) =>
     request.path.startsWith("/repos/alice/project/pulls"),
   );
-  assert.equal(lookups.length, 2);
+  assert.equal(lookups.length, 3);
   assert.ok(
     lookups.every((request) => request.authorization === `Bearer ${fixture.installationToken}`),
   );
@@ -826,7 +841,7 @@ for (const token of ["", "with space", "with\nnewline", "with\rreturn", "with\0n
   });
 }
 
-test("live publication rejects a legacy artifact without an agent description before creating a PR", async (t) => {
+test("live publication rejects a legacy artifact without verification evidence before creating a PR", async (t) => {
   const { github, requests } = await githubFixture(t);
   const live = createLiveAdapters(
     { apiKey: "fixture-never-used", openaiSecretName: "existing-secret" },
@@ -859,9 +874,7 @@ test("live publication rejects a legacy artifact without an agent description be
       { baseCommit: "0".repeat(40), patch: Buffer.from("patch") },
       async () => {},
     ),
-    (error) =>
-      error instanceof PublicationBlockedError &&
-      /no agent-authored pull request description/.test(error.message),
+    (error) => error instanceof Error && /successful goal and cleanup evidence/.test(error.message),
   );
   assert.equal(
     requests.filter((request) => request.path === "/repos/alice/project/pulls").length,

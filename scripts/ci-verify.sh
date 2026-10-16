@@ -9,7 +9,7 @@ cd "$repo_dir"
 stage="${1:-all}"
 case "$stage" in build|unit|cli|core|browser|all) ;; *) printf 'Unknown CI verification stage: %s\n' "$stage" >&2; exit 2 ;; esac
 needs_database=false
-[[ "$stage" == build ]] || needs_database=true
+[[ "$stage" == build || "$stage" == cli ]] || needs_database=true
 if [[ "$needs_database" == true ]]; then
   : "${HERBIE_TEST_DATABASE_URL:?Set HERBIE_TEST_DATABASE_URL to a disposable loopback Postgres database}"
   export HERBIE_CI_DATABASE_URL="${HERBIE_CI_DATABASE_URL:-$HERBIE_TEST_DATABASE_URL}"
@@ -55,7 +55,7 @@ cleanup() {
     wait "$playwright_install_pid" 2>/dev/null
   fi
   for pid in "${processes[@]}"; do kill -TERM -- "-$pid" 2>/dev/null; done
-  # All executors are deterministic local fixtures. Give them bounded time to
+  # Child processes are local test fixtures. Give them bounded time to
   # finish cleanup, then terminate only process groups started by this script.
   for ((attempt=0; attempt<50; attempt++)); do
     still_running=false
@@ -123,22 +123,6 @@ wait_browser_install() {
   fi
   playwright_install_pid=''
 }
-start_hosted_service() {
-  # Serve the compiled app and use the deterministic local demo adapter.
-  # Run the test service directly without loading the local Compose .env.
-  export HERBIE_E2E_URL="http://127.0.0.1:$HERBIE_CI_PORT"
-  export HERBIE_CLI_E2E_ENTRY="$repo_dir/packages/cli/dist/index.js"
-  start_server hosted env DATABASE_URL="$HERBIE_CI_DATABASE_URL" \
-    HERBIE_MODE=demo HERBIE_EXECUTION_ENABLED=true HERBIE_HOST=127.0.0.1 \
-    HERBIE_PORT="$HERBIE_CI_PORT" HERBIE_PUBLIC_URL="$HERBIE_E2E_URL" \
-    node --import tsx packages/service/dist/hosted.js
-  wait_http "$server_pid" "$HERBIE_E2E_URL/api/health" hosted
-  node --input-type=module <<'JS'
-const response = await fetch(`${process.env.HERBIE_E2E_URL}/api/health`,{signal:AbortSignal.timeout(5000)});
-const health = await response.json();
-if (!response.ok || health.mode !== 'demo' || health.executionEnabled !== true) throw new Error('CI requires its own deterministic demo service');
-JS
-}
 run_build() {
   run_step lint pnpm lint
   run_step format pnpm format:check
@@ -155,9 +139,11 @@ run_unit() {
   run_step build pnpm build
   run_unit_tests
 }
-run_cli_e2e() {
-  start_hosted_service
-  run_step cli-e2e pnpm --filter @herbie/cli test:e2e
+start_web_preview() {
+  export HERBIE_E2E_URL="http://127.0.0.1:$HERBIE_CI_PORT"
+  start_server web-preview pnpm --filter @herbie/web exec vite preview \
+    --host 127.0.0.1 --port "$HERBIE_CI_PORT" --strictPort
+  wait_http "$server_pid" "$HERBIE_E2E_URL/" web-preview
 }
 run_browser() {
   run_step browser-e2e pnpm --filter @herbie/web test:e2e
@@ -172,26 +158,25 @@ case "$stage" in
     ;;
   cli)
     run_step build pnpm build
-    run_cli_e2e
+    run_step cli-tests pnpm --filter @herbie/cli test
     ;;
   core)
     run_build
     run_unit
-    run_cli_e2e
     ;;
   browser)
     start_browser_install
     run_step build pnpm build
     wait_browser_install
-    start_hosted_service
+    start_web_preview
     run_browser
     ;;
   all)
     start_browser_install
     run_build
     run_unit_tests
-    run_cli_e2e
     wait_browser_install
+    start_web_preview
     run_browser
     ;;
 esac

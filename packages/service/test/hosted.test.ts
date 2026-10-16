@@ -8,9 +8,8 @@ import pg from "pg";
 import { createClient } from "@herbie/contracts/client";
 import { Store } from "../src/store.js";
 import { createDemoAdapters } from "../src/demo.js";
-import { createAuth } from "../src/auth.js";
-import { PgAuthStore, migrateAuth } from "../src/auth-store.js";
 import { startHostedService, type HostedRuntime } from "../src/hosted.js";
+import { testAuth, testSessionToken } from "./test-auth.js";
 
 async function fixture(database: string) {
   const schema = `hosted_${randomUUID().replaceAll("-", "")}`;
@@ -20,12 +19,8 @@ async function fixture(database: string) {
     const pool = new pg.Pool({ connectionString: database, options: `-c search_path=${schema}` });
     const store = new Store(pool);
     await store.migrate();
-    await migrateAuth(pool);
     const publicUrl = "http://127.0.0.1:8787";
-    const auth = createAuth(
-      { mode: "demo", publicUrl, credentialKey: Buffer.alloc(32, 7).toString("base64") },
-      new PgAuthStore(pool),
-    );
+    const auth = testAuth();
     return {
       config: { host: "127.0.0.1", port: 0, publicUrl, executionEnabled },
       store,
@@ -68,9 +63,9 @@ test("hosted API leaves queued work untouched when execution is disabled", async
     await service.close();
     await app.close();
   });
-  const token = (await clientFor(service).demoCliLogin()).token;
+  const token = testSessionToken;
   const client = clientFor(service, token);
-  assert.equal((await client.health()).mode, "demo");
+  assert.equal((await client.health()).mode, "live");
   await delay(1100);
   assert.equal((await client.goal(goal.id)).state, "queued");
   await service.close();
@@ -100,7 +95,7 @@ test("hosted shutdown stops HTTP first and lets the active bounded attempt persi
     await service.close();
     await app.close();
   });
-  const token = (await clientFor(service).demoCliLogin()).token;
+  const token = testSessionToken;
   const client = clientFor(service, token);
   const goal = await client.start(
     { repository: "demo/example", prompt: "Finish cleanup even when deployment stops" },

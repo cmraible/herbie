@@ -12,8 +12,8 @@ container check passes. Fork PRs verify without uploading.
 Checks use Node 24.19.0, pnpm 10.34.6 and the frozen lockfile. Actions are pinned
 to commit SHAs, and PostgreSQL and Node container images are pinned by digest.
 The runner and Debian package repositories still receive upstream updates.
-Tests use disposable PostgreSQL and deterministic demo execution, without live
-OAuth, Daytona, or model calls. Failure evidence expires after seven days.
+Tests use disposable PostgreSQL and injected test adapters, without live OAuth,
+Daytona, or model calls. Failure evidence expires after seven days.
 
 Run **`pnpm verify`** (or `bash scripts/verify.sh` without host Node/pnpm) for all
 blocking CI validation locally. Requires a running Docker engine with Buildx,

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Disposable demo database only. Never pass production runtime configuration here.
+# Disposable test database only. Never pass production runtime configuration here.
 set -euo pipefail
 image="${1:?Pass a locally built Herbie image}"
 revision="${2:?Pass its expected image revision}"
 prefix="herbie-smoke-${RANDOM}-$$"
+test_private_key="$(node --input-type=module -e 'import {generateKeyPairSync} from "node:crypto"; process.stdout.write(generateKeyPairSync("rsa", {modulusLength: 2048}).privateKey.export({type: "pkcs8", format: "pem"}))')"
 cleanup() {
   docker rm -f "$prefix-app" "$prefix-db" >/dev/null 2>&1 || true
   docker network rm "$prefix" >/dev/null 2>&1 || true
@@ -25,11 +26,18 @@ for ((i=0;i<30;i++)); do
   sleep 1
 done
 docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U fixture >/dev/null
-docker run -d --name "$prefix-app" --network "$prefix" \
+docker run -d --name "$prefix-app" --network "container:$prefix-db" \
   --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
-  -e HERBIE_MODE=demo -e HERBIE_HOST=127.0.0.1 -e HERBIE_EXECUTION_ENABLED=false \
-  -e DATABASE_URL=postgresql://fixture:fixture@postgres:5432/fixture \
+  -e HERBIE_MODE=live -e HERBIE_HOST=127.0.0.1 -e HERBIE_EXECUTION_ENABLED=false \
+  -e HERBIE_PUBLIC_URL=https://herbie.example.test \
+  -e HERBIE_ALLOWED_GITHUB_USER_ID=7 \
+  -e HERBIE_CREDENTIAL_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8= \
+  -e GITHUB_APP_ID=fixture -e GITHUB_CLIENT_ID=fixture \
+  -e GITHUB_CLIENT_SECRET=fixture -e GITHUB_WEBHOOK_SECRET=fixture \
+  -e "GITHUB_PRIVATE_KEY=$test_private_key" \
+  -e OPENAI_API_KEY=fixture \
+  -e DATABASE_URL=postgresql://fixture:fixture@127.0.0.1:5432/fixture \
   -e HERBIE_DEPLOYMENT_ID="$revision" "$image" >/dev/null
 for ((i=0;i<75;i++)); do
   if docker exec "$prefix-app" node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then break; fi

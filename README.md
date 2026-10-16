@@ -76,10 +76,9 @@ Environment configuration is validated together by the Zod schema in
 `packages/service/src/config.ts` before connecting to PostgreSQL. Errors name the
 variables that need fixing without displaying their values. Live mode requires
 `OPENAI_API_KEY`, including when execution is disabled. Automatic naming must succeed
-before a goal is queued; provider errors and invalid responses fail the request
-without saving a goal or job. Demo naming is deterministic and makes no model calls.
-Live execution also
-requires `DAYTONA_API_KEY` and `HERBIE_DAYTONA_OPENAI_SECRET` at this stage.
+before a project is queued; provider errors and invalid responses fail the request
+without saving a project or job. Live execution requires `DAYTONA_API_KEY` and
+`HERBIE_DAYTONA_OPENAI_SECRET` when enabled.
 
 The Compose container exits on invalid configuration. Check `docker compose logs
 herbie`, correct `.env`, and rerun `docker compose up -d --wait`.

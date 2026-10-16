@@ -11,6 +11,7 @@ import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
+import { errorReference } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 
 const api = createClient();
@@ -47,10 +48,27 @@ function initialDraft() {
 function Badge({ goal }: { goal: Goal }) {
   return <span className={`badge status-${goal.state}`}>{labels[goal.state]}</span>;
 }
+function goalErrorMessage(goal: Goal): string {
+  const error = goal.error ?? "";
+  if (error.includes("Worker connection was lost during an attempt"))
+    return `Run #${goal.attemptCount} was interrupted. Retry to start a new run`;
+  if (error.includes("saved artifact lacks matching test and cleanup evidence"))
+    return "Run failed. Your patches are saved.";
+  if (error.startsWith("Run failed.")) return error.split(" Reference:")[0];
+  if (error.startsWith("Attempt failed")) return "Run failed. No patches were saved.";
+  if (error.includes("Publication remains unconfirmed"))
+    return "Preparing the pull request is taking longer than expected. Retrying automatically";
+  if (error.includes("CI repair stopped"))
+    return "Agent couldn't fix the failing checks. Pull request needs your attention";
+  if (error.includes("original base")) return "Repository history changed. Agent paused";
+  if (error.includes("attempt branch exists"))
+    return "Pull request preparation paused. Agent paused";
+  if (error.startsWith("Live execution is disabled")) return "Live runs aren't configured yet";
+  return "This project needs your attention.";
+}
 
 export function App() {
   const [revision, setRevision] = useState<string | null>(null);
-  const [mode, setMode] = useState<"demo" | "live" | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionState, setSessionState] = useState<
     "pending" | "signed-in" | "signed-out" | "error"
@@ -122,7 +140,6 @@ export function App() {
         .health()
         .then((health) => {
           if (!alive) return;
-          setMode(health.mode);
           setHealthState("ready");
           setRevision(
             [health.deploymentId, health.imageRevision].find(
@@ -327,19 +344,13 @@ export function App() {
     sessionStorage.setItem("herbie-draft", JSON.stringify(draft));
   }, [draft]);
 
-  async function login(demo: boolean) {
+  async function login() {
     setBusy(true);
     setError(null);
     try {
-      if (demo) {
-        const current = await api.demoLogin();
-        setSession(current);
-        setSessionState("signed-in");
-      } else {
-        sessionStorage.setItem(onboardingInstallKey, "1");
-        const auth = await api.authStart("web");
-        location.assign(auth.url);
-      }
+      sessionStorage.setItem(onboardingInstallKey, "1");
+      const auth = await api.authStart("web");
+      location.assign(auth.url);
     } catch (failure) {
       sessionStorage.removeItem(onboardingInstallKey);
       setError(message(failure));
@@ -450,8 +461,8 @@ export function App() {
           <section className="welcome" aria-busy={sessionState === "pending"}>
             <h1>Herbie</h1>
             <p>
-              Give a coding goal a clear brief. Herbie works on it and brings back a result for you
-              to review.
+              Give a project a clear brief. Herbie works on it and brings back patches for you to
+              review.
             </p>
             {sessionState === "pending" && <p role="status">Checking your workspace…</p>}
             {(sessionState === "error" || healthState === "error") && (
@@ -465,11 +476,11 @@ export function App() {
                 <button
                   className="primary"
                   onClick={() => {
-                    void login(mode === "demo");
+                    void login();
                   }}
                   disabled={busy}
                 >
-                  {mode === "demo" ? "Open workspace" : "Continue with GitHub"}
+                  Continue with GitHub
                 </button>
                 <p className="fineprint">
                   GitHub access is checked separately for each repository.
@@ -481,7 +492,7 @@ export function App() {
           <>
             {creating && (
               <button className="back-button" onClick={navigateToList} disabled={busy}>
-                ← Back to goals
+                ← Back to projects
               </button>
             )}
             {editing && (
@@ -490,7 +501,7 @@ export function App() {
                 disabled={busy}
                 onClick={() => navigateToScreen(selected!, true)}
               >
-                ← Back to goal
+                ← Back to project
               </button>
             )}
             <section className="page-heading">
@@ -498,7 +509,7 @@ export function App() {
                 {selected && !creating && !editing ? (
                   <nav className="breadcrumbs" aria-label="Breadcrumb">
                     <button className="back-button" onClick={navigateToList}>
-                      All goals
+                      All projects
                     </button>
                     {goal && (
                       <>
@@ -508,14 +519,14 @@ export function App() {
                     )}
                   </nav>
                 ) : (
-                  <h1>{creating ? "New goal" : editing ? "Edit goal" : "Goals"}</h1>
+                  <h1>{creating ? "New project" : editing ? "Edit project" : "Projects"}</h1>
                 )}
                 {!creating && !selected && <p>Work that keeps moving.</p>}
               </div>
               {!creating && !editing && !selected && (
                 <div className="heading-actions">
                   <button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>
-                    New goal
+                    New project
                   </button>
                 </div>
               )}
@@ -540,12 +551,12 @@ export function App() {
             )}
             {!goalsLoaded && !goalsError && (
               <p className="subtle-note" role="status">
-                Loading goals…
+                Loading projects…
               </p>
             )}
             {goalsError && (
               <div className="status-message" role="alert">
-                {goalsLoaded && "Couldn’t refresh goals. Showing the latest saved progress. "}
+                {goalsLoaded && "Couldn’t refresh projects. Showing the latest saved progress. "}
                 {goalsError}
                 <button onClick={() => setGoalsRefresh((value) => value + 1)}>Retry</button>
               </div>
@@ -554,16 +565,16 @@ export function App() {
               <>
                 {!selected && goalsLoaded && goals.length === 0 && (
                   <section className="empty-state">
-                    <h2>No goals yet</h2>
+                    <h2>No projects yet</h2>
                     <p>Start with one useful change.</p>
                     <button className="text-button" onClick={openCreate}>
-                      Create a goal
+                      Create a project
                     </button>
                   </section>
                 )}
                 {!selected && goals.length > 0 && (
                   <>
-                    <section className="goal-list" aria-label="Goals" aria-busy={!goalsLoaded}>
+                    <section className="goal-list" aria-label="Projects" aria-busy={!goalsLoaded}>
                       {visibleGoals.map((item) => (
                         <button
                           className="goal-row"
@@ -589,8 +600,8 @@ export function App() {
                     )}
                     {goalsLoaded && visibleGoals.length === 0 && (
                       <section className="empty-state">
-                        <h2>All goals are finished</h2>
-                        <p>Completed and cancelled goals are hidden.</p>
+                        <h2>All projects are finished</h2>
+                        <p>Completed and cancelled projects are hidden.</p>
                       </section>
                     )}
                   </>
@@ -598,7 +609,7 @@ export function App() {
                 {selected && goal && (
                   <section
                     className="goal-detail"
-                    aria-label="Selected goal"
+                    aria-label="Selected project"
                     aria-busy={eventsState === "loading"}
                   >
                     <div className="detail-heading">
@@ -611,7 +622,7 @@ export function App() {
                           <button
                             className="goal-actions-trigger"
                             popoverTarget="goal-actions"
-                            aria-label="Goal actions"
+                            aria-label="Project actions"
                           >
                             <span aria-hidden="true">⋯</span>
                           </button>
@@ -665,22 +676,26 @@ export function App() {
                         </>
                       )}
                     </div>
-                    <p className="goal-brief">{goal.prompt.replace("[demo:fail]", "").trim()}</p>
+                    <p className="goal-brief">{goal.prompt}</p>
 
                     <p className="goal-meta">
-                      Attempt {goal.attemptCount} <span>·</span> Max WIP {goal.maxWip}{" "}
+                      {goal.attemptCount} runs <span>·</span> Max parallel runs {goal.maxWip}{" "}
                       <span>·</span> Created {time(goal.createdAt)}
                     </p>
                     {goal.error && (
                       <div className="status-message" role="alert">
-                        {goal.error}
+                        {goalErrorMessage(goal)}
+                        {errorReference(goal.error) && (
+                          <details>
+                            <summary>Error reference</summary>
+                            <p>{errorReference(goal.error)}</p>
+                          </details>
+                        )}
                       </div>
                     )}
                     {["failed", "needs_attention"].includes(goal.state) && (
                       <div className="status-message">
-                        <span>
-                          Retry recovers saved work when possible, or starts a new attempt.
-                        </span>
+                        <span>Retry resumes saved work when possible, or starts a new run.</span>
                         <button
                           className="primary"
                           disabled={busy}
@@ -695,7 +710,7 @@ export function App() {
                     {goal.stopRequested && (
                       <p className="subtle-note">
                         {goal.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The
-                        current attempt will finish before stopping.
+                        current run will finish before stopping.
                       </p>
                     )}
                     <hr className="goal-divider" />
@@ -711,9 +726,9 @@ export function App() {
                 )}
                 {selected && !goal && goalsLoaded && (
                   <section className="empty-state">
-                    <h2>Goal not found</h2>
+                    <h2>Project not found</h2>
                     <button className="text-button" onClick={navigateToList}>
-                      Back to goals
+                      Back to projects
                     </button>
                   </section>
                 )}
@@ -721,14 +736,14 @@ export function App() {
             )}
             {editing && !goal && goalsLoaded && (
               <section className="empty-state">
-                <h2>Goal not found</h2>
+                <h2>Project not found</h2>
                 <button className="text-button" onClick={navigateToList}>
-                  Back to goals
+                  Back to projects
                 </button>
               </section>
             )}
             {(creating || (editing && goal && goal.state !== "cancelled")) && formDraft && (
-              <section aria-label={editing ? "Edit goal" : "New goal"}>
+              <section aria-label={editing ? "Edit project" : "New project"}>
                 <form
                   onSubmit={(event) => {
                     void (editing ? saveGoalEdit(event) : createGoal(event));
@@ -738,7 +753,7 @@ export function App() {
                     <label>
                       Repository
                       <input readOnly value={formDraft.repository} />
-                      <span>Existing attempts and pull requests belong to this repository.</span>
+                      <span>Existing runs and pull requests belong to this repository.</span>
                     </label>
                   ) : (
                     <>
@@ -755,18 +770,16 @@ export function App() {
                         role={repositoryLoading ? "status" : undefined}
                       >
                         {repositoryLoading && <span>Checking repository access…</span>}
-                        {mode === "live" && (
-                          <button
-                            type="button"
-                            className="text-button"
-                            disabled={busy}
-                            onClick={() => {
-                              void connectRepositories();
-                            }}
-                          >
-                            Add repositories
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            void connectRepositories();
+                          }}
+                        >
+                          Add repositories
+                        </button>
                       </div>
                       {repositoryError && (
                         <div className="status-message" role="alert">
@@ -783,7 +796,7 @@ export function App() {
                   )}
                   {editing && (
                     <label>
-                      Goal name
+                      Project name
                       <input
                         autoFocus
                         required
@@ -816,12 +829,12 @@ export function App() {
                       value={formDraft.maxWip}
                       onChange={(event) => editForm({ maxWip: event.target.value })}
                     />
-                    <span>Open pull requests and the attempt preparing the next one.</span>
+                    <span>Open pull requests and the run preparing the next one.</span>
                   </label>
                   {editing && (
                     <p className="subtle-note">
-                      Prompt changes apply to future attempts. Existing work will finish before a
-                      lower work limit takes effect.
+                      Prompt changes apply to future runs. Existing work will finish before a lower
+                      work limit takes effect.
                     </p>
                   )}
                   {formError && (
@@ -859,7 +872,7 @@ export function App() {
                           : "Starting…"
                         : editing
                           ? "Save changes"
-                          : "Start goal"}
+                          : "Start project"}
                     </button>
                   </div>
                 </form>

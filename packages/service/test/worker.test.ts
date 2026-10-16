@@ -135,13 +135,16 @@ test("worker retains raw redacted causes privately and persists safe attempt ref
   await runWorkerOnce(store, adapters, "fixture-worker");
   const saved = await store.getGoal(goal.id);
   assert.equal(saved?.state, "needs_attention");
-  assert.match(saved?.error ?? "", /repository_clone: http_error; HTTP 503/);
-  assert.match(saved?.error ?? "", /Sandbox deletion confirmed/);
+  assert.match(
+    saved?.error ?? "",
+    /^Run failed\. No patches were saved\. Reference: [0-9a-f-]{36}$/,
+  );
   const record = JSON.parse(output.find((line) => line.includes("herbie_failure"))!);
   assert.ok(saved?.error?.includes(record.errorId));
   assert.equal(record.context.goalId, goal.id);
   assert.match(JSON.stringify(record), /useful synthetic failure/);
   assert.ok(!JSON.stringify(record).includes("hidden-fixture-token"));
+  assert.ok(!saved?.error?.includes("repository_clone"));
   assert.ok(!saved?.error?.includes("useful synthetic failure"));
   assert.equal(await runWorkerOnce(store, adapters, "fixture-worker"), false);
   assert.equal(attempts, 1);

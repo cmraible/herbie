@@ -24,7 +24,7 @@ const httpUrl = z.string().refine((value) => {
 export const environmentSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-    HERBIE_MODE: z.enum(["demo", "live"]).default("demo"),
+    HERBIE_MODE: z.literal("live").default("live"),
     HERBIE_EXECUTION_ENABLED: z.enum(["true", "false"]).optional(),
     HERBIE_HOST: text.default("127.0.0.1"),
     HERBIE_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
@@ -104,35 +104,27 @@ export const environmentSchema = z
         "HERBIE_PUBLIC_URL",
         "Must be an origin without credentials, a path, query, or fragment",
       );
-    if (env.HERBIE_MODE === "demo") {
-      if (!["localhost", "127.0.0.1", "::1"].includes(env.HERBIE_HOST))
-        issue("HERBIE_HOST", "Demo mode requires a loopback host");
-      if (origin && !["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))
-        issue("HERBIE_PUBLIC_URL", "Demo mode requires a loopback origin");
-    } else {
-      if (origin?.protocol !== "https:")
-        issue("HERBIE_PUBLIC_URL", "Live mode requires an HTTPS origin");
-      for (const name of [
-        "HERBIE_ALLOWED_GITHUB_USER_ID",
-        "HERBIE_CREDENTIAL_KEY",
-        "GITHUB_APP_ID",
-        "GITHUB_CLIENT_ID",
-        "GITHUB_CLIENT_SECRET",
-        "GITHUB_WEBHOOK_SECRET",
-        "OPENAI_API_KEY",
-      ] as const) {
-        if (!env[name]) issue(name, "Required in live mode");
-      }
-      if (!env.GITHUB_PRIVATE_KEY && !env.GITHUB_PRIVATE_KEY_FILE)
-        issue(
-          "GITHUB_PRIVATE_KEY",
-          "Set GITHUB_PRIVATE_KEY or GITHUB_PRIVATE_KEY_FILE in live mode",
-        );
-      if (env.HERBIE_EXECUTION_ENABLED === "true") {
-        for (const name of ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"] as const)
-          if (!env[name]) issue(name, "Required when live execution is enabled");
-      }
+    if (origin?.protocol !== "https:")
+      issue("HERBIE_PUBLIC_URL", "Live mode requires an HTTPS origin");
+    for (const name of [
+      "HERBIE_ALLOWED_GITHUB_USER_ID",
+      "HERBIE_CREDENTIAL_KEY",
+      "GITHUB_APP_ID",
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_SECRET",
+      "GITHUB_WEBHOOK_SECRET",
+      "OPENAI_API_KEY",
+    ] as const) {
+      if (!env[name]) issue(name, "Required for live runs");
     }
+    if (env.HERBIE_EXECUTION_ENABLED === "true")
+      for (const name of ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"] as const)
+        if (!env[name]) issue(name, "Required when live runs are enabled");
+    if (!env.GITHUB_PRIVATE_KEY && !env.GITHUB_PRIVATE_KEY_FILE)
+      issue(
+        "GITHUB_PRIVATE_KEY",
+        "Set GITHUB_PRIVATE_KEY or GITHUB_PRIVATE_KEY_FILE for live runs",
+      );
     if (env.GITHUB_PRIVATE_KEY && env.GITHUB_PRIVATE_KEY_FILE)
       issue("GITHUB_PRIVATE_KEY_FILE", "Set only one GitHub private key source");
     if (env.HERBIE_DATABASE_CA && env.HERBIE_DATABASE_CA_FILE)
@@ -200,9 +192,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
             webhookSecret: env.GITHUB_WEBHOOK_SECRET!,
           }
         : undefined,
-    executionEnabled: env.HERBIE_EXECUTION_ENABLED
-      ? env.HERBIE_EXECUTION_ENABLED === "true"
-      : mode === "demo",
+    executionEnabled: env.HERBIE_EXECUTION_ENABLED === "true",
     allowedGithubUserId: mode === "live" ? env.HERBIE_ALLOWED_GITHUB_USER_ID : undefined,
     deploymentId: env.HERBIE_DEPLOYMENT_ID,
     imageRevision: env.HERBIE_IMAGE_REVISION,
@@ -210,11 +200,14 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseCaFile: env.HERBIE_DATABASE_CA_FILE,
     openaiApiKey: mode === "live" ? env.OPENAI_API_KEY : undefined,
     goalNameModel: env.HERBIE_GOAL_NAME_MODEL,
-    daytona: {
-      apiKey: env.DAYTONA_API_KEY!,
-      apiUrl: env.DAYTONA_API_URL,
-      openaiSecretName: env.HERBIE_DAYTONA_OPENAI_SECRET!,
-      snapshot: env.HERBIE_DAYTONA_SNAPSHOT,
-    },
+    daytona:
+      env.DAYTONA_API_KEY && env.HERBIE_DAYTONA_OPENAI_SECRET
+        ? {
+            apiKey: env.DAYTONA_API_KEY,
+            apiUrl: env.DAYTONA_API_URL,
+            openaiSecretName: env.HERBIE_DAYTONA_OPENAI_SECRET,
+            snapshot: env.HERBIE_DAYTONA_SNAPSHOT,
+          }
+        : undefined,
   };
 }

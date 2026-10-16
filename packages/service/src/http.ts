@@ -83,7 +83,7 @@ export function createApiServer(options: ApiOptions) {
   const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
   function requireExecution() {
-    if (!executionEnabled) throw new HttpError(503, "Live execution is disabled by the operator");
+    if (!executionEnabled) throw new HttpError(503, "Live runs aren't configured yet");
   }
   const origin = new URL(options.publicUrl).origin;
   const secure = new URL(origin).protocol === "https:" ? "; Secure" : "";
@@ -166,7 +166,7 @@ export function createApiServer(options: ApiOptions) {
         return;
       }
       json(response, 200, {
-        mode: adapters.mode,
+        mode: "live",
         executionEnabled,
         deploymentId: options.deploymentId,
         imageRevision: options.imageRevision,
@@ -288,16 +288,6 @@ export function createApiServer(options: ApiOptions) {
         200,
         await legacy.poll(z.string().min(20).max(200).parse(url.searchParams.get("token"))),
       );
-      return;
-    }
-    if (method === "POST" && url.pathname === "/api/demo/login") {
-      if (!legacy || adapters.mode !== "demo") throw new HttpError(404, "Not found");
-      const { client } = clientInput.parse(await readJson(request));
-      const result = await legacy.demoLogin();
-      if (client === "web") {
-        response.setHeader("set-cookie", sessionCookie(result.token));
-        json(response, 200, result.session);
-      } else json(response, 200, result);
       return;
     }
     if (method === "POST" && url.pathname === "/api/webhooks/github") {
@@ -460,26 +450,6 @@ export function createApiServer(options: ApiOptions) {
           goalJson(200, await store.control(id, userId, action));
           return;
         }
-      }
-      const demoPath = url.pathname.match(/^\/api\/demo\/goals\/([^/]+)\/(merge|close)$/);
-      if (method === "POST" && adapters.mode === "demo" && demoPath) {
-        const id = z.string().uuid().parse(demoPath[1]);
-        const goal = await store.getGoal(id, userId);
-        if (!goal) throw new HttpError(404, "Goal not found");
-        if (goal.mode !== "demo")
-          throw new HttpError(409, "Only demo goals support simulated reviews");
-        const { branch } = z
-          .object({ branch: z.string().optional() })
-          .parse(await readJson(request));
-        const job = (await store.reviewJobs()).find(
-          (job) => job.goal.id === id && (!branch || job.branch === branch),
-        );
-        if (!job) {
-          goalJson(200, goal);
-          return;
-        }
-        goalJson(200, await store.reconcile(job.id, demoPath[2] === "merge" ? "merged" : "closed"));
-        return;
       }
       throw new HttpError(404, "Not found");
     }

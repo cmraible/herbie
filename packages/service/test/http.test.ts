@@ -3,11 +3,10 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 import { Store } from "../src/store.js";
-import { PgAuthStore, migrateAuth } from "../src/auth-store.js";
-import { createAuth } from "../src/auth.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { createApiServer } from "../src/http.js";
-import { goalSchema, sessionSchema } from "@herbie/contracts";
+import { goalSchema } from "@herbie/contracts";
+import { testAuth, testSessionToken } from "./test-auth.js";
 
 for (const version of [undefined, "2"])
   test(`HTTP goal contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
@@ -22,15 +21,7 @@ for (const version of [undefined, "2"])
     const pool = new pg.Pool({ connectionString: database, options: `-c search_path=${schema}` });
     const store = new Store(pool);
     await store.migrate();
-    await migrateAuth(pool);
-    const auth = createAuth(
-      {
-        mode: "demo",
-        publicUrl: "http://localhost:8787",
-        credentialKey: Buffer.alloc(32, 7).toString("base64"),
-      },
-      new PgAuthStore(pool),
-    );
+    const auth = testAuth();
     const server = createApiServer({
       store,
       auth,
@@ -50,15 +41,7 @@ for (const version of [undefined, "2"])
     assert.ok(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
     assert.equal((await fetch(`${base}/api/goals`)).status, 401);
-    const login = await fetch(`${base}/api/demo/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
-      body: "{}",
-    });
-    assert.equal(login.status, 200);
-    sessionSchema.parse(await login.json());
-    const cookie = login.headers.get("set-cookie")?.split(";")[0];
-    assert.ok(cookie);
+    const cookie = `herbie_session=${testSessionToken}`;
     const input = {
       repository: "demo/example",
       name: "Addition fix",

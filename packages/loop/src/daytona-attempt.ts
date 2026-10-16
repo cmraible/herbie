@@ -194,8 +194,18 @@ export async function runDaytonaAttempt(
   let deletion: Promise<void> | undefined;
   const removeSandbox = () =>
     (deletion ??= (async () => {
-      await sandbox.delete(60, true);
-      cleanupConfirmed = true;
+      let lastError: unknown;
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          await sandbox.delete(60, true);
+          cleanupConfirmed = true;
+          return;
+        } catch (error) {
+          lastError = error;
+          if (retry < 2) await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** retry));
+        }
+      }
+      throw lastError;
     })());
   const abort = () => {
     void removeSandbox().catch(() => undefined);
