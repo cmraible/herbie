@@ -88,7 +88,8 @@ export function App() {
   const [goalEdit, setGoalEdit] = useState<(Draft & { id: string }) | null>(null);
   const creating = screen === "new";
   const editing = Boolean(screen?.endsWith("/edit"));
-  const selected = creating ? null : editing ? screen!.slice(0, -5) : screen;
+  const [projectScreen, selectedRun = null] = (screen ?? "").split("/runs/");
+  const selected = creating ? null : editing ? screen!.slice(0, -5) : projectScreen || null;
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [formError, setFormError] = useState<string | null>(null);
   const [installationNotice, setInstallationNotice] = useState<string | null>(null);
@@ -595,7 +596,15 @@ export function App() {
                     {goal && (
                       <>
                         <span aria-hidden="true">&gt;</span>
-                        <span aria-current="page">{goal.repository}</span>
+                        {selectedRun ? (
+                          <>
+                            <a href={`#${goal.id}`}>{goal.name}</a>
+                            <span aria-hidden="true">&gt;</span>
+                            <span aria-current="page">Run details</span>
+                          </>
+                        ) : (
+                          <span aria-current="page">{goal.repository}</span>
+                        )}
                       </>
                     )}
                   </nav>
@@ -743,7 +752,7 @@ export function App() {
                     )}
                   </>
                 )}
-                {selected && goal && (
+                {selected && goal && !selectedRun && (
                   <section
                     className="goal-detail"
                     aria-label="Selected project"
@@ -889,6 +898,17 @@ export function App() {
                       time={time}
                     />
                   </section>
+                )}
+                {goal && selectedRun && (
+                  <AttemptHistory
+                    key={goal.id}
+                    goal={goal}
+                    selected={selectedRun}
+                    events={events}
+                    eventsState={eventsState}
+                    eventsError={eventsError}
+                    time={time}
+                  />
                 )}
                 {selected && !goal && goalsLoaded && (
                   <section className="empty-state">

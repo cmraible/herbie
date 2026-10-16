@@ -72,6 +72,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   });
   await page.goto(`/#${id}`);
   await expect(page.getByRole("heading", { name: "Live project" })).toBeVisible();
+  await page.getByRole("link", { name: /Run 1/ }).click();
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
   await expect.poll(() => connections).toBe(1);
   const activity = (method: string, params: Record<string, unknown>) => ({
@@ -124,8 +125,10 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   pr.state = "merged";
   goal.attempts[0]!.state = "completed";
   stream!.send(JSON.stringify({ type: "goals", goals: [goal] }));
-  await expect(page.getByRole("heading", { name: "Merged project" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Run 1.*Merged/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Merged project" })).toBeVisible();
+  await expect(
+    page.locator(".run-panel-heading").getByText("Merged", { exact: true }),
+  ).toBeVisible();
   stream!.close({ code: 1012, reason: "Service restart" });
   await expect.poll(() => connections).toBe(2);
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
