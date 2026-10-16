@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-const goalId = "00000000-0000-4000-8000-000000000001";
+const projectId = "00000000-0000-4000-8000-000000000001";
 const first = "00000000-0000-4000-8000-000000000002";
 const second = "00000000-0000-4000-8000-000000000003";
 
@@ -28,8 +28,8 @@ for (const [draft, checksPassed, label] of [
       url: `https://demo.invalid/pr/${number}`,
       state: number === 1 ? "merged" : "open",
     });
-    const goal = {
-      id: goalId,
+    const project = {
+      id: projectId,
       ownerId: "fixture",
       name: "Attempt history",
       repository: "demo/example",
@@ -59,7 +59,7 @@ for (const [draft, checksPassed, label] of [
       { id: 2, attemptId: second, type: "attempt_started", message: "Run #2 started" },
       { id: 3, attemptId: first, type: "pull_request_merged", message: "Pull request merged" },
       { id: 4, attemptId: null, type: "renamed", message: "Project renamed" },
-    ].map((e) => ({ ...e, goalId, createdAt: "2026-10-15" }));
+    ].map((e) => ({ ...e, projectId, createdAt: "2026-10-15" }));
     const json = (body: unknown) => ({
       contentType: "application/json",
       body: JSON.stringify(body),
@@ -70,14 +70,14 @@ for (const [draft, checksPassed, label] of [
     await page.route("**/api/session", (r) =>
       r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
     );
-    await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
+    await page.route("**/api/projects", (r) => r.fulfill(json([project])));
     await page.route("**/api/repositories", (r) => r.fulfill(json([])));
-    await page.route("**/api/goals/*/events**", (r) => r.fulfill(json(events)));
+    await page.route("**/api/projects/*/events**", (r) => r.fulfill(json(events)));
     await page.setViewportSize({ width: 796, height: 824 });
-    await page.goto(`/#${goalId}`);
+    await page.goto(`/#${projectId}`);
     const one = page.getByRole("link", { name: "Run 1 Merged" });
     const two = page.getByRole("link", { name: `Run 2 ${label}` });
-    await expect(two).toHaveAttribute("href", `#${goalId}/runs/${second}`);
+    await expect(two).toHaveAttribute("href", `#${projectId}/runs/${second}`);
     await expect(page.locator(".run-panel")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "#2 · Improve project details" })).toHaveAttribute(
       "href",
@@ -86,7 +86,7 @@ for (const [draft, checksPassed, label] of [
     await expect(page.locator(".detail-heading .badge")).toHaveText(label);
     await two.click();
     await expect(page).toHaveURL(new RegExp(`/runs/${second}$`));
-    await expect(page.locator(".goal-brief")).toHaveCount(0);
+    await expect(page.locator(".project-brief")).toHaveCount(0);
     await expect(page.getByRole("navigation", { name: "Run history" })).toHaveCount(0);
     await page.reload();
     await expect(page.getByText("Run #2 started", { exact: true })).toBeVisible();
@@ -134,8 +134,8 @@ for (const [draft, checksPassed, label] of [
     await page.setViewportSize({ width: 1440, height: 1100 });
     await two.click();
     await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
-    await expect(page.getByRole("button", { name: "Goal history" })).toHaveCount(0);
-    await expect(page.getByText("Goal renamed", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Project history" })).toHaveCount(0);
+    await expect(page.getByText("Project renamed", { exact: true })).toHaveCount(0);
     await page.goBack();
     await page.getByRole("link", { name: "Project activity", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Project activity" })).toBeVisible();
@@ -147,7 +147,7 @@ for (const [draft, checksPassed, label] of [
       true,
     );
     await page.screenshot({ path: "test-results/attempts-mobile.png", fullPage: true });
-    await page.goto(`/#${goalId}/runs/missing`);
+    await page.goto(`/#${projectId}/runs/missing`);
     await expect(page.getByText("Run not found.", { exact: true })).toBeVisible();
   });
 }

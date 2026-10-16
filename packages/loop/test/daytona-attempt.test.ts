@@ -22,7 +22,7 @@ const request = {
   secrets: { OPENAI_API_KEY: "existing-codex-secret" },
   repoUrl: "https://github.com/example/repo.git",
   commit: "0123456789abcdef",
-  goal: "Fix addition; $(do-not-execute) `nor-this` 'quoted'\nsecond line",
+  project: "Fix addition; $(do-not-execute) `nor-this` 'quoted'\nsecond line",
 };
 const runtimeNames = [
   "codex-initialize",
@@ -151,7 +151,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.ok(uploads.every(([, , timeout]) => timeout === 30));
   const input = uploads.at(-1);
   assert.ok(input);
-  assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, goal: request.goal });
+  assert.deepEqual(JSON.parse(input[0].toString()), { cwd: `${root}/repo`, project: request.project });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
     `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
     root,
@@ -289,7 +289,7 @@ async function localFixture(t: TestContext, edits = "") {
   const bin = join(directory, "bin");
   await mkdir(bin);
   const record = join(directory, "protocol");
-  const protocolFixture = fileURLToPath(new URL("./fixtures/goal-attempt.ts", import.meta.url));
+  const protocolFixture = fileURLToPath(new URL("./fixtures/project-attempt.ts", import.meta.url));
   await writeFile(
     join(bin, "codex"),
     `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-title.txt', ${JSON.stringify(pullRequestTitle)});\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
@@ -618,7 +618,7 @@ for (const point of [
     assert.equal(create.mock.callCount(), 1);
     assert.equal(sandbox.delete.mock.callCount(), point === "creation" ? 0 : 1);
     assert.ok(reports.includes("Attempt stage: " + stage));
-    assert.ok(!reports.some((message) => message.startsWith("Running goal")));
+    assert.ok(!reports.some((message) => message.startsWith("Running project")));
   });
 
 test("stage persistence is awaited before starting runtime preparation", async (t) => {
@@ -682,10 +682,10 @@ test("runner transports nested original failures to the host with sandbox creden
   createArithmeticFixture(cwd);
   const prompt = "private-prompt-fixture-do-not-log";
   const secret = "opaque-openai-fixture-do-not-log";
-  await writeFile(join(directory, "attempt.json"), JSON.stringify({ cwd, goal: prompt }));
+  await writeFile(join(directory, "attempt.json"), JSON.stringify({ cwd, project: prompt }));
   await writeFile(
     join(directory, "codex-process.js"),
-    `export async function runCodexAttempt(_bin,_args,{goal}) { throw new Error('adapter failed '+goal,{cause:Object.assign(new Error('original RPC failure '+process.env.OPENAI_API_KEY),{stderr:'useful runner failure context',signal:'SIGTERM'})}); }`,
+    `export async function runCodexAttempt(_bin,_args,{project}) { throw new Error('adapter failed '+project,{cause:Object.assign(new Error('original RPC failure '+process.env.OPENAI_API_KEY),{stderr:'useful runner failure context',signal:'SIGTERM'})}); }`,
   );
   let output = "";
   try {
@@ -786,7 +786,7 @@ for (const body of [undefined, "", "   ", 123, "x".repeat(60_001)]) {
   });
 }
 
-test("attempts for the same goal retain their own agent-authored titles and descriptions", async (t) => {
+test("attempts for the same project retain their own agent-authored titles and descriptions", async (t) => {
   const { sandbox, run } = await fixture(t);
   for (const body of [
     "Fixed addition so totals are accurate.",

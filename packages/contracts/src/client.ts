@@ -1,11 +1,11 @@
 import { z } from "zod";
 import {
-  goalUpdate,
-  type GoalUpdate,
-  goalPromptEdit,
-  goalRename,
-  goalInput,
-  goalSchema,
+  projectUpdate,
+  type ProjectUpdate,
+  projectPromptEdit,
+  projectRename,
+  projectInput,
+  projectSchema,
   eventSchema,
   sessionSchema,
   repositorySchema,
@@ -14,8 +14,8 @@ import {
   installationStartSchema,
   authPollSchema,
   actionSchema,
-  type GoalInput,
-  type GoalAction,
+  type ProjectInput,
+  type ProjectAction,
 } from "./index.js";
 
 export class ApiError extends Error {
@@ -40,7 +40,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
   ): Promise<T> {
     const headers = new Headers({
       accept: "application/json",
-      "x-herbie-goal-version": "2",
+      "x-herbie-project-version": "2",
       "x-herbie-repository-version": "2",
     });
     if (body !== undefined) headers.set("content-type", "application/json");
@@ -83,7 +83,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
           .transform((repositories) => ({ repositories, permissionsRequired: false })),
       ]),
     );
-  const goalPath = (id: string) => `/api/goals/${z.uuid().parse(id)}`;
+  const projectPath = (id: string) => `/api/projects/${z.uuid().parse(id)}`;
   return {
     health: () =>
       request(
@@ -97,35 +97,35 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     session: () => request("/api/session", sessionSchema),
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
-    goals: () => request("/api/goals", z.array(goalSchema)),
-    goal: (id: string) => request(goalPath(id), goalSchema),
-    start: (input: GoalInput, requestId: string) => {
-      const { maxWip, ...goal } = goalInput.parse(input);
+    projects: () => request("/api/projects", z.array(projectSchema)),
+    project: (id: string) => request(projectPath(id), projectSchema),
+    start: (input: ProjectInput, requestId: string) => {
+      const { maxWip, ...project } = projectInput.parse(input);
       // The default must remain acceptable to older strict APIs during rolling upgrades.
       return request(
-        "/api/goals",
-        goalSchema,
-        maxWip === 1 ? goal : { ...goal, maxWip },
+        "/api/projects",
+        projectSchema,
+        maxWip === 1 ? project : { ...project, maxWip },
         requestId,
       );
     },
     rename: (id: string, name: string) =>
-      request(`${goalPath(id)}/name`, goalSchema, goalRename.parse({ name })),
-    update: (id: string, input: GoalUpdate) =>
-      request(goalPath(id), goalSchema, goalUpdate.parse(input)),
+      request(`${projectPath(id)}/name`, projectSchema, projectRename.parse({ name })),
+    update: (id: string, input: ProjectUpdate) =>
+      request(projectPath(id), projectSchema, projectUpdate.parse(input)),
     editPrompt: (id: string, prompt: string) =>
-      request(`${goalPath(id)}/prompt`, goalSchema, goalPromptEdit.parse({ prompt })),
+      request(`${projectPath(id)}/prompt`, projectSchema, projectPromptEdit.parse({ prompt })),
     events: (id: string, after = 0) =>
       request(
-        `${goalPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`,
+        `${projectPath(id)}/events?after=${z.number().int().nonnegative().parse(after)}`,
         z.array(eventSchema),
       ),
-    action: (id: string, action: GoalAction) =>
-      request(`${goalPath(id)}/${actionSchema.parse(action)}`, goalSchema, {}),
+    action: (id: string, action: ProjectAction) =>
+      request(`${projectPath(id)}/${actionSchema.parse(action)}`, projectSchema, {}),
     retryRepair: (id: string, repairId: string) =>
-      request(`${goalPath(id)}/retry-repair`, goalSchema, { repairId }),
-    retryPublication: (id: string) => request(`${goalPath(id)}/retry-publication`, goalSchema, {}),
-    retry: (id: string) => request(`${goalPath(id)}/retry`, goalSchema, {}),
+      request(`${projectPath(id)}/retry-repair`, projectSchema, { repairId }),
+    retryPublication: (id: string) => request(`${projectPath(id)}/retry-publication`, projectSchema, {}),
+    retry: (id: string) => request(`${projectPath(id)}/retry`, projectSchema, {}),
     authStart: (client: "cli" | "web") => request("/api/auth/start", authStartSchema, { client }),
     installationStart: () => request("/api/auth/install/start", installationStartSchema, {}),
     authPoll: (token: string) =>

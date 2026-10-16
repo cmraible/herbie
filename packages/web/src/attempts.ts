@@ -1,4 +1,4 @@
-import type { Attempt, Goal, GoalEvent } from "@herbie/contracts";
+import type { Attempt, Project, ProjectEvent } from "@herbie/contracts";
 
 export const attemptLabels: Record<Attempt["state"], string> = {
   queued: "Queued",
@@ -12,12 +12,12 @@ export const attemptLabels: Record<Attempt["state"], string> = {
   needs_attention: "Needs attention",
 };
 
-export function groupAttempts(goal: Goal, events: GoalEvent[]) {
-  const attempts = (goal.attempts ?? []).map((attempt) => ({
+export function groupAttempts(project: Project, events: ProjectEvent[]) {
+  const attempts = (project.attempts ?? []).map((attempt) => ({
     ...attempt,
-    events: [] as GoalEvent[],
+    events: [] as ProjectEvent[],
   }));
-  const history: GoalEvent[] = [];
+  const history: ProjectEvent[] = [];
   let legacyAttempt: (typeof attempts)[number] | undefined;
   for (const event of events) {
     let attempt = attempts.find((item) => item.id === event.attemptId);
@@ -47,16 +47,16 @@ export function groupAttempts(goal: Goal, events: GoalEvent[]) {
   return { attempts: attempts.reverse(), history };
 }
 
-export function reviewLabel(pr: Goal["pullRequest"]): string {
+export function reviewLabel(pr: Project["pullRequest"]): string {
   return pr?.state === "open" && pr.draft === false && pr.checksPassed === true
     ? "Ready for review"
     : "Waiting for checks";
 }
 
-export function goalReadyForReview(goal: Goal): boolean {
+export function projectReadyForReview(project: Project): boolean {
   return (
-    goal.state === "awaiting_review" &&
-    (goal.pullRequests.length ? goal.pullRequests : [goal.pullRequest]).some(
+    project.state === "awaiting_review" &&
+    (project.pullRequests.length ? project.pullRequests : [project.pullRequest]).some(
       (pr) => reviewLabel(pr) === "Ready for review",
     )
   );

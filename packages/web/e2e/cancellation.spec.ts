@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 for (const state of ["queued", "running", "paused", "awaiting_review", "needs_attention"])
   test(`Cancel is available for ${state} with unresolved cleanup`, async ({ page }) => {
-    let goal = {
+    let project = {
       id: randomUUID(),
       ownerId: "fixture",
       repository: "fixture/project",
@@ -29,12 +29,12 @@ for (const state of ["queued", "running", "paused", "awaiting_review", "needs_at
     await page.route("**/api/session", (r) =>
       r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
     );
-    await page.route("**/api/goals", (r) => r.fulfill(json([goal])));
-    await page.route("**/api/goals/*/events**", (r) => r.fulfill(json([])));
-    await page.route("**/api/goals/*/cancel", (r) => {
+    await page.route("**/api/projects", (r) => r.fulfill(json([project])));
+    await page.route("**/api/projects/*/events**", (r) => r.fulfill(json([])));
+    await page.route("**/api/projects/*/cancel", (r) => {
       cancels++;
-      goal = { ...goal, state: "cancelled", cleanupStatus: "needs_attention" };
-      return r.fulfill(json(goal));
+      project = { ...project, state: "cancelled", cleanupStatus: "needs_attention" };
+      return r.fulfill(json(project));
     });
     await page.goto("/");
     await page.getByRole("button", { name: /Synthetic cancellation fixture/ }).click();
@@ -47,8 +47,8 @@ for (const state of ["queued", "running", "paused", "awaiting_review", "needs_at
     await expect(details.getByRole("button", { name: "Cancel" })).toHaveCount(0);
     await page.reload();
     await expect(details.getByText("Cancelled", { exact: true })).toBeVisible();
-    await page.goto(`/#${goal.id}/edit`);
-    await expect(page).toHaveURL(new RegExp(`#${goal.id}$`));
+    await page.goto(`/#${project.id}/edit`);
+    await expect(page).toHaveURL(new RegExp(`#${project.id}$`));
     await expect(page.getByRole("region", { name: "Edit project" })).toHaveCount(0);
     expect(cancels).toBe(1);
   });

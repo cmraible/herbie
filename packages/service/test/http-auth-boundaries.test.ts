@@ -118,29 +118,29 @@ async function fixture(t: TestContext) {
   return { store, session, base: `http://127.0.0.1:${address.port}` };
 }
 
-test("HTTP rejects expired and wrong-mode sessions and hides another owner’s goals and events", async (t) => {
+test("HTTP rejects expired and wrong-mode sessions and hides another owner’s projects and events", async (t) => {
   const setup = await fixture(t);
   if (!setup) return;
   const { store, session, base } = setup;
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "owner",
-    { repository: "demo/example", name: "Private goal text", prompt: "Private goal text" },
+    { repository: "demo/example", name: "Private project text", prompt: "Private project text" },
     "live",
     randomUUID(),
   );
   const other = await session("7");
-  for (const path of [`/api/goals/${goal.id}`, `/api/goals/${goal.id}/events`]) {
+  for (const path of [`/api/projects/${project.id}`, `/api/projects/${project.id}/events`]) {
     const response = await fetch(`${base}${path}`, { headers: other });
     assert.equal(response.status, 404);
-    assert.deepEqual(await response.json(), { error: "Goal not found" });
+    assert.deepEqual(await response.json(), { error: "Project not found" });
   }
-  const deniedControl = await fetch(`${base}/api/goals/${goal.id}/cancel`, {
+  const deniedControl = await fetch(`${base}/api/projects/${project.id}/cancel`, {
     method: "POST",
     headers: other,
   });
   assert.equal(deniedControl.status, 404);
-  assert.equal((await store.getGoal(goal.id))?.state, "queued");
-  assert.deepEqual(await (await fetch(`${base}/api/goals`, { headers: other })).json(), []);
+  assert.equal((await store.getProject(project.id))?.state, "queued");
+  assert.deepEqual(await (await fetch(`${base}/api/projects`, { headers: other })).json(), []);
   for (const headers of [
     await session("7", { expired: true }),
     await session("7", { mode: "demo" }),
@@ -161,7 +161,7 @@ test("HTTP reports expired GitHub login, denied repository permission, and inval
   assert.deepEqual(await repositories.json(), {
     error: "GitHub login expired; log in again before continuing",
   });
-  const denied = await fetch(`${base}/api/goals`, {
+  const denied = await fetch(`${base}/api/projects`, {
     method: "POST",
     headers: {
       ...(await session("7")),
@@ -193,12 +193,12 @@ test("existing nonowner bearer and cookie sessions cannot access authenticated A
   const bearer = await session("8");
   const cookie = { cookie: `herbie_session=${bearer.authorization.slice("Bearer ".length)}` };
   for (const headers of [bearer, cookie])
-    for (const path of ["/api/session", "/api/repositories", "/api/goals"]) {
+    for (const path of ["/api/session", "/api/repositories", "/api/projects"]) {
       const response = await fetch(`${base}${path}`, { headers });
       assert.equal(response.status, 401);
       assert.deepEqual(await response.json(), { error: "Login required" });
     }
-  const response = await fetch(`${base}/api/goals`, {
+  const response = await fetch(`${base}/api/projects`, {
     method: "POST",
     headers: { ...bearer, "content-type": "application/json", "idempotency-key": randomUUID() },
     body: JSON.stringify({ repository: "demo/example", prompt: "Denied" }),

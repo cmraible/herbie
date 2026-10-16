@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { GoalEvent } from "@herbie/contracts";
+import type { ProjectEvent } from "@herbie/contracts";
 import { agentActivity, activityText } from "../src/agent-activity.js";
 
-function event(method: string, params: Record<string, unknown>): GoalEvent {
+function event(method: string, params: Record<string, unknown>): ProjectEvent {
   return {
     id: 1,
-    goalId: "goal",
+    projectId: "project",
     type: "agent",
     createdAt: "now",
     message: JSON.stringify({ method, params: { threadId: "thread", turnId: "turn", ...params } }),

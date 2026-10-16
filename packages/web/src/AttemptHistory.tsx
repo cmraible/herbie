@@ -2,7 +2,7 @@ import { type ComponentProps } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentTranscript } from "./AgentTranscript.js";
-import type { Goal, GoalEvent } from "@herbie/contracts";
+import type { Project, ProjectEvent } from "@herbie/contracts";
 import { attemptLabels, groupAttempts, reviewLabel } from "./attempts.js";
 import { activityMessage, errorReference } from "./activity-message.js";
 
@@ -33,7 +33,7 @@ function MarkdownCode({ className, children }: ComponentProps<"code">) {
 }
 
 export function AttemptHistory({
-  goal,
+  project,
   events,
   eventsState,
   eventsError,
@@ -41,13 +41,13 @@ export function AttemptHistory({
   selected = null,
 }: {
   selected?: string | null;
-  goal: Goal;
-  events: GoalEvent[];
+  project: Project;
+  events: ProjectEvent[];
   eventsState: string;
   eventsError: string | null;
   time: (value: string) => string;
 }) {
-  const { attempts, history } = groupAttempts(goal, events);
+  const { attempts, history } = groupAttempts(project, events);
   const groups = [
     ...attempts.map((attempt) => ({
       id: attempt.id,
@@ -105,12 +105,12 @@ export function AttemptHistory({
         <nav className="run-list" aria-label="Run history">
           {groups.map((item) => (
             <div className="run-row" key={item.id}>
-              <a className="run-select" href={`#${goal.id}/runs/${item.id}`}>
+              <a className="run-select" href={`#${project.id}/runs/${item.id}`}>
                 <span>{item.title}</span>
                 {item.status && <span className={`badge status-${item.color}`}>{item.status}</span>}
               </a>
               {item.createdAt && (
-                <time className="goal-meta" dateTime={item.createdAt}>
+                <time className="project-meta" dateTime={item.createdAt}>
                   Created {time(item.createdAt)}
                 </time>
               )}
@@ -212,14 +212,14 @@ export function AttemptHistory({
           <AgentTranscript events={group.events} />
           <section className="activity">
             <h3>Activity</h3>
-            {group.events.every((event) => activityMessage(goal, event) === null) ? (
+            {group.events.every((event) => activityMessage(project, event) === null) ? (
               <p className="subtle-note">
                 {eventsState === "loading" ? "Loading activity…" : "No activity yet."}
               </p>
             ) : (
               <ol>
                 {group.events.map((event) => {
-                  const text = activityMessage(goal, event);
+                  const text = activityMessage(project, event);
                   if (!text) return null;
                   const number = /Pull request #(\d+)/.exec(text)?.[1];
                   const pullRequest = group.pullRequests.find((pr) => pr.number === Number(number));

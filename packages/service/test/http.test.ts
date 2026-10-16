@@ -5,14 +5,14 @@ import pg from "pg";
 import { Store } from "../src/store.js";
 import { createDemoAdapters } from "../src/demo.js";
 import { createApiServer } from "../src/http.js";
-import { goalSchema } from "@herbie/contracts";
+import { projectSchema } from "@herbie/contracts";
 import { testAuth, testSessionToken } from "./test-auth.js";
 
 for (const version of [undefined, "2"])
-  test(`HTTP goal contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
+  test(`HTTP project contracts, sessions, idempotency and origin checks (version: ${version ?? "legacy"})`, async (t) => {
     const responseSchema = version
-      ? goalSchema
-      : goalSchema.omit({ maxWip: true, pullRequests: true }).strict();
+      ? projectSchema
+      : projectSchema.omit({ maxWip: true, pullRequests: true }).strict();
     const database = process.env.HERBIE_TEST_DATABASE_URL;
     if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL for real PostgreSQL integration");
     const schema = `http_${randomUUID().replaceAll("-", "")}`;
@@ -40,7 +40,7 @@ for (const version of [undefined, "2"])
     const address = server.address();
     assert.ok(address && typeof address === "object");
     const base = `http://127.0.0.1:${address.port}`;
-    assert.equal((await fetch(`${base}/api/goals`)).status, 401);
+    assert.equal((await fetch(`${base}/api/projects`)).status, 401);
     const cookie = `herbie_session=${testSessionToken}`;
     const input = {
       repository: "demo/example",
@@ -50,7 +50,7 @@ for (const version of [undefined, "2"])
     };
     const key = randomUUID();
     const versionHeaders: Record<string, string> = version
-      ? { "x-herbie-goal-version": version }
+      ? { "x-herbie-project-version": version }
       : {};
     const headers = {
       "content-type": "application/json",
@@ -59,37 +59,37 @@ for (const version of [undefined, "2"])
       ...versionHeaders,
     };
     assert.equal(
-      (await fetch(`${base}/api/goals`, { method: "POST", headers, body: JSON.stringify(input) }))
+      (await fetch(`${base}/api/projects`, { method: "POST", headers, body: JSON.stringify(input) }))
         .status,
       403,
     );
     const request = () =>
-      fetch(`${base}/api/goals`, {
+      fetch(`${base}/api/projects`, {
         method: "POST",
         headers: { ...headers, origin: "http://localhost:8787" },
         body: JSON.stringify(input),
       });
     const first = await request();
     assert.equal(first.status, 201);
-    const goal = responseSchema.parse(await first.json());
+    const project = responseSchema.parse(await first.json());
     const replay = await request();
     assert.equal(replay.status, 200);
-    assert.equal(responseSchema.parse(await replay.json()).id, goal.id);
-    assert.equal(goal.name, "Addition fix");
+    assert.equal(responseSchema.parse(await replay.json()).id, project.id);
+    assert.equal(project.name, "Addition fix");
     const status = responseSchema.parse(
-      await (await fetch(`${base}/api/goals/${goal.id}`, { headers })).json(),
+      await (await fetch(`${base}/api/projects/${project.id}`, { headers })).json(),
     );
-    assert.deepEqual(status, goal);
-    const goals = responseSchema
+    assert.deepEqual(status, project);
+    const projects = responseSchema
       .array()
-      .parse(await (await fetch(`${base}/api/goals`, { headers })).json());
-    assert.deepEqual(goals, [goal]);
+      .parse(await (await fetch(`${base}/api/projects`, { headers })).json());
+    assert.deepEqual(projects, [project]);
     if (version) {
-      assert.equal(goalSchema.parse(goal).maxWip, 2);
-      assert.deepEqual(goalSchema.parse(goal).pullRequests, []);
+      assert.equal(projectSchema.parse(project).maxWip, 2);
+      assert.deepEqual(projectSchema.parse(project).pullRequests, []);
     }
     const rename = (name: string, extraHeaders = {}) =>
-      fetch(`${base}/api/goals/${goal.id}/name`, {
+      fetch(`${base}/api/projects/${project.id}/name`, {
         method: "POST",
         headers: { ...headers, origin: "http://localhost:8787", ...extraHeaders },
         body: JSON.stringify({ name }),
@@ -101,7 +101,7 @@ for (const version of [undefined, "2"])
     assert.equal(renamed.prompt, input.prompt);
     assert.equal(responseSchema.parse(await (await request()).json()).name, "Better addition");
     const editPrompt = (prompt: string, extraHeaders = {}) =>
-      fetch(`${base}/api/goals/${goal.id}/prompt`, {
+      fetch(`${base}/api/projects/${project.id}/prompt`, {
         method: "POST",
         headers: { ...headers, origin: "http://localhost:8787", ...extraHeaders },
         body: JSON.stringify({ prompt }),
@@ -116,7 +116,7 @@ for (const version of [undefined, "2"])
     assert.equal(edited.name, "Better addition");
     assert.equal(responseSchema.parse(await (await request()).json()).prompt, edited.prompt);
     const update = (input: unknown) =>
-      fetch(`${base}/api/goals/${goal.id}`, {
+      fetch(`${base}/api/projects/${project.id}`, {
         method: "POST",
         headers: { ...headers, origin: "http://localhost:8787" },
         body: JSON.stringify(input),
@@ -124,26 +124,26 @@ for (const version of [undefined, "2"])
     assert.equal((await update({ name: "Changed", prompt: "New", maxWip: 0 })).status, 400);
     assert.equal((await update({ repository: "other/repo" })).status, 400);
     const updated = responseSchema.parse(
-      await (await update({ name: "Updated goal", prompt: "Updated prompt", maxWip: 3 })).json(),
+      await (await update({ name: "Updated project", prompt: "Updated prompt", maxWip: 3 })).json(),
     );
-    assert.equal(updated.name, "Updated goal");
+    assert.equal(updated.name, "Updated project");
     assert.equal(updated.prompt, "Updated prompt");
-    if (version) assert.equal(goalSchema.parse(updated).maxWip, 3);
+    if (version) assert.equal(projectSchema.parse(updated).maxWip, 3);
     assert.equal(responseSchema.parse(await (await request()).json()).prompt, "Updated prompt");
-    const paused = await fetch(`${base}/api/goals/${goal.id}/pause`, {
+    const paused = await fetch(`${base}/api/projects/${project.id}/pause`, {
       method: "POST",
       headers: { cookie, origin: "http://localhost:8787", ...versionHeaders },
     });
     assert.equal(responseSchema.parse(await paused.json()).state, "paused");
     const cancel = () =>
-      fetch(`${base}/api/goals/${goal.id}/cancel`, {
+      fetch(`${base}/api/projects/${project.id}/cancel`, {
         method: "POST",
         headers: { cookie, origin: "http://localhost:8787", ...versionHeaders },
       });
     assert.equal(responseSchema.parse(await (await cancel()).json()).state, "cancelled");
     assert.equal(responseSchema.parse(await (await cancel()).json()).state, "cancelled");
     assert.equal(
-      (await fetch(`${base}/api/goals/${randomUUID()}`, { headers: { cookie } })).status,
+      (await fetch(`${base}/api/projects/${randomUUID()}`, { headers: { cookie } })).status,
       404,
     );
   });

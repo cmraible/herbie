@@ -20,7 +20,7 @@ Each Node runtime uses at most five database connections, with a 10-second conne
 
 ## Private schema and migrations
 
-Live runtime connections select only the `herbie` schema. `prepareDatabase` checks that search path, creates the schema if needed, and protects it before and after the existing goal and authentication migrations. The connecting database role must own the schema and tables and have permission to create them. A normal owner without superuser privileges works.
+Live runtime connections select only the `herbie` schema. `prepareDatabase` checks that search path, creates the schema if needed, and protects it before and after the existing project and authentication migrations. The connecting database role must own the schema and tables and have permission to create them. A normal owner without superuser privileges works.
 
 Preparation revokes schema, table, sequence, and function access from `PUBLIC` and any existing `anon`, `authenticated`, and `service_role` roles. It also removes per-schema default grants for objects created by the migration role. Every existing table receives RLS and a restrictive deny policy for non-owners. The trusted schema owner retains access through PostgreSQL's owner exemption; Herbie's HTTP API enforces user ownership. No `auth.uid()` policies or browser-facing database grants are created.
 

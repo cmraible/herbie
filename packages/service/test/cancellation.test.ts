@@ -23,46 +23,46 @@ async function fixture(t: TestContext) {
     await admin.query("DROP SCHEMA " + schema + " CASCADE");
     await admin.end();
   });
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "owner",
     { repository: "demo/example", prompt: "Synthetic fixture" },
     "demo",
     randomUUID(),
   );
-  return { store, goal };
+  return { store, project };
 }
 const changes = { baseCommit: "a".repeat(40), patch: Buffer.from("retained fixture") };
 
-test("cancelled goals reject edits without changing their saved definition", async (t) => {
+test("cancelled projects reject edits without changing their saved definition", async (t) => {
   const f = await fixture(t);
   if (!f) return;
-  const { store, goal } = f;
-  const cancelled = await store.control(goal.id, "owner", "cancel");
-  const events = await store.events(goal.id);
+  const { store, project } = f;
+  const cancelled = await store.control(project.id, "owner", "cancel");
+  const events = await store.events(project.id);
   for (const edit of [
-    () => store.renameGoal(goal.id, "owner", "Changed name"),
-    () => store.editGoalPrompt(goal.id, "owner", "Changed prompt"),
-    () => store.updateGoal(goal.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
+    () => store.renameProject(project.id, "owner", "Changed name"),
+    () => store.editProjectPrompt(project.id, "owner", "Changed prompt"),
+    () => store.updateProject(project.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
   ]) {
-    await assert.rejects(edit(), /Cancelled goals cannot be edited/);
+    await assert.rejects(edit(), /Cancelled projects cannot be edited/);
   }
-  assert.deepEqual(await store.getGoal(goal.id, "owner"), cancelled);
-  assert.deepEqual(await store.events(goal.id), events);
+  assert.deepEqual(await store.getProject(project.id, "owner"), cancelled);
+  assert.deepEqual(await store.events(project.id), events);
 });
 
 test("stuck publication with undecodable App key cancels without invoking reconciliation and stays fenced", async (t) => {
   const f = await fixture(t);
   if (!f) return;
-  const { store, goal } = f;
+  const { store, project } = f;
   const job = await store.claim("publisher");
   assert.ok(job);
   await store.saveArtifact(job.id, "publisher", changes);
   await store.beginPublication(job.id, "publisher");
   await store.publicationUncertain(job.id, "publisher", "ERR_OSSL_UNSUPPORTED");
-  const result = await store.control(goal.id, "owner", "cancel");
+  const result = await store.control(project.id, "owner", "cancel");
   assert.equal(result.state, "cancelled");
   assert.equal(result.cleanupStatus, "needs_attention");
-  assert.deepEqual(await store.control(goal.id, "owner", "cancel"), result);
+  assert.deepEqual(await store.control(project.id, "owner", "cancel"), result);
   const adapters = {
     ...createDemoAdapters(),
     async reconciliationRepository() {
@@ -77,7 +77,7 @@ test("stuck publication with undecodable App key cancels without invoking reconc
     store.queueSavedPublication(job.id, "owner", job.branch, changes.baseCommit),
     /no longer eligible/,
   );
-  assert.equal((await store.events(goal.id)).filter((e) => e.type === "cancel").length, 1);
+  assert.equal((await store.events(project.id)).filter((e) => e.type === "cancel").length, 1);
   assert.ok(
     (await store.pool.query("SELECT artifact FROM jobs WHERE id=$1", [job.id])).rows[0].artifact,
   );
@@ -89,7 +89,7 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
     async (t) => {
       const f = await fixture(t);
       if (!f) return;
-      const { store, goal } = f;
+      const { store, project } = f;
       const entered = Promise.withResolvers<void>();
       let stopped = false,
         publishes = 0;
@@ -114,16 +114,16 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
       };
       const work = runWorkerOnce(store, adapters, "active", { leaseMs: 1000, heartbeatMs: 10 });
       await entered.promise;
-      assert.equal((await store.control(goal.id, "owner", "cancel")).cleanupStatus, "pending");
+      assert.equal((await store.control(project.id, "owner", "cancel")).cleanupStatus, "pending");
       await work;
       assert.equal(stopped, true);
       assert.equal(publishes, 0);
-      const saved = await store.getGoal(goal.id);
+      const saved = await store.getProject(project.id);
       assert.equal(saved?.state, "cancelled");
       assert.equal(saved.cleanupStatus, cleanup === "confirmed" ? "complete" : "needs_attention");
       assert.equal(await runWorkerOnce(store, adapters, "next"), false);
       assert.ok(
-        (await store.pool.query("SELECT artifact FROM jobs WHERE goal_id=$1", [goal.id])).rows[0]
+        (await store.pool.query("SELECT artifact FROM jobs WHERE project_id=$1", [project.id])).rows[0]
           .artifact,
       );
     },
@@ -132,7 +132,7 @@ for (const cleanup of ["confirmed", "unconfirmed"] as const)
 test("cancel fences a publisher already in flight and preserves its eventual PR as unresolved cleanup", async (t) => {
   const f = await fixture(t);
   if (!f) return;
-  const { store, goal } = f;
+  const { store, project } = f;
   const entered = Promise.withResolvers<void>(),
     release = Promise.withResolvers<void>();
   let fence: (() => Promise<void>) | undefined;
@@ -155,23 +155,23 @@ test("cancel fences a publisher already in flight and preserves its eventual PR 
   };
   const work = runWorkerOnce(store, adapters, "publisher");
   await entered.promise;
-  await store.control(goal.id, "owner", "cancel");
+  await store.control(project.id, "owner", "cancel");
   await assert.rejects(fence!(), /lease/);
   release.resolve();
   await work;
-  const saved = await store.getGoal(goal.id);
+  const saved = await store.getProject(project.id);
   assert.equal(saved?.state, "cancelled");
   assert.equal(saved.cleanupStatus, "needs_attention");
   assert.equal(saved.pullRequest?.number, 1);
   assert.equal(await store.claim("next"), null);
   assert.equal((await store.reviewJobs()).length, 1);
-  const job = (await store.pool.query("SELECT id FROM jobs WHERE goal_id=$1", [goal.id])).rows[0];
+  const job = (await store.pool.query("SELECT id FROM jobs WHERE project_id=$1", [project.id])).rows[0];
   await store.reconcile(job.id, "merged");
-  assert.equal((await store.getGoal(goal.id))?.state, "cancelled");
-  assert.equal((await store.getGoal(goal.id))?.pullRequest?.state, "merged");
+  assert.equal((await store.getProject(project.id))?.state, "cancelled");
+  assert.equal((await store.getProject(project.id))?.pullRequest?.state, "merged");
   assert.deepEqual(await store.reviewJobs(), []);
   assert.equal(
-    (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE goal_id=$1", [goal.id])).rows[0]
+    (await store.pool.query("SELECT count(*)::int n FROM jobs WHERE project_id=$1", [project.id])).rows[0]
       .n,
     1,
   );
@@ -180,10 +180,10 @@ test("cancel fences a publisher already in flight and preserves its eventual PR 
 test("late worker writes cannot overwrite cancellation and abandoned cleanup becomes visible", async (t) => {
   const f = await fixture(t);
   if (!f) return;
-  const { store, goal } = f;
+  const { store, project } = f;
   const job = await store.claim("lost");
   assert.ok(job);
-  await store.control(goal.id, "owner", "cancel");
+  await store.control(project.id, "owner", "cancel");
   assert.equal(await store.heartbeat(job.id, "lost"), false);
   await assert.rejects(store.saveArtifact(job.id, "lost", changes), /lease/);
   await assert.rejects(store.fail(job.id, "lost", "failure"), /lease/);
@@ -193,7 +193,7 @@ test("late worker writes cannot overwrite cancellation and abandoned cleanup bec
     [job.id],
   );
   await store.recoverExpired();
-  assert.equal((await store.getGoal(goal.id))?.cleanupStatus, "needs_attention");
+  assert.equal((await store.getProject(project.id))?.cleanupStatus, "needs_attention");
   assert.equal(await store.finishCancelled(job.id, "unrelated", "complete"), false);
-  assert.equal((await store.getGoal(goal.id))?.state, "cancelled");
+  assert.equal((await store.getProject(project.id))?.state, "cancelled");
 });

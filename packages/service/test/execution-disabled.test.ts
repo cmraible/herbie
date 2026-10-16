@@ -19,7 +19,7 @@ test("live adapters without approved execution configuration cannot start an att
     },
   });
   const execution: Execution = {
-    goal: {
+    project: {
       id: "id",
       ownerId: "user",
       repository: "demo/example",

@@ -10,7 +10,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     state: "open",
     url: "https://github.com/owner/repo/pull/42",
   };
-  const goal = {
+  const project = {
     id,
     ownerId: "fixture",
     repository: "owner/repo",
@@ -37,15 +37,15 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   };
   const event = {
     id: 1,
-    goalId: id,
+    projectId: id,
     attemptId: id,
     type: "attempt",
     message: "Attempt stage: model_execution",
-    createdAt: goal.createdAt,
+    createdAt: project.createdAt,
   };
   const events = [event];
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
-  let goalReads = 0;
+  let projectReads = 0;
   let eventReads = 0;
   await page.route("**/api/health", (route) => route.fulfill(json({ mode: "live" })));
   await page.route("**/api/session", (route) =>
@@ -54,11 +54,11 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   await page.route("**/api/repositories", (route) =>
     route.fulfill(json({ repositories: [], permissionsRequired: false })),
   );
-  await page.route("**/api/goals", (route) => {
-    goalReads++;
-    return route.fulfill(json([goal]));
+  await page.route("**/api/projects", (route) => {
+    projectReads++;
+    return route.fulfill(json([project]));
   });
-  await page.route("**/api/goals/*/events**", (route) => {
+  await page.route("**/api/projects/*/events**", (route) => {
     eventReads++;
     return route.fulfill(json([]));
   });
@@ -67,8 +67,8 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   await page.routeWebSocket("**/api/stream**", (socket) => {
     stream = socket;
     connections++;
-    socket.send(JSON.stringify({ type: "goals", goals: [goal] }));
-    socket.send(JSON.stringify({ type: "events", goalId: id, events }));
+    socket.send(JSON.stringify({ type: "projects", projects: [project] }));
+    socket.send(JSON.stringify({ type: "events", projectId: id, events }));
   });
   await page.goto(`/#${id}`);
   await expect(page.getByRole("heading", { name: "Live project" })).toBeVisible();
@@ -101,7 +101,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
       delta: "Implemented <script>alert(1)</script> safely",
     }),
   );
-  stream!.send(JSON.stringify({ type: "events", goalId: id, events }));
+  stream!.send(JSON.stringify({ type: "events", projectId: id, events }));
   await expect(page.getByText("Checking the implementation", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Implemented <script>alert(1)</script> safely", { exact: true }),
@@ -121,10 +121,10 @@ test("pushes PR and run updates without polling and reconnects without duplicate
       .split("\n")
       .map((line) => JSON.parse(line)),
   ).toHaveLength(4);
-  goal.name = "Merged project";
+  project.name = "Merged project";
   pr.state = "merged";
-  goal.attempts[0]!.state = "completed";
-  stream!.send(JSON.stringify({ type: "goals", goals: [goal] }));
+  project.attempts[0]!.state = "completed";
+  stream!.send(JSON.stringify({ type: "projects", projects: [project] }));
   await expect(page.getByRole("link", { name: "Merged project" })).toBeVisible();
   await expect(
     page.locator(".run-panel-heading").getByText("Merged", { exact: true }),
@@ -138,7 +138,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   ).toHaveCount(1);
   // Exceed both former polling intervals.
   await page.waitForTimeout(2500);
-  expect(goalReads).toBe(1);
+  expect(projectReads).toBe(1);
   expect(eventReads).toBe(1);
   await page.route("**/api/session", (route) =>
     route.fulfill({ status: 401, ...json({ error: "Login required" }) }),

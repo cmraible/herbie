@@ -95,7 +95,7 @@ export async function publishPatch(
   const remoteUrl = `https://github.com/${repository}.git`;
   const { baseCommit } = changes;
   if (!hasValidPublicationEvidence(repository, changes)) {
-    throw new Error("Matching successful goal and cleanup evidence is required for this patch");
+    throw new Error("Matching successful project and cleanup evidence is required for this patch");
   }
   if (
     request.updatePullRequest &&

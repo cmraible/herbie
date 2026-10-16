@@ -19,7 +19,7 @@ test("attempts retain their PRs and event attribution when an older PR merges", 
     await admin.query("DROP SCHEMA " + schema + " CASCADE");
     await admin.end();
   });
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "owner",
     { repository: "demo/example", prompt: "Two attempts", maxWip: 2 },
     "demo",
@@ -28,7 +28,7 @@ test("attempts retain their PRs and event attribution when an older PR merges", 
   const adapters = createDemoAdapters();
   await runWorkerOnce(store, adapters, "worker");
   await runWorkerOnce(store, adapters, "worker");
-  const attempts = (await store.getGoal(goal.id))!.attempts!;
+  const attempts = (await store.getProject(project.id))!.attempts!;
   assert.equal(attempts.length, 2);
   assert.deepEqual(
     attempts.map((a) => a.number),
@@ -36,10 +36,10 @@ test("attempts retain their PRs and event attribution when an older PR merges", 
   );
   assert.ok(attempts.every((a) => a.state === "awaiting_review" && a.pullRequest));
   await store.reconcile(attempts[0]!.id, "merged");
-  const updated = (await store.getGoal(goal.id))!.attempts!;
+  const updated = (await store.getProject(project.id))!.attempts!;
   assert.equal(updated[0]!.pullRequest!.state, "merged");
   assert.equal(updated[1]!.pullRequest!.state, "open");
-  const events = await store.events(goal.id);
+  const events = await store.events(project.id);
   assert.equal(events.find((e) => e.type === "pull_request_merged")!.attemptId, attempts[0]!.id);
   for (const attempt of attempts) {
     const own = events.filter((e) => e.attemptId === attempt.id);

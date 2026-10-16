@@ -119,13 +119,13 @@ test("private schema denies Data API roles, repairs old grants, and remains usab
   );
   await prepareDatabase(pool, "live");
   await prepareDatabase(pool, "live");
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "owner",
-    { repository: "example/private", name: "Sensitive goal", prompt: "Sensitive goal" },
+    { repository: "example/private", name: "Sensitive project", prompt: "Sensitive project" },
     "live",
     randomUUID(),
   );
-  assert.equal((await store.getGoal(goal.id, "owner"))?.prompt, "Sensitive goal");
+  assert.equal((await store.getProject(project.id, "owner"))?.prompt, "Sensitive project");
   const auth = new PgAuthStore(pool);
   await auth.putCredential(
     { id: "owner", login: "owner" },
@@ -167,12 +167,12 @@ test("private schema denies Data API roles, repairs old grants, and remains usab
   }
   // RLS still blocks a client after accidental SQL grants and a permissive policy.
   await pool.query(`GRANT USAGE ON SCHEMA herbie TO ${probe}`);
-  await pool.query(`GRANT SELECT ON herbie.goals TO ${probe}`);
-  await pool.query("CREATE POLICY broad_access ON herbie.goals FOR SELECT TO PUBLIC USING (true)");
+  await pool.query(`GRANT SELECT ON herbie.projects TO ${probe}`);
+  await pool.query("CREATE POLICY broad_access ON herbie.projects FOR SELECT TO PUBLIC USING (true)");
   const client = await inspect.connect();
   try {
     await client.query(`SET ROLE ${probe}`);
-    assert.deepEqual((await client.query("SELECT prompt FROM herbie.goals")).rows, []);
+    assert.deepEqual((await client.query("SELECT prompt FROM herbie.projects")).rows, []);
   } finally {
     await client.query("RESET ROLE");
     client.release();
@@ -225,7 +225,7 @@ test("live preparation refuses a public search path while demo keeps its selecte
   database.additionalPools.push(wrong);
   await assert.rejects(prepareDatabase(wrong, "live"), /private herbie schema/);
   assert.equal(
-    (await wrong.query<Record<string, unknown>>("SELECT to_regclass('public.goals') AS name"))
+    (await wrong.query<Record<string, unknown>>("SELECT to_regclass('public.projects') AS name"))
       .rows[0]?.name,
     null,
   );
@@ -238,13 +238,13 @@ test("live preparation refuses a public search path while demo keeps its selecte
   database.additionalPools.push(demoPool);
   await prepareDatabase(demoPool, "demo");
   const store = new Store(demoPool);
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "demo-user",
     { repository: "demo/example", prompt: "Local demo" },
     "demo",
     randomUUID(),
   );
-  assert.equal((await store.getGoal(goal.id))?.prompt, "Local demo");
+  assert.equal((await store.getProject(project.id))?.prompt, "Local demo");
   assert.equal(
     (await demoPool.query<Record<string, unknown>>("SELECT current_schema() AS name")).rows[0]
       ?.name,

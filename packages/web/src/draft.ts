@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { goalInput } from "@herbie/contracts";
+import { projectInput } from "@herbie/contracts";
 // Preserve legacy names so retries keep the original idempotency payload.
 export const draftSchema = z.object({
   repository: z.string(),
@@ -13,7 +13,7 @@ export function newDraft(repository = ""): Draft {
   return { repository, prompt: "", maxWip: "1", requestId: crypto.randomUUID() };
 }
 export function parseDraft(draft: Draft) {
-  const input = goalInput.safeParse({
+  const input = projectInput.safeParse({
     repository: draft.repository,
     ...(draft.name?.trim() ? { name: draft.name } : {}),
     prompt: draft.prompt,

@@ -62,10 +62,10 @@ export function redactDiagnostic(value: string): string {
 }
 const sensitiveKey = /token|secret|password|authorization|cookie|private.?key|api.?key|credential/i;
 const omitKey =
-  /^(env|environment|config|request|headers|command|cmd|changes|artifact|patch|goal|prompt|input)$/i;
+  /^(env|environment|config|request|headers|command|cmd|changes|artifact|patch|project|prompt|input)$/i;
 export interface DiagnosticContext {
   component: string;
-  goalId?: string;
+  projectId?: string;
   jobId?: string;
   stage?: string;
 }

@@ -1,4 +1,4 @@
-import type { GoalEvent } from "@herbie/contracts";
+import type { ProjectEvent } from "@herbie/contracts";
 
 type Item = { id: string; type: string; [key: string]: unknown };
 function object(value: unknown): value is Record<string, unknown> {
@@ -6,7 +6,7 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 // Completed items replace streamed previews; the original records remain in the transcript.
-export function agentActivity(events: GoalEvent[]): Item[] {
+export function agentActivity(events: ProjectEvent[]): Item[] {
   const items = new Map<string, Item>();
   for (const event of events) {
     if (event.type !== "agent") continue;

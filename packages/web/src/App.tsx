@@ -3,9 +3,9 @@ import { createClient, ApiError } from "@herbie/contracts/client";
 import {
   githubPermissionsMessage,
   streamMessageSchema,
-  type Goal,
-  type GoalEvent,
-  type GoalAction,
+  type Project,
+  type ProjectEvent,
+  type ProjectAction,
   type Repository,
   type Session,
 } from "@herbie/contracts";
@@ -13,14 +13,14 @@ import { draftSchema, newDraft, parseDraft, type Draft } from "./draft.js";
 
 import { sortRepositories } from "./repositories.js";
 import { AttemptHistory } from "./AttemptHistory.js";
-import { errorReference, goalErrorMessage, workflowPermissionMessage } from "./activity-message.js";
+import { errorReference, projectErrorMessage, workflowPermissionMessage } from "./activity-message.js";
 import { RepositorySelect } from "./RepositorySelect.js";
-import { goalReadyForReview } from "./attempts.js";
+import { projectReadyForReview } from "./attempts.js";
 
 const api = createClient();
 const terminal = new Set(["completed", "cancelled", "failed"]);
 const onboardingInstallKey = "herbie-onboarding-install";
-const labels: Record<Goal["state"], string> = {
+const labels: Record<Project["state"], string> = {
   queued: "Queued",
   running: "Running",
   paused: "Paused",
@@ -48,11 +48,11 @@ function initialDraft() {
     return newDraft();
   }
 }
-function Badge({ goal }: { goal: Goal }) {
-  const waitingForChecks = goal.state === "awaiting_review" && !goalReadyForReview(goal);
+function Badge({ project }: { project: Project }) {
+  const waitingForChecks = project.state === "awaiting_review" && !projectReadyForReview(project);
   return (
-    <span className={`badge status-${waitingForChecks ? "waiting_for_checks" : goal.state}`}>
-      {waitingForChecks ? "Waiting for checks" : labels[goal.state]}
+    <span className={`badge status-${waitingForChecks ? "waiting_for_checks" : project.state}`}>
+      {waitingForChecks ? "Waiting for checks" : labels[project.state]}
     </span>
   );
 }
@@ -68,10 +68,10 @@ export function App() {
   const [startupRefresh, setStartupRefresh] = useState(0);
   const streamRevision = useRef(0);
   const [reconnecting, setReconnecting] = useState(false);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [goalsLoaded, setGoalsLoaded] = useState(false);
-  const [goalsError, setGoalsError] = useState<string | null>(null);
-  const [goalsRefresh, setGoalsRefresh] = useState(0);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectsRefresh, setProjectsRefresh] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [permissionsRequired, setPermissionsRequired] = useState(false);
   const [repositoryError, setRepositoryError] = useState<string | null>(null);
@@ -80,12 +80,12 @@ export function App() {
   const [repositoryRefresh, setRepositoryRefresh] = useState(0);
   const [screen, setScreen] = useState<string | null>(() => location.hash.slice(1) || null);
   const [showFinished, setShowFinished] = useState(false);
-  const [events, setEvents] = useState<GoalEvent[]>([]);
+  const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [eventsState, setEventsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [goalEdit, setGoalEdit] = useState<(Draft & { id: string }) | null>(null);
+  const [projectEdit, setProjectEdit] = useState<(Draft & { id: string }) | null>(null);
   const creating = screen === "new";
   const editing = Boolean(screen?.endsWith("/edit"));
   const [projectScreen, selectedRun = null] = (screen ?? "").split("/runs/");
@@ -93,35 +93,35 @@ export function App() {
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [formError, setFormError] = useState<string | null>(null);
   const [installationNotice, setInstallationNotice] = useState<string | null>(null);
-  const goal = goals.find((item) => item.id === selected) ?? null;
-  const workflowPermissionError = workflowPermissionMessage(goal?.error ?? "");
-  const formDraft = editing ? goalEdit : draft;
+  const project = projects.find((item) => item.id === selected) ?? null;
+  const workflowPermissionError = workflowPermissionMessage(project?.error ?? "");
+  const formDraft = editing ? projectEdit : draft;
   useEffect(() => {
     setFormError(null);
-    if (!editing) setGoalEdit(null);
+    if (!editing) setProjectEdit(null);
   }, [screen]);
   useEffect(() => {
-    if (editing && goal?.state === "cancelled") {
-      navigateToScreen(goal.id, true);
+    if (editing && project?.state === "cancelled") {
+      navigateToScreen(project.id, true);
       return;
     }
-    if (editing && goal)
-      setGoalEdit((current) =>
-        current?.id === goal.id
+    if (editing && project)
+      setProjectEdit((current) =>
+        current?.id === project.id
           ? current
           : {
-              ...newDraft(goal.repository),
-              id: goal.id,
-              name: goal.name,
-              prompt: goal.prompt,
-              maxWip: String(goal.maxWip),
+              ...newDraft(project.repository),
+              id: project.id,
+              name: project.name,
+              prompt: project.prompt,
+              maxWip: String(project.maxWip),
             },
       );
-  }, [editing, goal]);
-  const visibleGoals = goals.filter(
+  }, [editing, project]);
+  const visibleProjects = projects.filter(
     (item) => showFinished || !["completed", "cancelled"].includes(item.state),
   );
-  const finishedCount = goals.filter((item) =>
+  const finishedCount = projects.filter((item) =>
     ["completed", "cancelled"].includes(item.state),
   ).length;
 
@@ -181,22 +181,22 @@ export function App() {
   useEffect(() => {
     if (!session) return;
     let alive = true;
-    setGoalsError(null);
+    setProjectsError(null);
     async function refresh() {
       try {
         const revision = streamRevision.current;
-        const list = await api.goals();
+        const list = await api.projects();
         if (!alive) return;
-        if (revision === streamRevision.current) setGoals(list);
-        setGoalsLoaded(true);
-        setGoalsError(null);
+        if (revision === streamRevision.current) setProjects(list);
+        setProjectsLoaded(true);
+        setProjectsError(null);
       } catch (failure) {
         if (!alive) return;
         if (failure instanceof ApiError && failure.status === 401) {
           setSession(null);
           setSessionState("signed-out");
         }
-        setGoalsError(message(failure));
+        setProjectsError(message(failure));
       }
     }
     void refresh();
@@ -204,10 +204,10 @@ export function App() {
     return () => {
       alive = false;
     };
-  }, [session, goalsRefresh]);
+  }, [session, projectsRefresh]);
 
   // Repository discovery can require GitHub API calls. Refresh on sign-in or an
-  // explicit request, independently from the live goal stream.
+  // explicit request, independently from the live project stream.
   useEffect(() => {
     if (!session) {
       setRepositories([]);
@@ -339,7 +339,7 @@ export function App() {
     function connect() {
       const url = new URL("/api/stream", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      if (selected) url.searchParams.set("goal", selected);
+      if (selected) url.searchParams.set("project", selected);
       socket = new WebSocket(url);
       socket.onmessage = (event) => {
         if (disposed) return;
@@ -347,12 +347,12 @@ export function App() {
           const update = streamMessageSchema.parse(JSON.parse(event.data));
           delay = 500;
           setReconnecting(false);
-          if (update.type === "goals") {
+          if (update.type === "projects") {
             streamRevision.current++;
-            setGoals(update.goals);
-            setGoalsLoaded(true);
-            setGoalsError(null);
-          } else if (update.goalId === selected) {
+            setProjects(update.projects);
+            setProjectsLoaded(true);
+            setProjectsError(null);
+          } else if (update.projectId === selected) {
             setEvents((current) =>
               [
                 ...new Map([...current, ...update.events].map((item) => [item.id, item])).values(),
@@ -447,7 +447,7 @@ export function App() {
     setFormError(null);
   }
   function openCreate() {
-    if (!session || sessionState !== "signed-in" || !goalsLoaded) return;
+    if (!session || sessionState !== "signed-in" || !projectsLoaded) return;
     if (!draft.repository && repositories[0])
       setDraft((current) => ({
         ...current,
@@ -458,14 +458,14 @@ export function App() {
     navigateToScreen("new");
     setFormError(null);
   }
-  async function createGoal(event: FormEvent<HTMLFormElement>) {
+  async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setFormError(null);
     try {
       const result = await api.start(parseDraft(draft), draft.requestId);
-      setGoals((current) => [result, ...current.filter((item) => item.id !== result.id)]);
-      setGoalsLoaded(true);
+      setProjects((current) => [result, ...current.filter((item) => item.id !== result.id)]);
+      setProjectsLoaded(true);
       if (location.hash === "#new") navigateToScreen(result.id, true);
       setDraft(newDraft(draft.repository));
     } catch (failure) {
@@ -474,19 +474,19 @@ export function App() {
       setBusy(false);
     }
   }
-  async function saveGoalEdit(event: FormEvent<HTMLFormElement>) {
+  async function saveProjectEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!goalEdit || goal?.state === "cancelled") return;
+    if (!projectEdit || project?.state === "cancelled") return;
     setBusy(true);
     setFormError(null);
     try {
-      const result = await api.update(goalEdit.id, {
-        name: goalEdit.name,
-        prompt: goalEdit.prompt,
-        maxWip: Number(goalEdit.maxWip),
+      const result = await api.update(projectEdit.id, {
+        name: projectEdit.name,
+        prompt: projectEdit.prompt,
+        maxWip: Number(projectEdit.maxWip),
       });
-      setGoals((current) => current.map((item) => (item.id === result.id ? result : item)));
-      if (location.hash === `#${goalEdit.id}/edit`) navigateToScreen(result.id, true);
+      setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
+      if (location.hash === `#${projectEdit.id}/edit`) navigateToScreen(result.id, true);
     } catch (failure) {
       setFormError(message(failure));
     } finally {
@@ -495,24 +495,24 @@ export function App() {
   }
   function editForm(change: Partial<Draft>) {
     if (editing) {
-      setGoalEdit((current) => (current ? { ...current, ...change } : current));
+      setProjectEdit((current) => (current ? { ...current, ...change } : current));
       setFormError(null);
     } else edit(change);
   }
-  async function control(action: GoalAction | "retry" | "retry-repair", repairId?: string) {
-    if (!goal) return;
+  async function control(action: ProjectAction | "retry" | "retry-repair", repairId?: string) {
+    if (!project) return;
     setBusy(true);
     setError(null);
     try {
       const result =
         action === "retry-repair"
-          ? await api.retryRepair(goal.id, repairId!)
+          ? await api.retryRepair(project.id, repairId!)
           : action === "retry"
             ? workflowPermissionError
-              ? await api.retryPublication(goal.id)
-              : await api.retry(goal.id)
-            : await api.action(goal.id, action);
-      setGoals((current) => current.map((item) => (item.id === result.id ? result : item)));
+              ? await api.retryPublication(project.id)
+              : await api.retry(project.id)
+            : await api.action(project.id, action);
+      setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
     } catch (failure) {
       setError(message(failure));
     } finally {
@@ -593,17 +593,17 @@ export function App() {
                     <button className="back-button" onClick={navigateToList}>
                       All projects
                     </button>
-                    {goal && (
+                    {project && (
                       <>
                         <span aria-hidden="true">&gt;</span>
                         {selectedRun ? (
                           <>
-                            <a href={`#${goal.id}`}>{goal.name}</a>
+                            <a href={`#${project.id}`}>{project.name}</a>
                             <span aria-hidden="true">&gt;</span>
                             <span aria-current="page">Run details</span>
                           </>
                         ) : (
-                          <span aria-current="page">{goal.repository}</span>
+                          <span aria-current="page">{project.repository}</span>
                         )}
                       </>
                     )}
@@ -617,7 +617,7 @@ export function App() {
               </div>
               {!creating && !editing && !selected && (
                 <div className="heading-actions">
-                  <button className="primary" onClick={openCreate} disabled={busy || !goalsLoaded}>
+                  <button className="primary" onClick={openCreate} disabled={busy || !projectsLoaded}>
                     New project
                   </button>
                 </div>
@@ -666,21 +666,21 @@ export function App() {
                 Reconnecting to live updates. Displayed progress may be out of date.
               </p>
             )}
-            {!goalsLoaded && !goalsError && (
+            {!projectsLoaded && !projectsError && (
               <p className="subtle-note" role="status">
                 Loading projects…
               </p>
             )}
-            {goalsError && (
+            {projectsError && (
               <div className="status-message" role="alert">
-                {goalsLoaded && "Couldn’t refresh projects. Showing the latest saved progress. "}
-                {goalsError}
-                <button onClick={() => setGoalsRefresh((value) => value + 1)}>Retry</button>
+                {projectsLoaded && "Couldn’t refresh projects. Showing the latest saved progress. "}
+                {projectsError}
+                <button onClick={() => setProjectsRefresh((value) => value + 1)}>Retry</button>
               </div>
             )}
             {!creating && !editing && (
               <>
-                {!selected && goalsLoaded && goals.length === 0 && (
+                {!selected && projectsLoaded && projects.length === 0 && (
                   <section className="empty-state">
                     <h2>No projects yet</h2>
                     <p>Start with one useful change.</p>
@@ -689,45 +689,45 @@ export function App() {
                     </button>
                   </section>
                 )}
-                {!selected && goals.length > 0 && (
+                {!selected && projects.length > 0 && (
                   <>
-                    <dl className="goal-summary" aria-label="Project overview">
+                    <dl className="project-summary" aria-label="Project overview">
                       <div>
                         <dt>In progress</dt>
                         <dd>
                           {
-                            goals.filter((item) => ["queued", "running"].includes(item.state))
+                            projects.filter((item) => ["queued", "running"].includes(item.state))
                               .length
                           }
                         </dd>
                       </div>
                       <div className="status-awaiting_review">
                         <dt>Ready for review</dt>
-                        <dd>{goals.filter(goalReadyForReview).length}</dd>
+                        <dd>{projects.filter(projectReadyForReview).length}</dd>
                       </div>
                       <div className="status-needs_attention">
                         <dt>Needs attention</dt>
                         <dd>
                           {
-                            goals.filter((item) =>
+                            projects.filter((item) =>
                               ["failed", "needs_attention"].includes(item.state),
                             ).length
                           }
                         </dd>
                       </div>
                     </dl>
-                    <section className="goal-list" aria-label="Projects" aria-busy={!goalsLoaded}>
-                      {visibleGoals.map((item) => (
+                    <section className="project-list" aria-label="Projects" aria-busy={!projectsLoaded}>
+                      {visibleProjects.map((item) => (
                         <button
-                          className="goal-row"
+                          className="project-row"
                           key={item.id}
                           onClick={() => navigateToScreen(item.id)}
                         >
-                          <span className="goal-row-heading">
-                            <span className="goal-row-title">{item.name}</span>
-                            <Badge goal={item} />
+                          <span className="project-row-heading">
+                            <span className="project-row-title">{item.name}</span>
+                            <Badge project={item} />
                           </span>
-                          <span className="goal-row-meta">
+                          <span className="project-row-meta">
                             {item.repository} <span>·</span> {item.attemptCount}{" "}
                             {item.attemptCount === 1 ? "run" : "runs"} <span>·</span> Updated{" "}
                             {time(item.updatedAt)}
@@ -744,7 +744,7 @@ export function App() {
                         {showFinished ? "Hide" : "Show"} completed and cancelled ({finishedCount})
                       </button>
                     )}
-                    {goalsLoaded && visibleGoals.length === 0 && (
+                    {projectsLoaded && visibleProjects.length === 0 && (
                       <section className="empty-state">
                         <h2>All projects are finished</h2>
                         <p>Completed and cancelled projects are hidden.</p>
@@ -752,30 +752,30 @@ export function App() {
                     )}
                   </>
                 )}
-                {selected && goal && !selectedRun && (
+                {selected && project && !selectedRun && (
                   <section
-                    className="goal-detail"
+                    className="project-detail"
                     aria-label="Selected project"
                     aria-busy={eventsState === "loading"}
                   >
                     <div className="detail-heading">
                       <div>
-                        <Badge goal={goal} />
-                        <h2>{goal.name}</h2>
+                        <Badge project={project} />
+                        <h2>{project.name}</h2>
                       </div>
-                      {goal.state !== "cancelled" && (
+                      {project.state !== "cancelled" && (
                         <>
                           <button
-                            className="goal-actions-trigger"
-                            popoverTarget="goal-actions"
+                            className="project-actions-trigger"
+                            popoverTarget="project-actions"
                             aria-label="Project actions"
                           >
                             <span aria-hidden="true">⋯</span>
                           </button>
                           <div
-                            id="goal-actions"
+                            id="project-actions"
                             popover="auto"
-                            className="goal-actions-menu"
+                            className="project-actions-menu"
                             onClick={(event) => {
                               if ((event.target as HTMLElement).closest("button"))
                                 event.currentTarget.hidePopover();
@@ -783,14 +783,14 @@ export function App() {
                           >
                             <button
                               disabled={busy}
-                              onClick={() => navigateToScreen(`${goal.id}/edit`)}
+                              onClick={() => navigateToScreen(`${project.id}/edit`)}
                             >
                               Edit
                             </button>
-                            {!terminal.has(goal.state) &&
-                              !["paused", "needs_attention"].includes(goal.state) && (
+                            {!terminal.has(project.state) &&
+                              !["paused", "needs_attention"].includes(project.state) && (
                                 <button
-                                  disabled={busy || Boolean(goal.stopRequested)}
+                                  disabled={busy || Boolean(project.stopRequested)}
                                   onClick={() => {
                                     void control("pause");
                                   }}
@@ -798,7 +798,7 @@ export function App() {
                                   Pause
                                 </button>
                               )}
-                            {goal.state === "paused" && (
+                            {project.state === "paused" && (
                               <button
                                 disabled={busy}
                                 onClick={() => {
@@ -808,7 +808,7 @@ export function App() {
                                 Resume
                               </button>
                             )}
-                            {!terminal.has(goal.state) && (
+                            {!terminal.has(project.state) && (
                               <button
                                 disabled={busy}
                                 onClick={() => {
@@ -822,24 +822,24 @@ export function App() {
                         </>
                       )}
                     </div>
-                    <p className="goal-brief">{goal.prompt}</p>
+                    <p className="project-brief">{project.prompt}</p>
 
-                    <p className="goal-meta">
-                      {goal.attemptCount} {goal.attemptCount === 1 ? "run" : "runs"} <span>·</span>{" "}
-                      Max parallel runs {goal.maxWip} <span>·</span> Created {time(goal.createdAt)}
+                    <p className="project-meta">
+                      {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"} <span>·</span>{" "}
+                      Max parallel runs {project.maxWip} <span>·</span> Created {time(project.createdAt)}
                     </p>
-                    {goal.error && (
+                    {project.error && (
                       <div className="status-message" role="alert">
-                        {goalErrorMessage(goal)}
-                        {errorReference(goal.error) && (
+                        {projectErrorMessage(project)}
+                        {errorReference(project.error) && (
                           <details>
                             <summary>Error reference</summary>
-                            <p>{errorReference(goal.error)}</p>
+                            <p>{errorReference(project.error)}</p>
                           </details>
                         )}
                       </div>
                     )}
-                    {["failed", "needs_attention"].includes(goal.state) && (
+                    {["failed", "needs_attention"].includes(project.state) && (
                       <div className="status-message">
                         <span>
                           {workflowPermissionError
@@ -861,14 +861,14 @@ export function App() {
                         </button>
                       </div>
                     )}
-                    {goal.attempts
+                    {project.attempts
                       ?.filter((attempt) => attempt.ciRepair?.state === "failed")
                       .map((attempt) => (
                         <div className="status-message" key={attempt.id}>
                           <span>Repair failed for PR #{attempt.pullRequest?.number}.</span>
                           {attempt.ciRepair?.canRetry &&
-                            !goal.stopRequested &&
-                            ["queued", "running", "awaiting_review"].includes(goal.state) &&
+                            !project.stopRequested &&
+                            ["queued", "running", "awaiting_review"].includes(project.state) &&
                             attempt.pullRequest?.state === "open" && (
                               <button
                                 className="primary"
@@ -882,16 +882,16 @@ export function App() {
                             )}
                         </div>
                       ))}
-                    {goal.stopRequested && (
+                    {project.stopRequested && (
                       <p className="subtle-note">
-                        {goal.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The
+                        {project.stopRequested === "pause" ? "Pause" : "Cancellation"} requested. The
                         current run will finish before stopping.
                       </p>
                     )}
-                    <hr className="goal-divider" />
+                    <hr className="project-divider" />
                     <AttemptHistory
-                      key={goal.id}
-                      goal={goal}
+                      key={project.id}
+                      project={project}
                       events={events}
                       eventsState={eventsState}
                       eventsError={eventsError}
@@ -899,10 +899,10 @@ export function App() {
                     />
                   </section>
                 )}
-                {goal && selectedRun && (
+                {project && selectedRun && (
                   <AttemptHistory
-                    key={goal.id}
-                    goal={goal}
+                    key={project.id}
+                    project={project}
                     selected={selectedRun}
                     events={events}
                     eventsState={eventsState}
@@ -910,7 +910,7 @@ export function App() {
                     time={time}
                   />
                 )}
-                {selected && !goal && goalsLoaded && (
+                {selected && !project && projectsLoaded && (
                   <section className="empty-state">
                     <h2>Project not found</h2>
                     <button className="text-button" onClick={navigateToList}>
@@ -920,7 +920,7 @@ export function App() {
                 )}
               </>
             )}
-            {editing && !goal && goalsLoaded && (
+            {editing && !project && projectsLoaded && (
               <section className="empty-state">
                 <h2>Project not found</h2>
                 <button className="text-button" onClick={navigateToList}>
@@ -928,11 +928,11 @@ export function App() {
                 </button>
               </section>
             )}
-            {(creating || (editing && goal && goal.state !== "cancelled")) && formDraft && (
+            {(creating || (editing && project && project.state !== "cancelled")) && formDraft && (
               <section aria-label={editing ? "Edit project" : "New project"}>
                 <form
                   onSubmit={(event) => {
-                    void (editing ? saveGoalEdit(event) : createGoal(event));
+                    void (editing ? saveProjectEdit(event) : createProject(event));
                   }}
                 >
                   {editing ? (
@@ -1043,7 +1043,7 @@ export function App() {
                       type="submit"
                       disabled={
                         busy ||
-                        !goalsLoaded ||
+                        !projectsLoaded ||
                         (editing
                           ? !formDraft.name?.trim() || !formDraft.prompt.trim()
                           : repositoryLoading ||

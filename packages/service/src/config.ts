@@ -199,7 +199,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseCa: env.HERBIE_DATABASE_CA,
     databaseCaFile: env.HERBIE_DATABASE_CA_FILE,
     openaiApiKey: mode === "live" ? env.OPENAI_API_KEY : undefined,
-    goalNameModel: env.HERBIE_GOAL_NAME_MODEL,
+    projectNameModel: env.HERBIE_GOAL_NAME_MODEL,
     daytona:
       env.DAYTONA_API_KEY && env.HERBIE_DAYTONA_OPENAI_SECRET
         ? {

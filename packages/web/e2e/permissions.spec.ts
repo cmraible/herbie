@@ -9,7 +9,7 @@ test("an existing installation prompts for required permissions and recovers aft
   await page.route("**/api/session", (r) =>
     r.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
   );
-  await page.route("**/api/goals", (r) => r.fulfill(json([])));
+  await page.route("**/api/projects", (r) => r.fulfill(json([])));
   await page.route("**/api/repositories", (r) =>
     r.fulfill(
       approved

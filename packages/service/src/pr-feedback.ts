@@ -18,12 +18,12 @@ export async function runFeedbackOnce(
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      goal: job.goal,
+      project: job.project,
       branch: job.branch,
       attemptId: job.attemptId,
-      repository: await adapters.authorize(job.goal.ownerId, job.goal.repository),
+      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
       signal: controller.signal,
-      onActivity: (message) => store.appendEvent(job.goal.id, "agent", message, job.id),
+      onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
     };
     const current = await adapters.reconcile(execution);
     if (!current || current.state !== "open" || !current.headSha) return true;
@@ -43,7 +43,7 @@ export async function runFeedbackOnce(
       controller.signal.throwIfAborted();
       if (!(await store.heartbeatFeedback(id!, workerId))) {
         controller.abort();
-        throw new Error("Feedback lease lost or goal stopped");
+        throw new Error("Feedback lease lost or project stopped");
       }
       controller.signal.throwIfAborted();
     };
@@ -59,12 +59,12 @@ export async function runFeedbackOnce(
     }, 5000);
     await requireLease();
     const changes = await adapters.attempt(execution, (message) =>
-      store.appendEvent(job.goal.id, "pr_feedback", message.slice(0, 2000), job.id),
+      store.appendEvent(job.project.id, "pr_feedback", message.slice(0, 2000), job.id),
     );
     await requireLease();
     const decision = parseFeedbackDecision(changes.feedbackDecision);
     if (
-      !hasValidPublicationEvidence(job.goal.repository, changes) ||
+      !hasValidPublicationEvidence(job.project.repository, changes) ||
       changes.baseCommit !== current.headSha
     )
       throw new Error("Feedback lacks matching completion and cleanup evidence");
@@ -124,7 +124,7 @@ export async function runFeedbackOnce(
   } catch (error) {
     const reference = logFailure(error, {
       component: "pr-feedback",
-      goalId: job.goal.id,
+      projectId: job.project.id,
       jobId: job.id,
     });
     if (id)

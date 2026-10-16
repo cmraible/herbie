@@ -274,9 +274,9 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(await ready("c".repeat(40)), false);
   await assert.rejects(
     ready("a".repeat(40), async () => {
-      throw new Error("Goal paused");
+      throw new Error("Project paused");
     }),
-    /Goal paused/,
+    /Project paused/,
   );
   assert.equal(writes, 0);
   graphError = true;

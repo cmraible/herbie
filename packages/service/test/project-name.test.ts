@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createGoalNamer } from "../src/goal-name.js";
+import { createProjectNamer } from "../src/project-name.js";
 
 const completion = (text: string) => ({
   status: "completed",
@@ -9,7 +9,7 @@ const completion = (text: string) => ({
 
 test("names summarize the prompt with a bounded server-side model request", async () => {
   const prompt = "Add validation to the signup form and cover invalid email addresses with tests.";
-  const name = await createGoalNamer("fixture-key", "fixture-model", async (url, options) => {
+  const name = await createProjectNamer("fixture-key", "fixture-model", async (url, options) => {
     assert.equal(url, "https://api.openai.com/v1/responses");
     assert.equal(options?.method, "POST");
     assert.equal(new Headers(options?.headers).get("authorization"), "Bearer fixture-key");
@@ -26,12 +26,12 @@ test("names summarize the prompt with a bounded server-side model request", asyn
 
 test("empty credentials fail when constructing the namer", () => {
   for (const key of ["", "   "])
-    assert.throws(() => createGoalNamer(key), /OPENAI_API_KEY is required/);
+    assert.throws(() => createProjectNamer(key), /OPENAI_API_KEY is required/);
 });
 
 test("the default naming model uses the supported Luna model", async () => {
   assert.equal(
-    await createGoalNamer("fixture-key", undefined, async (_url, options) => {
+    await createProjectNamer("fixture-key", undefined, async (_url, options) => {
       assert.equal(JSON.parse(String(options?.body)).model, "gpt-6-luna");
       return Response.json(completion("Improve signup validation"));
     })("Improve the signup form"),
@@ -56,7 +56,7 @@ test("failed, incomplete, empty, and invalid model responses reject naming", asy
   ];
   for (const response of responses) {
     await assert.rejects(
-      createGoalNamer("fixture-key", undefined, async () => response)("Fix arithmetic"),
+      createProjectNamer("fixture-key", undefined, async () => response)("Fix arithmetic"),
     );
   }
   for (const error of [
@@ -64,7 +64,7 @@ test("failed, incomplete, empty, and invalid model responses reject naming", asy
     new DOMException("Timed out", "TimeoutError"),
   ]) {
     await assert.rejects(
-      createGoalNamer("fixture-key", undefined, async () => {
+      createProjectNamer("fixture-key", undefined, async () => {
         throw error;
       })("Fix arithmetic"),
       error,

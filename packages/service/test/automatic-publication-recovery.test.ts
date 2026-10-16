@@ -31,7 +31,7 @@ async function fixture(t: TestContext) {
     await admin.end();
   });
   t.mock.method(console, "error", () => {});
-  const { goal } = await store.createGoal(
+  const { project } = await store.createProject(
     "owner",
     { repository: "alice/project", name: "Fixture only", prompt: "Fixture only" },
     "live",
@@ -56,7 +56,7 @@ async function fixture(t: TestContext) {
     publishes = 0;
   let remote: PullRequest | null = null;
   let check: PublicationRetryCheck = "ready";
-  const access = { repository: goal.repository, defaultBranch: "main", installationId: 1 };
+  const access = { repository: project.repository, defaultBranch: "main", installationId: 1 };
   const adapters: Adapters = {
     ...createDemoAdapters(),
     mode: "live",
@@ -89,11 +89,11 @@ async function fixture(t: TestContext) {
     },
   };
   const row = async () => {
-    const r = await pool.query("SELECT * FROM jobs WHERE goal_id=$1", [goal.id]);
+    const r = await pool.query("SELECT * FROM jobs WHERE project_id=$1", [project.id]);
     return r.rows[0]!;
   };
   const due = async () => {
-    await pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE goal_id=$1", [goal.id]);
+    await pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE project_id=$1", [project.id]);
   };
   async function legacy() {
     const job = await store.claim("old", 30_000, "live");
@@ -110,7 +110,7 @@ async function fixture(t: TestContext) {
   return {
     store,
     pool,
-    goal,
+    project,
     artifact,
     adapters,
     row,
@@ -156,18 +156,18 @@ test("initial JWT signing failure recovers the saved artifact after credentials 
     return null;
   };
   await runWorkerOnce(f.store, f.adapters, "first");
-  assert.equal((await f.store.getGoal(f.goal.id))?.state, "needs_attention");
+  assert.equal((await f.store.getProject(f.project.id))?.state, "needs_attention");
   assert.equal(f.attempts, 1);
   assert.match(
-    (await f.store.getGoal(f.goal.id))?.error ?? "",
+    (await f.store.getProject(f.project.id))?.error ?? "",
     /Automatic publication recovery #1 scheduled for/,
   );
   assert.equal(await runWorkerOnce(f.store, f.adapters, "too-early"), false);
   f.adapters.reconcile = reconcile;
   await f.due();
   await runWorkerOnce(new Store(f.pool, () => 0), f.adapters, "restarted");
-  assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
-  assert.equal((await f.store.getGoal(f.goal.id))?.attemptCount, 1);
+  assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
+  assert.equal((await f.store.getProject(f.project.id))?.attemptCount, 1);
   assert.equal(f.attempts, 1);
   assert.equal(f.publishes, 1);
   assert.equal((await f.row()).publication_retry_count, 0);
@@ -201,7 +201,7 @@ test("legacy missing-PR jobs recover automatically and network failures preserve
   await runWorkerOnce(restarted, f.adapters, "fixed");
   assert.equal(f.attempts, 0);
   assert.equal(f.publishes, 1);
-  assert.equal((await f.store.getGoal(f.goal.id))?.attemptCount, 1);
+  assert.equal((await f.store.getProject(f.project.id))?.attemptCount, 1);
 });
 
 for (const conflict of ["branch_exists", "base_changed"] as const)
@@ -216,7 +216,7 @@ for (const conflict of ["branch_exists", "base_changed"] as const)
     assert.ok(row.artifact);
     assert.equal(f.publishes, 0);
     assert.match(
-      (await f.store.getGoal(f.goal.id))?.error ?? "",
+      (await f.store.getProject(f.project.id))?.error ?? "",
       /Automatic publication recovery stopped/,
     );
     await f.due();
@@ -236,7 +236,7 @@ test("ambiguous successful PR creation is reconciled without duplicate writes", 
   await runWorkerOnce(f.store, f.adapters, "recovery");
   assert.equal(f.attempts, 1);
   assert.equal(f.publishes, 1);
-  assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
+  assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
 });
 
 test("a PR appearing during the retry preflight is reconciled on the next tick, never republished", async (t) => {
@@ -257,7 +257,7 @@ test("a PR appearing during the retry preflight is reconciled on the next tick, 
   await f.due();
   await runWorkerOnce(f.store, f.adapters, "confirm");
   assert.equal(f.publishes, 0);
-  assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
+  assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
 });
 
 for (const mode of ["cancel", "lease-loss"] as const)
@@ -266,11 +266,11 @@ for (const mode of ["cancel", "lease-loss"] as const)
     if (!f) return;
     await f.legacy();
     f.adapters.checkPublicationRetry = async () => {
-      if (mode === "cancel") await f.store.control(f.goal.id, "owner", "cancel");
+      if (mode === "cancel") await f.store.control(f.project.id, "owner", "cancel");
       else
         await f.pool.query(
-          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE goal_id=$1",
-          [f.goal.id],
+          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE project_id=$1",
+          [f.project.id],
         );
       return "ready";
     };
@@ -278,7 +278,7 @@ for (const mode of ["cancel", "lease-loss"] as const)
     assert.equal(f.publishes, 0);
     assert.equal(f.attempts, 0);
     if (mode === "cancel") {
-      assert.equal((await f.store.getGoal(f.goal.id))?.state, "cancelled");
+      assert.equal((await f.store.getProject(f.project.id))?.state, "cancelled");
       await f.due();
       assert.equal(await runWorkerOnce(f.store, f.adapters, "later"), false);
     }
@@ -326,8 +326,8 @@ test("corrupt saved evidence blocks recovery before any remote write", async (t)
   if (!f) return;
   await f.legacy();
   await f.pool.query(
-    "UPDATE jobs SET artifact=jsonb_set(artifact,'{verification,patchSha256}','\"wrong\"') WHERE goal_id=$1",
-    [f.goal.id],
+    "UPDATE jobs SET artifact=jsonb_set(artifact,'{verification,patchSha256}','\"wrong\"') WHERE project_id=$1",
+    [f.project.id],
   );
   await runWorkerOnce(f.store, f.adapters, "recover");
   assert.equal((await f.row()).publication_blocked, true);
@@ -347,8 +347,8 @@ test("identical capped retries update status without flooding the event feed; ch
   }
   const events = async () =>
     (
-      await f.pool.query("SELECT type,message FROM goal_events WHERE goal_id=$1 ORDER BY id", [
-        f.goal.id,
+      await f.pool.query("SELECT type,message FROM project_events WHERE project_id=$1 ORDER BY id", [
+        f.project.id,
       ])
     ).rows;
   const before = await events();
@@ -359,7 +359,7 @@ test("identical capped retries update status without flooding the event feed; ch
   );
   assert.equal(before.filter((e) => e.type === "publication_phase").length, 1);
   assert.match(
-    (await f.store.getGoal(f.goal.id))?.error ?? "",
+    (await f.store.getProject(f.project.id))?.error ?? "",
     /recovery #10 scheduled for .*Failure reference:/,
   );
   assert.equal(f.attempts, 1);
@@ -369,7 +369,7 @@ test("identical capped retries update status without flooding the event feed; ch
   await runWorkerOnce(f.store, f.adapters, "changed-cause");
   assert.equal((await events()).filter((e) => e.type === "publication_uncertain").length, 6);
   assert.match(
-    (await f.store.getGoal(f.goal.id))?.error ?? "",
+    (await f.store.getProject(f.project.id))?.error ?? "",
     /pull request appeared.*recovery #11 scheduled for/,
   );
   const row = await f.row();
@@ -382,7 +382,7 @@ test("identical capped retries update status without flooding the event feed; ch
   await f.due();
   await runWorkerOnce(f.store, f.adapters, "recovered");
   assert.equal((await events()).filter((e) => e.type === "pull_request_opened").length, 1);
-  assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
+  assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
 });
 
 for (const recovering of [false, true])
@@ -400,7 +400,7 @@ for (const recovering of [false, true])
     assert.equal(row.publication_blocked, true);
     assert.ok(row.artifact);
     assert.match(
-      (await f.store.getGoal(f.goal.id))?.error ?? "",
+      (await f.store.getProject(f.project.id))?.error ?? "",
       /no agent-authored pull request description/,
     );
     await f.due();
@@ -428,5 +428,5 @@ for (const recovering of [false, true])
     assert.equal(f.publishes, 1);
     assert.equal(f.attempts, 0, "saved patches do not launch another run");
     assert.equal((await f.row()).publication_blocked, false);
-    assert.equal((await f.store.getGoal(f.goal.id))?.state, "awaiting_review");
+    assert.equal((await f.store.getProject(f.project.id))?.state, "awaiting_review");
   });

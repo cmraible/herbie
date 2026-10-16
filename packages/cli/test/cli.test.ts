@@ -66,7 +66,7 @@ const session = { user: { id: "user-1", login: "octocat" }, mode: "live" };
 test("GitHub login persists a private bearer session and authenticates subsequent status calls", async () => {
   const app = await fixture((request, response) => {
     if (
-      request.url === "/api/goals" &&
+      request.url === "/api/projects" &&
       request.headers.authorization === "Bearer private-session"
     ) {
       json(response, []);
@@ -86,10 +86,10 @@ test("GitHub login persists a private bearer session and authenticates subsequen
   }
 });
 
-const goalId = "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d";
+const projectId = "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d";
 const requestId = "8e5e189f-b9cf-4f65-9c94-5d8d25b43b70";
-const goal = {
-  id: goalId,
+const project = {
+  id: projectId,
   ownerId: "user-1",
   repository: "octocat/demo",
   name: "Regression coverage",
@@ -107,7 +107,7 @@ const goal = {
 test("start sends a custom name and preserves the request ID on retry", async () => {
   const requests: { key: string | string[] | undefined; body: unknown }[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === "/api/goals" && request.method === "POST") {
+    if (request.url === "/api/projects" && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
       request.on("data", (chunk: string) => {
@@ -115,7 +115,7 @@ test("start sends a custom name and preserves the request ID on retry", async ()
       });
       request.on("end", () => {
         requests.push({ key: request.headers["idempotency-key"], body: JSON.parse(body) });
-        json(response, goal, requests.length === 1 ? 201 : 200);
+        json(response, project, requests.length === 1 ? 201 : 200);
       });
       return;
     }
@@ -150,7 +150,7 @@ test("start sends a custom name and preserves the request ID on retry", async ()
         },
       })),
     );
-    assert.equal(JSON.parse(app.output.at(-1) ?? "").id, goalId);
+    assert.equal(JSON.parse(app.output.at(-1) ?? "").id, projectId);
   } finally {
     await app.close();
   }
@@ -158,21 +158,21 @@ test("start sends a custom name and preserves the request ID on retry", async ()
 
 test("failed and repeated controls report service truth; events support a cursor", async () => {
   const app = await fixture((request, response) => {
-    if (request.url === `/api/goals/${goalId}/pause`) {
+    if (request.url === `/api/projects/${projectId}/pause`) {
       json(response, { error: "Publication already started" }, 409);
       return;
     }
-    if (request.url === `/api/goals/${goalId}/cancel`) {
-      json(response, { ...goal, state: "cancelled" });
+    if (request.url === `/api/projects/${projectId}/cancel`) {
+      json(response, { ...project, state: "cancelled" });
       return;
     }
-    if (request.url === `/api/goals/${goalId}/events?after=2`) {
+    if (request.url === `/api/projects/${projectId}/events?after=2`) {
       json(response, [
         {
           id: 3,
-          goalId,
+          projectId,
           type: "cancelled",
-          message: "Goal cancelled",
+          message: "Project cancelled",
           createdAt: "2026-10-08T00:00:01Z",
         },
       ]);
@@ -182,13 +182,13 @@ test("failed and repeated controls report service truth; events support a cursor
   });
   try {
     await app.invoke(["login", "--url", app.baseUrl]);
-    assert.equal(await app.invoke(["pause", goalId]), 1);
+    assert.equal(await app.invoke(["pause", projectId]), 1);
     assert.match(app.errors.at(-1) ?? "", /Publication already started/);
-    assert.equal(await app.invoke(["cancel", goalId]), 0);
-    assert.equal(await app.invoke(["cancel", goalId]), 0);
+    assert.equal(await app.invoke(["cancel", projectId]), 0);
+    assert.equal(await app.invoke(["cancel", projectId]), 0);
     assert.equal(JSON.parse(app.output.at(-1) ?? "").state, "cancelled");
-    assert.equal(await app.invoke(["logs", goalId, "--after", "2"]), 0);
-    assert.equal(JSON.parse(app.output.at(-1) ?? "")[0].message, "Goal cancelled");
+    assert.equal(await app.invoke(["logs", projectId, "--after", "2"]), 0);
+    assert.equal(JSON.parse(app.output.at(-1) ?? "")[0].message, "Project cancelled");
   } finally {
     await app.close();
   }
@@ -210,12 +210,12 @@ test("a saved bearer token is never sent to a different service", async () => {
 test("saved publication recovery sends authenticated POST and reports server refusals", async () => {
   let retryCount = 0;
   const app = await fixture((request, response) => {
-    assert.equal(request.url, `/api/goals/${goalId}/retry-publication`);
+    assert.equal(request.url, `/api/projects/${projectId}/retry-publication`);
     assert.equal(request.method, "POST");
     assert.equal(request.headers.authorization, "Bearer private-session");
     assert.equal(request.headers.origin, app.baseUrl);
     retryCount++;
-    if (retryCount === 1) json(response, { ...goal, mode: "live" });
+    if (retryCount === 1) json(response, { ...project, mode: "live" });
     else
       json(
         response,
@@ -231,9 +231,9 @@ test("saved publication recovery sends authenticated POST and reports server ref
     assert.equal(await app.invoke(["retry-publication"]), 1);
     assert.equal(await app.invoke(["retry-publication", "invalid-id"]), 1);
     assert.equal(retryCount, 0);
-    assert.equal(await app.invoke(["retry-publication", goalId]), 0);
+    assert.equal(await app.invoke(["retry-publication", projectId]), 0);
     assert.equal(JSON.parse(app.output.at(-1) ?? "").state, "queued");
-    assert.equal(await app.invoke(["retry-publication", goalId]), 1);
+    assert.equal(await app.invoke(["retry-publication", projectId]), 1);
     assert.match(app.errors.at(-1) ?? "", /base changed/);
     assert.equal(retryCount, 2);
     assert.ok(!app.output.join("").includes("private-session"));
@@ -242,7 +242,7 @@ test("saved publication recovery sends authenticated POST and reports server ref
   }
 });
 
-test("the CLI refuses misspelled options and the removed test command before creating a goal", async () => {
+test("the CLI refuses misspelled options and the removed test command before creating a project", async () => {
   const app = await fixture((_request, response) =>
     json(response, { token: "private-session", session }),
   );
@@ -428,10 +428,10 @@ test("CLI authorization without a user approval code is refused before polling",
   }
 });
 
-test("rename sends a validated name for the selected goal", async () => {
+test("rename sends a validated name for the selected project", async () => {
   const names: unknown[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === `/api/goals/${goalId}/name` && request.method === "POST") {
+    if (request.url === `/api/projects/${projectId}/name` && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
       request.on("data", (chunk: string) => {
@@ -440,7 +440,7 @@ test("rename sends a validated name for the selected goal", async () => {
       request.on("end", () => {
         const input = JSON.parse(body);
         names.push(input);
-        json(response, { ...goal, ...input });
+        json(response, { ...project, ...input });
       });
       return;
     }
@@ -448,8 +448,8 @@ test("rename sends a validated name for the selected goal", async () => {
   });
   try {
     await app.invoke(["login", "--url", app.baseUrl]);
-    assert.equal(await app.invoke(["rename", goalId, "--name", "   "]), 1);
-    assert.equal(await app.invoke(["rename", goalId, "--name", "  Better coverage  "]), 0);
+    assert.equal(await app.invoke(["rename", projectId, "--name", "   "]), 1);
+    assert.equal(await app.invoke(["rename", projectId, "--name", "  Better coverage  "]), 0);
     assert.deepEqual(names, [{ name: "Better coverage" }]);
     assert.equal(JSON.parse(app.output.at(-1) ?? "").name, "Better coverage");
   } finally {
@@ -457,10 +457,10 @@ test("rename sends a validated name for the selected goal", async () => {
   }
 });
 
-test("edit sends a validated prompt for the selected goal", async () => {
+test("edit sends a validated prompt for the selected project", async () => {
   const prompts: unknown[] = [];
   const app = await fixture((request, response) => {
-    if (request.url === `/api/goals/${goalId}/prompt` && request.method === "POST") {
+    if (request.url === `/api/projects/${projectId}/prompt` && request.method === "POST") {
       let body = "";
       request.setEncoding("utf8");
       request.on("data", (chunk: string) => {
@@ -469,7 +469,7 @@ test("edit sends a validated prompt for the selected goal", async () => {
       request.on("end", () => {
         const input = JSON.parse(body);
         prompts.push(input);
-        json(response, { ...goal, ...input });
+        json(response, { ...project, ...input });
       });
       return;
     }
@@ -477,8 +477,8 @@ test("edit sends a validated prompt for the selected goal", async () => {
   });
   try {
     await app.invoke(["login", "--url", app.baseUrl]);
-    assert.equal(await app.invoke(["edit", goalId, "--prompt", "   "]), 1);
-    assert.equal(await app.invoke(["edit", goalId, "--prompt", "  Better coverage  "]), 0);
+    assert.equal(await app.invoke(["edit", projectId, "--prompt", "   "]), 1);
+    assert.equal(await app.invoke(["edit", projectId, "--prompt", "  Better coverage  "]), 0);
     assert.deepEqual(prompts, [{ prompt: "Better coverage" }]);
     assert.equal(JSON.parse(app.output.at(-1) ?? "").prompt, "Better coverage");
   } finally {

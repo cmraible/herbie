@@ -1,4 +1,4 @@
-import type { Goal, Repository, RepositoryDiscovery } from "@herbie/contracts";
+import type { Project, Repository, RepositoryDiscovery } from "@herbie/contracts";
 import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
 
 export interface RepositoryAccess {
@@ -7,7 +7,7 @@ export interface RepositoryAccess {
   installationId: number;
 }
 export interface Execution {
-  goal: Goal;
+  project: Project;
   repository: RepositoryAccess;
   attemptId: string;
   branch: string;
@@ -45,7 +45,7 @@ export type CiStatus =
       head: string;
       pullRequest: { number: number; url: string };
     };
-export type PullRequest = NonNullable<Goal["pullRequest"]>;
+export type PullRequest = NonNullable<Project["pullRequest"]>;
 export type PublicationPhase =
   | "preflight_reconciliation"
   | "authorization"

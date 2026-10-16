@@ -45,7 +45,7 @@ for (const result of ["absent", "pull_request_exists", "branch_exists"] as const
       },
     });
     const execution = {
-      goal: { ownerId: "7", repository },
+      project: { ownerId: "7", repository },
       repository: access,
       attemptId: "fixture",
       branch,

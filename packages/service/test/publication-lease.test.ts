@@ -150,7 +150,7 @@ test("live publication stops after awaited GitHub preflight when its durable lea
     await admin.end();
   });
   await store.migrate();
-  await store.createGoal(
+  await store.createProject(
     "owner",
     { repository: "alice/project", name: "Fix arithmetic", prompt: "Fix arithmetic" },
     "live",
@@ -171,7 +171,7 @@ test("live publication stops after awaited GitHub preflight when its durable lea
   );
   const pending = live.publish(
     {
-      goal: job.goal,
+      project: job.project,
       repository: { repository: "alice/project", defaultBranch: "main", installationId: 11 },
       attemptId: job.id,
       branch: job.branch,
@@ -189,6 +189,6 @@ test("live publication stops after awaited GitHub preflight when its durable lea
   release.resolve();
   await assert.rejects(pending, (error) => error instanceof StoreError && error.status === 409);
   assert.equal(recovered, 1);
-  assert.equal((await store.getGoal(job.goal.id))?.state, "needs_attention");
+  assert.equal((await store.getProject(job.project.id))?.state, "needs_attention");
   assert.deepEqual(remotePullRequests, []);
 });

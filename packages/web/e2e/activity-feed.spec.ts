@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test("activity feed shows clear run progress and hides internal system events", async ({
   page,
 }) => {
-  const goalId = "00000000-0000-4000-8000-000000000001";
+  const projectId = "00000000-0000-4000-8000-000000000001";
   const runId = "00000000-0000-4000-8000-000000000002";
   const pullRequest = {
     number: 42,
@@ -13,8 +13,8 @@ test("activity feed shows clear run progress and hides internal system events", 
   };
   const rawFailure =
     "Attempt failed (runtime_preparation: command_failed; exit 28). Sandbox deletion confirmed. No automatic retry. Reference: db3a91ad-09c8-44ea-a2d8-f002570936cf";
-  const goal = {
-    id: goalId,
+  const project = {
+    id: projectId,
     ownerId: "fixture",
     repository: "owner/repo",
     name: "Clear activity messages",
@@ -44,7 +44,7 @@ test("activity feed shows clear run progress and hides internal system events", 
     ["attempt", "Attempt stage: sandbox_creation"],
     ["attempt", "Attempt stage: repository_clone"],
     ["attempt", "Attempt stage: model_execution"],
-    ["attempt", "Goal completed in sandbox abc123"],
+    ["attempt", "Project completed in sandbox abc123"],
     ["failed", rawFailure],
     ["publication_phase", "Publication phase: state_persistence"],
     ["pull_request_opened", "Pull request #42 awaits review"],
@@ -54,7 +54,7 @@ test("activity feed shows clear run progress and hides internal system events", 
     ],
   ].map(([type, message], index) => ({
     id: index + 1,
-    goalId,
+    projectId,
     attemptId: runId,
     type,
     message,
@@ -65,9 +65,9 @@ test("activity feed shows clear run progress and hides internal system events", 
   await page.route("**/api/session", (route) =>
     route.fulfill(json({ mode: "live", user: { id: "fixture", login: "fixture" } })),
   );
-  await page.route("**/api/goals", (route) => route.fulfill(json([goal])));
-  await page.route("**/api/goals/*/events**", (route) => route.fulfill(json(messages)));
-  await page.goto(`/#${goalId}`);
+  await page.route("**/api/projects", (route) => route.fulfill(json([project])));
+  await page.route("**/api/projects/*/events**", (route) => route.fulfill(json(messages)));
+  await page.goto(`/#${projectId}`);
 
   await expect(page.getByRole("region", { name: "Selected project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Clear activity messages" })).toBeVisible();

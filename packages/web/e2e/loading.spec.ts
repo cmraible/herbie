@@ -2,9 +2,9 @@ import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
 const fixtureSession = { mode: "live", user: { id: "fixture-user", login: "sample-user" } };
-const goalId = randomUUID();
-const fixtureGoal = {
-  id: goalId,
+const projectId = randomUUID();
+const fixtureProject = {
+  id: projectId,
   ownerId: "fixture-owner",
   repository: "demo/sample",
   name: "Keep loaded work visible",
@@ -21,14 +21,14 @@ const fixtureGoal = {
 const health = { mode: "live" };
 const json = (route: Parameters<Parameters<Page["route"]>[1]>[0], body: unknown, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-async function routeSignedIn(page: Page, goals: unknown[] = [fixtureGoal]) {
+async function routeSignedIn(page: Page, projects: unknown[] = [fixtureProject]) {
   await page.route("**/api/health", (route) => json(route, health));
   await page.route("**/api/session", (route) => json(route, fixtureSession));
-  await page.route("**/api/goals", (route) =>
-    route.request().method() === "GET" ? json(route, goals) : route.continue(),
+  await page.route("**/api/projects", (route) =>
+    route.request().method() === "GET" ? json(route, projects) : route.continue(),
   );
   await page.route("**/api/repositories", (route) => json(route, []));
-  await page.route("**/api/goals/*/events**", (route) => json(route, []));
+  await page.route("**/api/projects/*/events**", (route) => json(route, []));
 }
 
 test("the deployed commit stays accessible across views", async ({ page }) => {
@@ -98,20 +98,20 @@ test("the welcome copy renders immediately while health and session are pending"
   await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
 });
 
-test("goals and repository actions stay pending until their responses arrive", async ({ page }) => {
-  let releaseGoals!: () => void;
+test("projects and repository actions stay pending until their responses arrive", async ({ page }) => {
+  let releaseProjects!: () => void;
   let releaseRepos!: () => void;
-  const goalsGate = new Promise<void>((resolve) => {
-    releaseGoals = resolve;
+  const projectsGate = new Promise<void>((resolve) => {
+    releaseProjects = resolve;
   });
   const reposGate = new Promise<void>((resolve) => {
     releaseRepos = resolve;
   });
   await page.route("**/api/health", (route) => json(route, health));
   await page.route("**/api/session", (route) => json(route, fixtureSession));
-  await page.route("**/api/goals", async (route) => {
+  await page.route("**/api/projects", async (route) => {
     if (route.request().method() === "GET") {
-      await goalsGate;
+      await projectsGate;
       await json(route, []);
     } else await route.continue();
   });
@@ -119,14 +119,14 @@ test("goals and repository actions stay pending until their responses arrive", a
     await reposGate;
     await json(route, []);
   });
-  await page.route("**/api/goals/*/events**", (route) => json(route, []));
+  await page.route("**/api/projects/*/events**", (route) => json(route, []));
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Loading projects" })).toBeVisible();
   await expect(page.getByText("No projects yet")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New project", exact: true })).toBeDisabled();
   await page.screenshot({ path: "test-results/loading-dashboard-pending.png", fullPage: true });
-  releaseGoals();
+  releaseProjects();
   await expect(page.getByText("No projects yet")).toBeVisible();
   await expect(page.getByRole("button", { name: "New project", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "New project", exact: true }).click();
@@ -161,35 +161,35 @@ test("failed startup checks never masquerade as a signed-out session and can be 
   await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
 });
 
-test("an initial goal failure has a retry state instead of looking like an empty workspace", async ({
+test("an initial project failure has a retry state instead of looking like an empty workspace", async ({
   page,
 }) => {
   let requests = 0;
   await page.route("**/api/health", (route) => json(route, health));
   await page.route("**/api/session", (route) => json(route, fixtureSession));
-  await page.route("**/api/goals", (route) => {
+  await page.route("**/api/projects", (route) => {
     requests++;
-    return requests === 1 ? json(route, { error: "goals unavailable" }, 503) : json(route, []);
+    return requests === 1 ? json(route, { error: "projects unavailable" }, 503) : json(route, []);
   });
   await page.route("**/api/repositories", (route) => json(route, []));
   await page.goto("/");
-  await expect(page.getByRole("alert")).toContainText("goals unavailable");
+  await expect(page.getByRole("alert")).toContainText("projects unavailable");
   await expect(page.getByText("No projects yet")).toHaveCount(0);
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("No projects yet")).toBeVisible();
 });
 
-test("an owner-protected goals rejection never exposes an empty workspace or goal actions", async ({
+test("an owner-protected projects rejection never exposes an empty workspace or project actions", async ({
   page,
 }) => {
   await page.route("**/api/health", (route) => json(route, health));
   await page.route("**/api/session", (route) => json(route, fixtureSession));
-  await page.route("**/api/goals", (route) =>
-    json(route, { error: "Not authorized to access these goals" }, 403),
+  await page.route("**/api/projects", (route) =>
+    json(route, { error: "Not authorized to access these projects" }, 403),
   );
   await page.route("**/api/repositories", (route) => json(route, []));
   await page.goto("/");
-  await expect(page.getByRole("alert")).toContainText("Not authorized to access these goals");
+  await expect(page.getByRole("alert")).toContainText("Not authorized to access these projects");
   await expect(page.getByText("No projects yet")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New project", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Create a project" })).toHaveCount(0);
@@ -200,7 +200,7 @@ test("repository discovery errors do not suggest connecting repositories", async
   await page.route("**/api/session", (route) =>
     json(route, { mode: "live", user: { id: "fixture-user", login: "sample-user" } }),
   );
-  await page.route("**/api/goals", (route) => json(route, []));
+  await page.route("**/api/projects", (route) => json(route, []));
   await page.route("**/api/repositories", (route) =>
     json(route, { error: "Repository discovery is unavailable" }, 503),
   );
@@ -235,7 +235,7 @@ test("signed-out and sign-in states only appear after their responses", async ({
       body: `<script>location.replace(${JSON.stringify(home)})</script>`,
     });
   });
-  await page.route("**/api/goals", (route) => json(route, []));
+  await page.route("**/api/projects", (route) => json(route, []));
   await page.route("**/api/repositories", (route) => json(route, []));
   await page.goto("/");
   const login = page.getByRole("button", { name: "Continue with GitHub" });
@@ -246,7 +246,7 @@ test("signed-out and sign-in states only appear after their responses", async ({
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
 });
 
-test("stream failures keep the last goal and details on screen", async ({ page }) => {
+test("stream failures keep the last project and details on screen", async ({ page }) => {
   await routeSignedIn(page);
   await page.routeWebSocket("**/api/stream**", (socket) => socket.close({ code: 1012 }));
   await page.goto("/");
@@ -259,24 +259,24 @@ test("stream failures keep the last goal and details on screen", async ({ page }
   await expect(page.getByText("No projects yet")).toHaveCount(0);
 });
 
-test("the goal list hides finished work until requested and opens details separately", async ({
+test("the project list hides finished work until requested and opens details separately", async ({
   page,
 }) => {
   const completed = {
-    ...fixtureGoal,
+    ...fixtureProject,
     id: randomUUID(),
     name: "Finished work",
     prompt: "Finished work",
     state: "completed",
   };
   const cancelled = {
-    ...fixtureGoal,
+    ...fixtureProject,
     id: randomUUID(),
     name: "Stopped work",
     prompt: "Stopped work",
     state: "cancelled",
   };
-  await routeSignedIn(page, [fixtureGoal, completed, cancelled]);
+  await routeSignedIn(page, [fixtureProject, completed, cancelled]);
   await page.goto("/");
   await expect(page.getByRole("region", { name: "Selected project" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Keep loaded work visible/ })).toBeVisible();
@@ -331,7 +331,7 @@ test("mobile loading and repeated refresh clicks remain within the viewport", as
   await expect(refresh).toBeEnabled();
   await refresh.click();
   await expect(page.getByRole("region", { name: "New project", exact: true })).toBeVisible();
-  await page.screenshot({ path: "test-results/new-goal-mobile.png", fullPage: true });
+  await page.screenshot({ path: "test-results/new-project-mobile.png", fullPage: true });
   expect(requests).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -413,19 +413,19 @@ test("a pending creation respects browser Back navigation", async ({ page }) => 
     release = resolve;
   });
   let created = false;
-  await page.unroute("**/api/goals");
-  await page.route("**/api/goals", async (route) => {
+  await page.unroute("**/api/projects");
+  await page.route("**/api/projects", async (route) => {
     if (route.request().method() === "POST") {
       await gate;
       created = true;
-      await json(route, fixtureGoal);
-    } else await json(route, created ? [fixtureGoal] : []);
+      await json(route, fixtureProject);
+    } else await json(route, created ? [fixtureProject] : []);
   });
   await page.goto("/");
   await page.getByRole("button", { name: "New project", exact: true }).click();
-  await page.getByLabel("What should Herbie work on?").fill(fixtureGoal.prompt);
+  await page.getByLabel("What should Herbie work on?").fill(fixtureProject.prompt);
   const request = page.waitForRequest(
-    (request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/goals",
+    (request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/projects",
   );
   await page.getByRole("button", { name: "Start project", exact: true }).click();
   await request;
@@ -439,7 +439,7 @@ test("a pending creation respects browser Back navigation", async ({ page }) => 
   await expect(page.getByRole("button", { name: /Keep loaded work visible/ })).toBeVisible();
 });
 
-test("direct creation waits for the initial goals request to succeed", async ({ page }) => {
+test("direct creation waits for the initial projects request to succeed", async ({ page }) => {
   await routeSignedIn(page, []);
   await page.unroute("**/api/repositories");
   await page.route("**/api/repositories", (route) =>
@@ -450,17 +450,17 @@ test("direct creation waits for the initial goals request to succeed", async ({ 
     release = resolve;
   });
   let fail = true;
-  await page.unroute("**/api/goals");
-  await page.route("**/api/goals", async (route) => {
+  await page.unroute("**/api/projects");
+  await page.route("**/api/projects", async (route) => {
     await gate;
-    await (fail ? json(route, { error: "goals unavailable" }, 503) : json(route, []));
+    await (fail ? json(route, { error: "projects unavailable" }, 503) : json(route, []));
   });
   await page.goto("/#new");
   await expect(page.getByLabel("Repository")).toBeEnabled();
   const start = page.getByRole("button", { name: "Start project", exact: true });
   await expect(start).toBeDisabled({ timeout: 1000 });
   release();
-  await expect(page.getByRole("alert")).toContainText("goals unavailable");
+  await expect(page.getByRole("alert")).toContainText("projects unavailable");
   await expect(start).toBeDisabled();
   fail = false;
   await page.getByRole("button", { name: "Retry" }).click();
@@ -473,15 +473,15 @@ test("successful creation replaces the draft screen in browser history", async (
   await page.route("**/api/repositories", (route) =>
     json(route, [{ fullName: "demo/sample", defaultBranch: "main", installationId: 1 }]),
   );
-  await page.unroute("**/api/goals");
-  await page.route("**/api/goals", (route) =>
-    json(route, route.request().method() === "POST" ? fixtureGoal : []),
+  await page.unroute("**/api/projects");
+  await page.route("**/api/projects", (route) =>
+    json(route, route.request().method() === "POST" ? fixtureProject : []),
   );
   await page.goto("/");
   await page.getByRole("button", { name: "New project", exact: true }).click();
-  await page.getByLabel("What should Herbie work on?").fill(fixtureGoal.prompt);
+  await page.getByLabel("What should Herbie work on?").fill(fixtureProject.prompt);
   await page.getByRole("button", { name: "Start project", exact: true }).click();
-  await expect(page.getByRole("heading", { name: fixtureGoal.name, exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: fixtureProject.name, exact: true })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible({
     timeout: 1000,

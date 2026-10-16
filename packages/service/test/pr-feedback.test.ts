@@ -43,7 +43,7 @@ for (const outcome of [
       await admin.end();
     });
     await store.migrate();
-    const { goal } = await store.createGoal(
+    const { project } = await store.createProject(
       "demo-user",
       { repository: "demo/example", prompt: "Fix arithmetic" },
       "demo",
@@ -51,10 +51,10 @@ for (const outcome of [
     );
     const demo = createDemoAdapters();
     await runWorkerOnce(store, demo, "original");
-    await store.pool.query("UPDATE goals SET mode='live' WHERE id=$1", [goal.id]);
+    await store.pool.query("UPDATE projects SET mode='live' WHERE id=$1", [project.id]);
     const [job] = await store.reviewJobs("live");
     assert.ok(job);
-    const pr = { ...job.goal.pullRequests[0]!, headSha: "a".repeat(40) };
+    const pr = { ...job.project.pullRequests[0]!, headSha: "a".repeat(40) };
     const item: PullRequestFeedback = {
       kind: "inline",
       id: 1,
@@ -91,7 +91,7 @@ for (const outcome of [
         assert.equal(execution.feedback?.item.id, item.id);
         assert.equal(execution.branch, job.branch);
         if (outcome === "failure") throw new Error("Agent failed");
-        if (outcome === "cancel") await store.control(goal.id, "demo-user", "cancel");
+        if (outcome === "cancel") await store.control(project.id, "demo-user", "cancel");
         if (outcome === "lease")
           await store.pool.query(
             "UPDATE pr_feedback SET lease_expires_at=clock_timestamp()-interval '1 second'",
@@ -126,7 +126,7 @@ for (const outcome of [
         pushes++;
         current = { ...pr, headSha: "c".repeat(40) };
         assert.equal(await store.reconcilePullRequestHead(job.id, current), false);
-        assert.equal((await store.getGoal(goal.id))?.state, "awaiting_review");
+        assert.equal((await store.getProject(project.id))?.state, "awaiting_review");
         return current;
       },
       replyToFeedback: async (_execution, _body, lease) => {
@@ -161,7 +161,7 @@ for (const outcome of [
       await store.finishCiRepair(repair, "ci", false, "Unconfirmed cleanup");
     }
     if (outcome === "ci-busy") assert.ok(await store.startCiRepair(job.id, pr.headSha, "ci"));
-    if (outcome === "paused") await store.control(goal.id, "demo-user", "pause");
+    if (outcome === "paused") await store.control(project.id, "demo-user", "pause");
     if (outcome === "closed") current = { ...pr, state: "closed" };
     await store.requestFeedbackReview("other/repo");
     assert.equal(await runFeedbackOnce(store, adapters, "worker"), false);
@@ -174,15 +174,15 @@ for (const outcome of [
     if (attempts)
       assert.ok(
         (
-          await store.pool.query("SELECT 1 FROM goal_events WHERE goal_id=$1 AND type='agent'", [
-            goal.id,
+          await store.pool.query("SELECT 1 FROM project_events WHERE project_id=$1 AND type='agent'", [
+            project.id,
           ])
         ).rowCount,
       );
     assert.equal(pushes, ["update", "reply-failed"].includes(outcome) ? 1 : 0);
     assert.equal(replies, ["reply", "update"].includes(outcome) ? 1 : 0);
     if (pushes)
-      assert.equal((await store.getGoal(goal.id))?.pullRequests[0]?.headSha, current.headSha);
+      assert.equal((await store.getProject(project.id))?.pullRequests[0]?.headSha, current.headSha);
     if (outcome !== "edited") {
       await store.requestFeedbackReview();
       await runFeedbackOnce(store, adapters, "duplicate");

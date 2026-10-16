@@ -26,7 +26,7 @@ test("nested errors keep useful stacks and command metadata while redacting cred
     error,
     {
       component: "attempt",
-      goalId: "fixture-goal",
+      projectId: "fixture-project",
       jobId: "fixture-job",
       stage: "repository_clone",
     },
