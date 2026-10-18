@@ -184,13 +184,14 @@ export async function runAgentAttempt(
     throw new Error("Invalid session environment name");
   const directory = `/tmp/${name}`;
   const cwd = `${directory}/repo`;
-  if (!checkpoint?.environmentId || !request.signal?.aborted) {
+  if (!checkpoint || !request.signal?.aborted) {
     await begin("sandbox_creation");
     await emit(`Creating sandbox ${name}`);
   }
   let sandbox: Environment;
   try {
-    if (!checkpoint?.environmentId) request.signal?.throwIfAborted();
+    if (!checkpoint || request.signal?.reason instanceof SessionDetached)
+      request.signal?.throwIfAborted();
     await save({ provider: provider.name });
     const connected =
       checkpoint?.phase === "deleted"
@@ -198,17 +199,19 @@ export async function runAgentAttempt(
         : checkpoint?.environmentId
           ? await provider.connect!(checkpoint.environmentId, request.resources)
           : ((checkpoint ? await provider.find?.(name, request.resources) : null) ??
-            (await provider.create({
-              name,
-              resources: request.resources,
-              timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
-            })));
+            (request.signal?.aborted
+              ? null
+              : await provider.create({
+                  name,
+                  resources: request.resources,
+                  timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
+                })));
     if (!connected && !["collected", "deleted"].includes(checkpoint?.phase ?? "")) {
       const error = new AgentAttemptError(
         [],
         "Session environment no longer exists; execution cannot be repeated automatically",
       );
-      error.cleanup = "confirmed";
+      error.cleanup = checkpoint?.environmentId || provider.find ? "confirmed" : "unconfirmed";
       throw error;
     }
     const absent = async (): Promise<never> => {

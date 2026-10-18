@@ -140,3 +140,48 @@ test("explicit cancellation reconnects and deletes the original environment with
   );
   assert.equal(destroys, 1);
 });
+
+test("cancellation discovers an environment created before its ID was checkpointed", async () => {
+  let destroyed = 0;
+  const checkpoint: AttemptCheckpoint = {
+    version: 1,
+    name: `herbie-attempt-${randomUUID()}`,
+    phase: "created",
+    deadline: Date.now() + 60_000,
+  };
+  const controller = new AbortController();
+  controller.abort(new Error("Project cancelled during deployment"));
+  const environment = {
+    id: "created-before-crash",
+    destroy: async () => {
+      destroyed++;
+    },
+  } as unknown as Environment;
+  await assert.rejects(
+    runAgentAttempt(
+      {
+        name: "fixture",
+        find: async (name) => {
+          assert.equal(name, checkpoint.name);
+          return environment;
+        },
+        create: async () => {
+          throw new Error("Cancellation must not create an environment");
+        },
+      },
+      {
+        repoUrl: "https://github.com/example/repo.git",
+        project: "Original",
+        signal: controller.signal,
+        durable: { checkpoint, save: async () => {} },
+      },
+      () => {},
+      new URL("../dist/", import.meta.url),
+    ),
+    (error: unknown) => {
+      assert.equal((error as { cleanup: string }).cleanup, "confirmed");
+      return true;
+    },
+  );
+  assert.equal(destroyed, 1);
+});
