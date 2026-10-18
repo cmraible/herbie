@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ProjectEvent } from "@herbie/contracts";
-import { agentActivity, activityText } from "./agent-activity.js";
+import { agentActivity, activityText, groupActivity } from "./agent-activity.js";
 
 const labels: Record<string, string> = {
   agentMessage: "Agent",
@@ -75,61 +75,97 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
             {query ? "No matching updates." : "Waiting for agent updates…"}
           </p>
         )}
-        {visible.map((item) => (
-          <article key={item.id} className={`transcript-item transcript-${item.type}`}>
-            {item.type === "agentMessage" || item.type === "plan" ? (
-              <>
-                <span className="transcript-label">{labels[item.type]}</span>
-                <div className="pr-description transcript-message">
-                  <Markdown remarkPlugins={[remarkGfm]} skipHtml>
-                    {activityText(item)}
-                  </Markdown>
-                </div>
-              </>
-            ) : (
-              <details open={item.status === "inProgress" || !!query}>
-                <summary>
-                  <span className="transcript-label">{labels[item.type] ?? item.type}</span>
-                  {typeof item.command === "string" && (
-                    <code className="transcript-command">{item.command}</code>
-                  )}
-                  {typeof item.command !== "string" && (
-                    <span className="transcript-preview">
-                      {item.type === "reasoning"
-                        ? activityText(item).replace(/[#*`]/g, "")
-                        : item.type === "mcpToolCall"
-                          ? [item.server, item.tool].filter(Boolean).join(" / ")
-                          : item.type === "webSearch"
-                            ? String(item.query ?? "")
-                            : ""}
-                    </span>
-                  )}
-                  {typeof item.status === "string" && (
-                    <span className={`transcript-status transcript-status-${item.status}`}>
-                      {item.status === "inProgress"
-                        ? "Running"
-                        : item.status === "completed"
-                          ? "Completed"
-                          : item.status === "failed"
-                            ? "Failed"
-                            : item.status}
-                    </span>
-                  )}
-                </summary>
-                {item.type === "reasoning" ? (
-                  <div className="pr-description transcript-message">
-                    <Markdown remarkPlugins={[remarkGfm]} skipHtml>
-                      {activityText(item)}
-                    </Markdown>
-                  </div>
-                ) : (
-                  <pre>{activityText(item)}</pre>
-                )}
-              </details>
-            )}
-          </article>
-        ))}
+        {groupActivity(visible).map((group) =>
+          group.length === 1 ? (
+            <TranscriptItem key={group[0].id} item={group[0]} query={query} />
+          ) : (
+            <details className="transcript-group" key={group[0].id} open={!!query}>
+              <summary>
+                <span className="transcript-label">{group.length} activity updates</span>
+                <span className="transcript-preview">
+                  {Object.entries(
+                    group.reduce<Record<string, number>>((counts, item) => {
+                      const label = labels[item.type] ?? item.type;
+                      counts[label] = (counts[label] ?? 0) + 1;
+                      return counts;
+                    }, {}),
+                  )
+                    .map(([label, count]) => `${label} × ${count}`)
+                    .join(" · ")}
+                </span>
+              </summary>
+              <div className="transcript-group-items">
+                {group.map((item) => (
+                  <TranscriptItem key={item.id} item={item} query={query} />
+                ))}
+              </div>
+            </details>
+          ),
+        )}
       </div>
     </section>
+  );
+}
+
+function TranscriptItem({
+  item,
+  query,
+}: {
+  item: ReturnType<typeof agentActivity>[number];
+  query: string;
+}) {
+  return (
+    <article key={item.id} className={`transcript-item transcript-${item.type}`}>
+      {item.type === "agentMessage" || item.type === "plan" ? (
+        <>
+          <span className="transcript-label">{labels[item.type]}</span>
+          <div className="pr-description transcript-message">
+            <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+              {activityText(item)}
+            </Markdown>
+          </div>
+        </>
+      ) : (
+        <details open={item.status === "inProgress" || !!query}>
+          <summary>
+            <span className="transcript-label">{labels[item.type] ?? item.type}</span>
+            {typeof item.command === "string" && (
+              <code className="transcript-command">{item.command}</code>
+            )}
+            {typeof item.command !== "string" && (
+              <span className="transcript-preview">
+                {item.type === "reasoning"
+                  ? activityText(item).replace(/[#*`]/g, "")
+                  : item.type === "mcpToolCall"
+                    ? [item.server, item.tool].filter(Boolean).join(" / ")
+                    : item.type === "webSearch"
+                      ? String(item.query ?? "")
+                      : ""}
+              </span>
+            )}
+            {typeof item.status === "string" && (
+              <span className={`transcript-status transcript-status-${item.status}`}>
+                {item.status === "inProgress"
+                  ? "Running"
+                  : item.status === "completed"
+                    ? "Completed"
+                    : item.status === "failed"
+                      ? "Failed"
+                      : item.status}
+              </span>
+            )}
+          </summary>
+          {item.type === "reasoning" ? (
+            <div className="pr-description transcript-message">
+              <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+                {activityText(item)}
+              </Markdown>
+            </div>
+          ) : (
+            <pre>{activityText(item)}</pre>
+          )}
+        </details>
+      )}
+    </article>
   );
 }

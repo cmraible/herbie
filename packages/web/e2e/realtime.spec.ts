@@ -132,6 +132,32 @@ test("pushes PR and run updates without polling and reconnects without duplicate
       .split("\n")
       .map((line) => JSON.parse(line)),
   ).toHaveLength(4);
+  events.push(
+    activity("item/completed", {
+      item: {
+        id: "command",
+        type: "commandExecution",
+        command: "pnpm test",
+        status: "completed",
+        aggregatedOutput: "All tests passed",
+        exitCode: 0,
+      },
+    }),
+  );
+  stream!.send(JSON.stringify({ type: "events", projectId: id, events }));
+  const group = page.locator(".transcript-group");
+  await expect(group.locator(":scope > summary")).toContainText("2 activity updates");
+  await expect(page.locator(".transcript-command")).not.toBeVisible();
+  await expect(page.locator(".transcript-agentMessage")).toBeVisible();
+  await group.locator(":scope > summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".transcript-command")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.getByRole("searchbox", { name: "Search transcript" }).fill("e");
+  await expect(group).toHaveAttribute("open", "");
+  await expect(page.locator(".agent-transcript pre")).toContainText("All tests passed");
+  await page.getByRole("searchbox", { name: "Search transcript" }).fill("");
+  await expect(group).not.toHaveAttribute("open", "");
   project.name = "Merged project";
   pr.state = "merged";
   project.attempts[0]!.state = "completed";

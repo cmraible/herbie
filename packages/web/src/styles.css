@@ -937,7 +937,7 @@ textarea::placeholder {
 }
 .transcript-item {
   min-width: 0;
-  padding: 4px 0;
+  padding: 0;
 }
 .transcript-agentMessage,
 .transcript-plan {
@@ -963,32 +963,32 @@ textarea::placeholder {
 .transcript-plan > .transcript-label {
   color: #a5e0b8;
 }
-.transcript-item summary {
+:is(.transcript-item, .transcript-group) summary {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px;
-  min-height: 44px;
+  padding: 5px 10px;
+  min-height: 32px;
   border-radius: 6px;
   cursor: pointer;
   list-style: none;
 }
-.transcript-item summary::-webkit-details-marker {
+:is(.transcript-item, .transcript-group) summary::-webkit-details-marker {
   display: none;
 }
-.transcript-item summary::before {
+:is(.transcript-item, .transcript-group) summary::before {
   content: "›";
   color: #a5b3aa;
   font-size: 18px;
   transition: transform 120ms;
 }
-.transcript-item details[open] > summary::before {
+:is(.transcript-item details, .transcript-group)[open] > summary::before {
   transform: rotate(90deg);
 }
-.transcript-item summary:hover {
+:is(.transcript-item, .transcript-group) summary:hover {
   background: #1c2820;
 }
-.transcript-item summary .transcript-label {
+:is(.transcript-item, .transcript-group) summary .transcript-label {
   flex-shrink: 0;
 }
 .transcript-command,
@@ -1055,7 +1055,7 @@ textarea::placeholder {
   .transcript-plan {
     padding: 16px;
   }
-  .transcript-item summary {
+  :is(.transcript-item, .transcript-group) summary {
     flex-wrap: wrap;
   }
   .transcript-command,
@@ -1066,7 +1066,7 @@ textarea::placeholder {
   }
 }
 .transcript-timeline:focus-visible,
-.transcript-item summary:focus-visible {
+:is(.transcript-item, .transcript-group) summary:focus-visible {
   outline: 2px solid #a5e0b8;
   outline-offset: -2px;
 }
@@ -1101,5 +1101,19 @@ textarea::placeholder {
 @media (max-width: 480px) {
   .environment-resources-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.transcript-group {
+  margin-block: 4px;
+}
+.transcript-group-items {
+  margin: 2px 0 8px 16px;
+  padding-left: 8px;
+  border-left: 1px solid #303a33;
+}
+@media (pointer: coarse) {
+  :is(.transcript-item, .transcript-group) summary {
+    min-height: 44px;
   }
 }

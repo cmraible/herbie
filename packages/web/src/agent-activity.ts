@@ -72,3 +72,25 @@ export function activityText(item: Item): string {
   const { id: _id, type: _type, ...details } = item;
   return JSON.stringify(details, null, 2);
 }
+
+// Keep messages, instructions, running work and failures outside collapsed activity groups.
+export function groupActivity(items: Item[]): Item[][] {
+  const groups: Item[][] = [];
+  let pending: Item[] = [];
+  for (const item of items) {
+    if (
+      ["agentMessage", "plan", "userMessage"].includes(item.type) ||
+      item.status === "inProgress" ||
+      item.status === "failed" ||
+      (typeof item.exitCode === "number" && item.exitCode !== 0)
+    ) {
+      if (pending.length) groups.push(pending);
+      groups.push([item]);
+      pending = [];
+    } else {
+      pending.push(item);
+    }
+  }
+  if (pending.length) groups.push(pending);
+  return groups;
+}
