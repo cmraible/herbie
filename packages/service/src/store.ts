@@ -724,7 +724,7 @@ export class Store {
       );
       if (row.stage !== "publishing")
         await client.query(
-          "UPDATE projects SET state='running',attempt_count=attempt_count+$2,error=NULL,updated_at=clock_timestamp() WHERE id=$1",
+          "UPDATE projects SET state='running',attempt_count=attempt_count+$2,updated_at=clock_timestamp() WHERE id=$1",
           [project.id, row.stage === "queued" ? 1 : 0],
         );
       if (row.stage !== "publishing")

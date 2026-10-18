@@ -1390,6 +1390,11 @@ integration("retry publishes a sibling's saved work after another run fails", as
   assert.ok(first && second);
   await store.fail(first.id, "first", "Implementation failed");
   await store.saveArtifact(second.id, "second", { baseCommit: "abc", patch: Buffer.from("saved") });
+  await store.pool.query("UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE id=$1", [
+    second.id,
+  ]);
+  assert.equal((await store.claim("saved"))?.id, second.id);
+  assert.equal((await store.getProject(project.id))?.error, "Implementation failed");
   await store.retryAttempt(project.id, "owner");
   const resumed = await store.claim("resumed");
   assert.equal(resumed?.id, second.id);
