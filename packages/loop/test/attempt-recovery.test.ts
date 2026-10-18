@@ -1,0 +1,142 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import test from "node:test";
+import { runAgentAttempt, SessionDetached, type AttemptCheckpoint } from "../src/agent-attempt.js";
+import type { Environment, EnvironmentProvider } from "../src/environment.js";
+
+for (const phase of ["collected", "deleted"] as const) {
+  test(`saved patches survive replacement ${phase === "collected" ? "during" : "after"} environment deletion`, async () => {
+    let checkpoint: AttemptCheckpoint = {
+      version: 1,
+      name: `herbie-attempt-${randomUUID()}`,
+      environmentId: "same-environment",
+      phase,
+      deadline: Date.now() + 60_000,
+      artifact: JSON.stringify({
+        baseCommit: "a".repeat(40),
+        patchBase64: Buffer.from("patch").toString("base64"),
+        pullRequestTitle: "Saved title",
+        pullRequestBody: "Saved body",
+      }),
+    };
+    let connects = 0;
+    const provider: EnvironmentProvider = {
+      name: "fixture",
+      create: async () => {
+        throw new Error("Must not create a replacement environment");
+      },
+      connect: async (id) => {
+        connects++;
+        assert.equal(id, "same-environment");
+        return null;
+      },
+    };
+    const changes = await runAgentAttempt(
+      provider,
+      {
+        repoUrl: "https://github.com/example/repo.git",
+        project: "Original instructions",
+        durable: {
+          checkpoint,
+          save: async (state) => {
+            checkpoint = structuredClone(state);
+          },
+        },
+      },
+      () => {},
+      new URL("../dist/", import.meta.url),
+    );
+    assert.equal(changes.patch.toString(), "patch");
+    assert.equal(changes.verification?.sandboxDeleted, true);
+    assert.equal(checkpoint.phase, "deleted");
+    assert.equal(connects, phase === "deleted" ? 0 : 1);
+  });
+}
+
+test("observer loss never destroys a running environment", async () => {
+  let destroys = 0;
+  const environment = {
+    id: "original",
+    exec: async () => {
+      throw new Error("Network disconnected");
+    },
+    destroy: async () => {
+      destroys++;
+    },
+    readFile: async () => Readable.from([]),
+  } as unknown as Environment;
+  const checkpoint: AttemptCheckpoint = {
+    version: 1,
+    name: `herbie-attempt-${randomUUID()}`,
+    environmentId: "original",
+    phase: "running",
+    deadline: Date.now() + 60_000,
+  };
+  await assert.rejects(
+    runAgentAttempt(
+      {
+        name: "fixture",
+        create: async () => {
+          throw new Error("Unexpected create");
+        },
+        connect: async () => environment,
+      },
+      {
+        repoUrl: "https://github.com/example/repo.git",
+        project: "Original",
+        durable: { checkpoint, save: async () => {} },
+      },
+      () => {},
+      new URL("../dist/", import.meta.url),
+    ),
+    SessionDetached,
+  );
+  assert.equal(destroys, 0);
+});
+
+test("explicit cancellation reconnects and deletes the original environment without executing again", async () => {
+  let destroys = 0;
+  const environment = {
+    id: "original",
+    exec: async () => {
+      throw new Error("Must not execute after cancellation");
+    },
+    destroy: async () => {
+      destroys++;
+    },
+  } as unknown as Environment;
+  const controller = new AbortController();
+  controller.abort(new Error("Project cancelled"));
+  const checkpoint: AttemptCheckpoint = {
+    version: 1,
+    name: `herbie-attempt-${randomUUID()}`,
+    environmentId: "original",
+    phase: "running",
+    deadline: Date.now() + 60_000,
+  };
+  await assert.rejects(
+    runAgentAttempt(
+      {
+        name: "fixture",
+        create: async () => {
+          throw new Error("Unexpected create");
+        },
+        connect: async () => environment,
+      },
+      {
+        repoUrl: "https://github.com/example/repo.git",
+        project: "Original",
+        signal: controller.signal,
+        durable: { checkpoint, save: async () => {} },
+      },
+      () => {},
+      new URL("../dist/", import.meta.url),
+    ),
+    (error: unknown) => {
+      assert.equal((error as { cleanup: string }).cleanup, "confirmed");
+      return true;
+    },
+  );
+  assert.equal(destroys, 1);
+});

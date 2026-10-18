@@ -243,3 +243,69 @@ test("hosted process sanitizes startup failure output before exiting", async () 
     stderr.endsWith("Herbie startup failed. Check configuration and database availability.\n"),
   );
 });
+
+test("deployment detaches a durable session and replacement immediately resumes it", async (t) => {
+  const database = process.env.HERBIE_TEST_DATABASE_URL;
+  if (!database) return t.skip("Set HERBIE_TEST_DATABASE_URL");
+  const app = await fixture(database);
+  const first = await app.runtime(true);
+  const started = Promise.withResolvers<void>();
+  const resumed = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const demo = first.adapters;
+  let session: string | undefined;
+  first.adapters = {
+    ...demo,
+    durableSessions: true,
+    async attempt(execution, report) {
+      session = execution.agentSessionId;
+      await execution.durable!.save({
+        ...execution.durable!.checkpoint,
+        environmentId: "still-running",
+        phase: "running",
+      });
+      started.resolve();
+      await release.promise;
+      execution.signal?.throwIfAborted();
+      return demo.attempt(execution, report);
+    },
+  };
+  const old = await startHostedService(first);
+  let replacement: Awaited<ReturnType<typeof startHostedService>> | undefined;
+  t.after(async () => {
+    release.resolve();
+    await old.close();
+    await replacement?.close();
+    await app.close();
+  });
+  const project = await clientFor(old, testSessionToken).start(
+    { repository: "demo/example", prompt: "Survive rollout" },
+    randomUUID(),
+  );
+  await started.promise;
+  await Promise.race([
+    old.close(),
+    delay(2000).then(() => {
+      throw new Error("Shutdown waited for the remote agent");
+    }),
+  ]);
+  const next = await app.runtime(true);
+  next.adapters = {
+    ...demo,
+    durableSessions: true,
+    async attempt(execution, report) {
+      assert.equal(execution.agentSessionId, session);
+      assert.equal(execution.durable?.checkpoint.environmentId, "still-running");
+      resumed.resolve();
+      return demo.attempt(execution, report);
+    },
+  };
+  replacement = await startHostedService(next);
+  await Promise.race([
+    resumed.promise,
+    delay(2000).then(() => {
+      throw new Error("Replacement did not reconnect on boot");
+    }),
+  ]);
+  assert.equal((await next.store.getProject(project.id))?.attemptCount, 1);
+});

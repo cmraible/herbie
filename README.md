@@ -439,10 +439,12 @@ render individually. Check-repair turns are included in the same run.
 
 The runner appends notifications to a JSONL file in its environment. The worker
 reads new byte ranges every 500 ms when caught up, persists them in order, and
-drains the file before cleanup, including after execution failures. A recording
-failure stops execution rather than silently dropping output. Records already
-committed remain available after cancellation or a worker crash; uncollected
-output can be lost if the environment is deleted or the worker crashes.
+drains the file before cleanup, including after execution failures. For durable
+sessions, a recording failure detaches the observer while execution continues.
+The replacement reconnects to the same environment and replays the file;
+per-session byte offsets deduplicate records already committed to Postgres.
+Worker replacement does not delete the environment. Output not yet collected can
+still be lost if the environment itself fails or reaches its TTL.
 
 Thinking includes only reasoning summaries/text emitted by Codex and the selected
 model. The transcript preserves exposed protocol output, not unavailable model

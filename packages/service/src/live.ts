@@ -59,6 +59,7 @@ export function createLiveAdapters(
         : undefined;
   return {
     mode: "live",
+    durableSessions: true,
     environmentLimits,
     ...(config
       ? {
@@ -234,11 +235,19 @@ Inspect these branches before choosing your change. Make one small, independentl
                 domainAllowList: config.domainAllowList,
                 outboundProxyUrl: config.outboundProxyUrl,
               },
+              (id) =>
+                new Daytona({
+                  apiKey: config.apiKey,
+                  apiUrl: config.apiUrl,
+                  target: config.target,
+                  requestTimeoutMs: 30_000,
+                }).get(id),
             );
       const changes = await runAgentAttempt(
         provider,
         {
           signal: execution.signal,
+          durable: execution.durable,
           onEnvironment: execution.onEnvironment,
           onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,

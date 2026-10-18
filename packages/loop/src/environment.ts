@@ -2,7 +2,7 @@ import type { Readable } from "node:stream";
 
 export interface Environment {
   id: string;
-  prepare(): Promise<void>;
+  prepare(durable?: { directory: string; deadline: number; signal?: AbortSignal }): Promise<void>;
   mkdir(path: string): Promise<void>;
   writeFile(contents: Buffer, path: string): Promise<void>;
   readFile(path: string, options: { timeoutMs: number; signal: AbortSignal }): Promise<Readable>;
@@ -16,6 +16,14 @@ export interface Environment {
 }
 export interface EnvironmentProvider {
   name: string;
+  find?(
+    name: string,
+    resources?: { cpu: number; memory: number; disk: number },
+  ): Promise<Environment | null>;
+  connect?(
+    id: string,
+    resources?: { cpu: number; memory: number; disk: number },
+  ): Promise<Environment | null>;
   create(options: {
     name: string;
     resources?: { cpu: number; memory: number; disk: number };

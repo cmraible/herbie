@@ -4,7 +4,7 @@ import type {
   Repository,
   RepositoryDiscovery,
 } from "@herbie/contracts";
-import type { AgentAttemptChanges } from "@herbie/loop/agent-attempt";
+import type { AgentAttemptChanges, DurableAttempt } from "@herbie/loop/agent-attempt";
 
 export interface RepositoryAccess {
   repository: string;
@@ -13,6 +13,7 @@ export interface RepositoryAccess {
 }
 export interface Execution {
   agentSessionId?: string;
+  durable?: DurableAttempt;
   onEnvironment?: (environment: { provider: string; id: string }) => Promise<void>;
   project: Project;
   repository: RepositoryAccess;
@@ -20,7 +21,7 @@ export interface Execution {
   branch: string;
   signal?: AbortSignal;
   ciRepair?: CiFailure;
-  onActivity?: (message: string) => Promise<void>;
+  onActivity?: (message: string, offset?: number) => Promise<void>;
   feedback?: PullRequestUpdate & { item: PullRequestFeedback; context: PullRequestFeedback[] };
 }
 export interface PullRequestFeedback {
@@ -73,6 +74,7 @@ export class PublicationBlockedError extends Error {}
 export class StaleRepairError extends Error {}
 export interface Adapters {
   mode: "demo" | "live";
+  durableSessions?: boolean;
   environmentLimits?(): Promise<Record<keyof EnvironmentResources, number | null>>;
 
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;

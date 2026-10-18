@@ -4,7 +4,7 @@ import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure, failureDiagnosticRecord } from "./diagnostic-log.js";
-import { AgentAttemptError } from "@herbie/loop/agent-attempt";
+import { AgentAttemptError, SessionDetached } from "@herbie/loop/agent-attempt";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   KnownAttemptFailure,
@@ -12,7 +12,7 @@ import {
   type Adapters,
   type Execution,
 } from "./adapters.js";
-import type { Job } from "./store.js";
+import type { Job, WorkerOptions } from "./store.js";
 import { Store, StoreError } from "./store.js";
 import { publicationDiagnostic, publicationDiagnosticMessage } from "./publication-diagnostics.js";
 import type { PublicationPhase } from "./adapters.js";
@@ -30,17 +30,18 @@ export async function runWorkerOnce(
   adapters: Adapters,
   workerId: string,
   timing = { leaseMs: 30_000, heartbeatMs: 5_000 },
+  options: WorkerOptions = {},
 ): Promise<boolean> {
   const { leaseMs, heartbeatMs } = timing;
   await store.recoverExpired();
   await store.recoverAgentSessions();
-  const job = await store.claim(workerId, leaseMs, adapters.mode);
+  const job = options.recovered?.job ?? (await store.claim(workerId, leaseMs, adapters.mode));
   if (!job) return false;
   let leaseLost = false;
   const controller = new AbortController();
-  const loseLease = () => {
+  const loseLease = (reason: Error = new SessionDetached("Worker lease lost")) => {
     leaseLost = true;
-    controller.abort();
+    controller.abort(reason);
   };
   let renewing = false;
   const heartbeat = setInterval(() => {
@@ -48,8 +49,13 @@ export async function runWorkerOnce(
     renewing = true;
     void store
       .heartbeat(job.id, workerId, leaseMs)
-      .then((owned) => {
-        if (!owned) loseLease();
+      .then(async (owned) => {
+        if (!owned)
+          loseLease(
+            (await store.getProject(job.project.id))?.state === "cancelled"
+              ? new Error("Project cancelled")
+              : undefined,
+          );
       })
       .catch((error) => {
         loseLease();
@@ -88,9 +94,13 @@ export async function runWorkerOnce(
       if (!(await store.beginPublication(job.id, workerId))) return true;
       publishing = true;
     }
+    if (options.recovered && job.project.state === "cancelled")
+      controller.abort(new Error("Project cancelled"));
     const execution = {
-      ...(await executionFor(adapters, job, publishing)),
-      signal: controller.signal,
+      ...(options.recovered?.execution ?? (await executionFor(adapters, job, publishing))),
+      signal: options.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal,
     };
     await requireLease();
     if (recoveringPublication) {
@@ -153,7 +163,7 @@ export async function runWorkerOnce(
       }
       return true;
     }
-    controller.signal.throwIfAborted();
+    if (!options.recovered) controller.signal.throwIfAborted();
     if (!changes) {
       // Authorization can outlive the lease; fence the paid operation after that read.
       await requireLease();
@@ -191,6 +201,7 @@ export async function runWorkerOnce(
     if (!existing) await reportPublicationPhase("state_persistence");
     await store.completePublication(job.id, workerId, result);
   } catch (error) {
+    if (error instanceof SessionDetached || options.signal?.aborted) return true;
     const cancelled = await store.getProject(job.project.id);
     if (cancelled?.state === "cancelled") {
       controller.abort();
@@ -310,6 +321,10 @@ export async function runWorker(
   workerId: string,
   signal: AbortSignal,
 ): Promise<void> {
+  const detached = new AbortController();
+  const detach = () => detached.abort(new SessionDetached("Coordinator stopped"));
+  signal.addEventListener("abort", detach, { once: true });
+  if (signal.aborted) detach();
   const tasks = new Set<Promise<unknown>>();
   const launch = (task: Promise<unknown>) => {
     const tracked = task
@@ -323,18 +338,32 @@ export async function runWorker(
   let nextCiPoll = 0;
   while (!signal.aborted) {
     try {
-      if (Date.now() >= nextReconciliation) {
-        await reconcileReviews(store, adapters);
-        nextReconciliation = Date.now() + 30_000;
+      const recoveryWorkerId = `${workerId}:${randomUUID()}`;
+      const options = { signal: adapters.durableSessions ? detached.signal : undefined };
+      const recovered = adapters.durableSessions
+        ? await store.claimSessionRecovery(recoveryWorkerId)
+        : null;
+      if (recovered) {
+        const recovery = { ...options, recovered };
+        if (recovered.kind === "implementation")
+          launch(runWorkerOnce(store, adapters, recoveryWorkerId, undefined, recovery));
+        else if (recovered.kind === "ci_repair")
+          launch(runCiRepairOnce(store, adapters, recoveryWorkerId, recovery));
+        else launch(runFeedbackOnce(store, adapters, recoveryWorkerId, recovery));
+      } else {
+        if (Date.now() >= nextReconciliation) {
+          await reconcileReviews(store, adapters);
+          nextReconciliation = Date.now() + 30_000;
+        }
+        if ((adapters.ciStatus || adapters.feedback) && Date.now() >= nextCiPoll) {
+          if (adapters.ciStatus) await store.requestCiReview();
+          if (adapters.feedback) await store.requestFeedbackReview();
+          nextCiPoll = Date.now() + 10 * 60_000;
+        }
+        if (!signal.aborted) launch(runFeedbackOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
+        if (!signal.aborted) launch(runCiRepairOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
+        if (!signal.aborted) launch(runWorkerOnce(store, adapters, `${workerId}:${randomUUID()}`, undefined, options));
       }
-      if ((adapters.ciStatus || adapters.feedback) && Date.now() >= nextCiPoll) {
-        if (adapters.ciStatus) await store.requestCiReview();
-        if (adapters.feedback) await store.requestFeedbackReview();
-        nextCiPoll = Date.now() + 10 * 60_000;
-      }
-      if (!signal.aborted) launch(runFeedbackOnce(store, adapters, `${workerId}:${randomUUID()}`));
-      if (!signal.aborted) launch(runCiRepairOnce(store, adapters, `${workerId}:${randomUUID()}`));
-      if (!signal.aborted) launch(runWorkerOnce(store, adapters, `${workerId}:${randomUUID()}`));
     } catch (error) {
       logFailure(error, { component: "worker-tick" });
       // Database interruptions leave leases to expire safely; keep the daemon alive.
@@ -346,6 +375,7 @@ export async function runWorker(
     await delay(1000, undefined, { signal }).catch(() => undefined);
   }
   await Promise.all(tasks);
+  signal.removeEventListener("abort", detach);
 }
 
 /**
@@ -381,6 +411,7 @@ export async function runExclusiveWorker(
       }
     }
     if (!locked) return;
+    if (adapters.durableSessions) await store.releaseSessionObservers();
     console.log(`Herbie coordinator ${workerId} acquired exclusive database ownership.`);
     await runWorker(store, adapters, workerId, AbortSignal.any([signal, connectionLost.signal]));
     if (connectionLost.signal.aborted && !signal.aborted) throw connectionLost.signal.reason;

@@ -83,15 +83,24 @@ release check, not a claim that a generic secret scan can prove absence of secre
   ID and baked image revision. Use it for readiness, never liveness.
 - Startup has its own 60-second deadline. Allow about 90 seconds for the startup
   probe including process overhead. A database outage must not cause restart churn.
-- SIGTERM closes the listener and stops new claims, then waits for active bounded
-  work and cleanup before closing the pool. Allow 40 minutes of termination grace
-  for the roughly 35-minute attempt lifecycle plus publication/database overhead.
-  This is an operating allowance, not a new global deadline. Never force-delete
-  an active coordinator or assume a terminated process proves sandbox cleanup.
+- SIGTERM closes the listener, stops new claims, and detaches session observers.
+  Agent execution continues in its environment independently of the coordinator;
+  no agent-duration termination grace is required, including abrupt process death.
+  On acquiring coordinator ownership, the replacement reclaims durable sessions
+  immediately using their original inputs, environment IDs, and checkpoints.
+  Remote locks prevent duplicate execution after ambiguous launch responses.
+  Results are persisted before environment deletion, and activity replay is
+  deduplicated. Explicit cancellation and stop controls retain their cleanup
+  behavior; ordinary session deadlines and environment TTLs still apply.
+  Ambiguous GitHub writes remain subject to the existing publication recovery
+  rules; reconnecting an agent never blindly repeats a push or review reply.
+  A terminated coordinator does not prove environment cleanup. Existing sessions
+  created by versions without durable checkpoints cannot be retroactively resumed:
+  let those finish before the first upgrade to this execution protocol.
 - One steady replica with a rolling strategy using `maxUnavailable: 0` and
   `maxSurge: 1`, and no autoscaler. During a rollout, both pods may serve HTTP,
   but a PostgreSQL session advisory lock permits only one background coordinator.
-  The old coordinator drains before releasing ownership to the replacement.
+  The old coordinator detaches before releasing ownership to the replacement.
   Deploy the API, coordinator, and clients together when changing the project contract.
   The existing database WIP column is retained internally, preserving configured targets
   while older coordinators drain during rollout.

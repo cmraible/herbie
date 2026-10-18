@@ -9,7 +9,7 @@ try {
   process.once("SIGINT", () => controller.abort());
   process.once("SIGTERM", () => controller.abort());
   console.log(
-    `Herbie ${adapters.mode} worker ${config.executionEnabled ? "ready" : "disabled by operator"}. Active bounded attempts finish cleanup on shutdown.`,
+    `Herbie ${adapters.mode} worker ${config.executionEnabled ? "ready" : "disabled by operator"}. Durable agent sessions continue remotely during shutdown.`,
   );
   try {
     if (config.executionEnabled)

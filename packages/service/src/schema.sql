@@ -242,3 +242,11 @@ END;
 $$;
 CREATE TRIGGER notify_agent_session_change AFTER INSERT OR UPDATE ON agent_sessions
   FOR EACH ROW EXECUTE FUNCTION notify_agent_session_change();
+
+-- Durable session execution is independent of the coordinator process.
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS execution jsonb;
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS checkpoint jsonb;
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS observer text;
+ALTER TABLE project_events ADD COLUMN IF NOT EXISTS transcript_offset bigint;
+CREATE UNIQUE INDEX IF NOT EXISTS project_events_transcript_offset ON project_events(agent_session_id,transcript_offset) WHERE transcript_offset IS NOT NULL;
+ALTER TABLE pr_feedback ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;

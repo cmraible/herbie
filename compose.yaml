@@ -27,7 +27,6 @@ services:
       context: .
     init: true
     network_mode: service:postgres
-    stop_grace_period: 40m
     depends_on:
       postgres:
         condition: service_healthy
