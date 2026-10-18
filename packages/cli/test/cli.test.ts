@@ -131,7 +131,7 @@ test("start sends a custom name and preserves the request ID on retry", async ()
       "octocat/demo",
       "--prompt",
       "Add a regression test",
-      "--max-wip",
+      "--target-wip",
       "2",
       "--request-id",
       requestId,
@@ -146,7 +146,7 @@ test("start sends a custom name and preserves the request ID on retry", async ()
           repository: "octocat/demo",
           name: "Regression coverage",
           prompt: "Add a regression test",
-          maxWip: 2,
+          targetWip: 2,
         },
       })),
     );

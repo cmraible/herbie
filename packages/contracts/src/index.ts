@@ -50,7 +50,7 @@ export const projectInput = z
     model: projectModel.default("gpt-6-luna"),
     reasoningEffort: reasoningEffort.default("low"),
     resources: environmentResources.nullable().default(null),
-    maxWip: z.number().int().min(1).max(2147483647).default(1),
+    targetWip: z.number().int().min(1).max(2147483647).default(1),
   })
   .strict();
 export const projectUpdate = z
@@ -60,7 +60,7 @@ export const projectUpdate = z
     prompt: projectPrompt.optional(),
     model: projectModel.optional(),
     reasoningEffort: reasoningEffort.optional(),
-    maxWip: projectInput.shape.maxWip.removeDefault().optional(),
+    targetWip: projectInput.shape.targetWip.removeDefault().optional(),
   })
   .strict()
   .refine(

@@ -8,7 +8,7 @@ export const draftSchema = z.object({
   model: z.string().default("gpt-6-luna"),
   reasoningEffort: reasoningEffort.default("low"),
   resources: environmentResources.nullable().default(null),
-  maxWip: z.string().default("1"),
+  targetWip: z.string().default("1"),
   requestId: z.string().uuid(),
 });
 export type Draft = z.infer<typeof draftSchema>;
@@ -18,7 +18,7 @@ export function newDraft(repository = ""): Draft {
     prompt: "",
     model: "gpt-6-luna",
     reasoningEffort: "low",
-    maxWip: "1",
+    targetWip: "1",
     resources: null,
     requestId: crypto.randomUUID(),
   };
@@ -31,7 +31,7 @@ export function parseDraft(draft: Draft) {
     ...(draft.resources === null ? {} : { resources: draft.resources }),
     model: draft.model,
     reasoningEffort: draft.reasoningEffort,
-    maxWip: Number(draft.maxWip),
+    targetWip: Number(draft.targetWip),
   });
   if (!input.success)
     throw new Error(

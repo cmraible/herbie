@@ -121,7 +121,7 @@ export function App() {
               id: project.id,
               name: project.name,
               prompt: project.prompt,
-              maxWip: String(project.maxWip),
+              targetWip: String(project.targetWip),
               resources: project.resources,
               model: project.model,
               reasoningEffort: project.reasoningEffort,
@@ -496,7 +496,7 @@ export function App() {
         resources: projectEdit.resources,
         model: projectEdit.model,
         reasoningEffort: projectEdit.reasoningEffort,
-        maxWip: Number(projectEdit.maxWip),
+        targetWip: Number(projectEdit.targetWip),
       });
       setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
       if (location.hash === `#${projectEdit.id}/edit`) navigateToScreen(result.id, true);
@@ -850,7 +850,7 @@ export function App() {
 
                     <p className="project-meta">
                       {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"}{" "}
-                      <span>·</span> Max parallel runs {project.maxWip} <span>·</span> Created{" "}
+                      <span>·</span> Target WIP {project.targetWip} <span>·</span> Created{" "}
                       {time(project.createdAt)}
                     </p>
                     {project.error && (
@@ -1046,22 +1046,25 @@ export function App() {
                     onChange={(reasoningEffort) => editForm({ reasoningEffort })}
                   />
                   <label>
-                    Maximum work in progress
+                    Target WIP
                     <input
                       disabled={busy}
                       type="number"
                       min="1"
                       max="2147483647"
                       required
-                      value={formDraft.maxWip}
-                      onChange={(event) => editForm({ maxWip: event.target.value })}
+                      value={formDraft.targetWip}
+                      onChange={(event) => editForm({ targetWip: event.target.value })}
                     />
-                    <span>Open pull requests and the run preparing the next one.</span>
+                    <span>
+                      Open pull requests plus active runs. Herbie starts new runs to maintain this
+                      target.
+                    </span>
                   </label>
                   {editing && (
                     <p className="subtle-note">
                       Instructions, environment, model, and reasoning changes apply to future runs.
-                      Existing work will finish before a lower work limit takes effect.
+                      Existing work will finish before a lower target takes effect.
                     </p>
                   )}
                   {formError && (

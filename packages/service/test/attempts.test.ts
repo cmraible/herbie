@@ -21,7 +21,7 @@ test("attempts retain their PRs and event attribution when an older PR merges", 
   });
   const { project } = await store.createProject(
     "owner",
-    { repository: "demo/example", prompt: "Two attempts", maxWip: 2 },
+    { repository: "demo/example", prompt: "Two attempts", targetWip: 2 },
     "demo",
     randomUUID(),
   );

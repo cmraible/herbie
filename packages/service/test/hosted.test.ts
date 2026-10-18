@@ -167,13 +167,15 @@ test("overlapping hosted processes keep exactly one coordinator during a rollout
   }
   let active = 0;
   let maximumActive = 0;
+  const coordinators = new Set<number>();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  for (const runtime of runtimes) {
+  for (const [index, runtime] of runtimes.entries()) {
     const demo = runtime.adapters;
     runtime.adapters = {
       ...demo,
       async attempt(execution, report) {
+        coordinators.add(index);
         active++;
         maximumActive = Math.max(maximumActive, active);
         entered.resolve();
@@ -194,8 +196,9 @@ test("overlapping hosted processes keep exactly one coordinator during a rollout
   });
   await entered.promise;
   await delay(1200);
-  assert.equal(maximumActive, 1);
-  assert.equal(active, 1);
+  assert.equal(coordinators.size, 1);
+  assert.equal(maximumActive, 2);
+  assert.equal(active, 2);
   release.resolve();
   await Promise.all(services.map((service) => service.close()));
 });

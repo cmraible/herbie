@@ -42,7 +42,6 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
   ): Promise<T> {
     const headers = new Headers({
       accept: "application/json",
-      "x-herbie-project-version": "2",
       "x-herbie-repository-version": "2",
     });
     if (body !== undefined) headers.set("content-type", "application/json");
@@ -109,15 +108,13 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     projects: () => request("/api/projects", z.array(projectSchema)),
     project: (id: string) => request(projectPath(id), projectSchema),
     start: (input: ProjectInput, requestId: string) => {
-      const { maxWip, model, reasoningEffort, resources, ...project } = projectInput.parse(input);
-      // The default must remain acceptable to older strict APIs during rolling upgrades.
+      const { model, reasoningEffort, resources, ...project } = projectInput.parse(input);
       return request(
         "/api/projects",
         projectSchema,
         {
           ...project,
           ...(resources === null ? {} : { resources }),
-          ...(maxWip === 1 ? {} : { maxWip }),
           ...(model === "gpt-6-luna" ? {} : { model }),
           ...(reasoningEffort === "low" ? {} : { reasoningEffort }),
         },

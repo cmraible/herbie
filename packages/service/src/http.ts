@@ -111,12 +111,7 @@ export function createApiServer(options: ApiOptions) {
     const url = new URL(request.url ?? "/", origin);
     const method = request.method ?? "GET";
     function projectJson(status: number, value: Project | Project[]): void {
-      const compatible = (project: Project) => {
-        if (request.headers["x-herbie-project-version"] === "2") return project;
-        const { maxWip: _maxWip, pullRequests: _pullRequests, ...legacy } = project;
-        return legacy;
-      };
-      json(response, status, Array.isArray(value) ? value.map(compatible) : compatible(value));
+      json(response, status, value);
     }
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1];
     if (

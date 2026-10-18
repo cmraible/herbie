@@ -30,7 +30,7 @@ Copy the App ID, client ID, client secret, private key, and webhook secret into
 Postgres preserves jobs and results across restarts. Coding runs in disposable
 Daytona sandboxes; GitHub write credentials stay on the Herbie host.
 
-- `maxWip` limits open PRs plus queued/running attempts. Merging a PR frees capacity;
+- `targetWip` sets the desired number of open PRs plus queued/running runs. Polling replenishes missing work;
   closing one without merging pauses the project. Projects have no total attempt or dollar cap.
 - **Pause** lets an active attempt finish. Saved changes can resume publication
   without another model run.

@@ -67,13 +67,12 @@ test("a non-JSON service failure retains HTTP status without exposing its body",
   );
 });
 
-for (const maxWip of [undefined, 1, 2])
-  test(`project creation preserves rollout compatibility (maxWip: ${maxWip})`, async () => {
+for (const targetWip of [undefined, 1, 2])
+  test(`project creation sends the WIP target (targetWip: ${targetWip})`, async () => {
     const bodies: unknown[] = [];
     const id = "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d";
     await withServer(
       (request, response) => {
-        assert.equal(request.headers["x-herbie-project-version"], "2");
         let body = "";
         request.setEncoding("utf8");
         request.on("data", (chunk) => {
@@ -101,9 +100,9 @@ for (const maxWip of [undefined, 1, 2])
         });
       },
       async (client) => {
-        await client.start({ repository: "demo/example", prompt: "Work", maxWip }, id);
+        await client.start({ repository: "demo/example", prompt: "Work", targetWip }, id);
         assert.deepEqual(bodies, [
-          { repository: "demo/example", prompt: "Work", ...(maxWip === 2 ? { maxWip: 2 } : {}) },
+          { repository: "demo/example", prompt: "Work", targetWip: targetWip ?? 1 },
         ]);
       },
     );

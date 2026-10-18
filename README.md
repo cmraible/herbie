@@ -46,7 +46,7 @@ The optional CLI client requires Node.js 24+ and pnpm 10:
 pnpm install
 pnpm cli login --url https://herbie-dev.example.com
 pnpm cli repositories
-pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --max-wip 1
+pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --target-wip 1
 pnpm cli status
 pnpm cli status PROJECT_ID
 pnpm cli rename PROJECT_ID --name "Improve arithmetic"
@@ -57,14 +57,13 @@ pnpm cli resume PROJECT_ID
 pnpm cli cancel PROJECT_ID
 ```
 
-`maxWip` defaults to 1 and limits each project's outstanding work: open PRs plus
-any queued or running attempt. Attempts run sequentially, filling available
-capacity without waiting for merges. Each merge frees capacity for the next
-attempt. For example, `--max-wip 2` keeps up to two PRs outstanding until the
+`targetWip` defaults to 1 and sets the desired amount of outstanding work: open PRs
+plus queued or active runs. The coordinator polls for missing work and starts runs
+to restore the target, including after a PR merges. For example, `--target-wip 2` maintains two open PRs or active runs until the
 project is paused, cancelled, or stopped by a failure or an unmerged close.
 The project view lists every published PR. Use **Edit project** to update its name,
-prompt, and maximum work in progress together. Prompt changes apply to future
-attempts; lowering the limit keeps existing work and delays new attempts until
+prompt, and target work in progress together. Prompt changes apply to future
+attempts; lowering the target keeps existing work and delays new attempts until
 capacity is available. The repository stays fixed for the life of the project.
 
 CLI responses are JSON. Login stores only a Herbie bearer session in a private

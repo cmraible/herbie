@@ -43,7 +43,11 @@ test("cancelled projects reject edits without changing their saved definition", 
     () => store.renameProject(project.id, "owner", "Changed name"),
     () => store.editProjectPrompt(project.id, "owner", "Changed prompt"),
     () =>
-      store.updateProject(project.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 2 }),
+      store.updateProject(project.id, "owner", {
+        name: "Changed",
+        prompt: "Changed",
+        targetWip: 2,
+      }),
   ]) {
     await assert.rejects(edit(), /Cancelled projects cannot be edited/);
   }
