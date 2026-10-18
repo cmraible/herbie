@@ -1,4 +1,5 @@
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { runAgentSession } from "./agent-session.js";
+import { AgentAttemptError } from "@herbie/loop/agent-attempt";
 import { StaleRepairError } from "./adapters.js";
 import type { Adapters, Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -12,6 +13,7 @@ export async function runCiRepairOnce(
 ): Promise<boolean> {
   if (!adapters.ciStatus) return false;
   await store.recoverCiRepairs();
+  await store.recoverAgentSessions();
   const job = await store.takeCiReview();
   if (!job) return false;
   let id: string | null = null;
@@ -66,13 +68,7 @@ export async function runCiRepairOnce(
     let changes = await store.ciArtifact(id);
     cleanupConfirmed = changes?.verification?.sandboxDeleted === true;
     if (!changes) {
-      changes = await adapters.attempt(
-        {
-          ...execution,
-          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
-        },
-        (message) => store.appendEvent(job.project.id, "ci_repair", message.slice(0, 2000), job.id),
-      );
+      changes = await runAgentSession(store, adapters, execution, job.id, workerId, "ci_repair");
       cleanupConfirmed = changes.verification?.sandboxDeleted === true;
       await requireLease();
       await store.saveCiArtifact(id, workerId, changes);
@@ -122,7 +118,7 @@ export async function runCiRepairOnce(
         false,
         `CI repair stopped. Inspect diagnostics, sandbox cleanup, and PR state before manual recovery. Reference: ${reference}`,
         undefined,
-        cleanupConfirmed || (error instanceof DaytonaAttemptError && error.cleanup === "confirmed"),
+        cleanupConfirmed || (error instanceof AgentAttemptError && error.cleanup === "confirmed"),
       );
     // The periodic poll retries failed reads; immediate requeue starves other PRs.
   } finally {

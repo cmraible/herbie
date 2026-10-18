@@ -15,8 +15,8 @@ type AttemptOptions = ProcessOptions & {
   turnTimeoutMs?: number;
   onActivity?: (message: Record<string, unknown>) => void;
   interruptTimeoutMs?: number;
-  // Only the runner inside an externally isolated, disposable Daytona sandbox enables this.
-  disposableDaytona?: boolean;
+  // Only the runner inside an externally isolated, disposable environment enables this.
+  disposableEnvironment?: boolean;
 };
 
 export function initializeCodexProcess(
@@ -48,9 +48,9 @@ async function runCodexProcess(
   if (process.platform === "win32") throw new Error("Codex process groups require POSIX");
   if (!Number.isFinite(shutdownMs) || shutdownMs < 0)
     throw new Error("Invalid Codex shutdown deadline");
-  const disposableDaytona = "disposableDaytona" in options && options.disposableDaytona;
-  // Preserve Daytona's opaque API placeholder and proxy/CA routing, never host auth/config.
-  const daytonaEnvironment = new Set([
+  const disposableEnvironment = "disposableEnvironment" in options && options.disposableEnvironment;
+  // Preserve the provider's opaque API placeholder and proxy/CA routing, never host auth/config.
+  const environmentVariables = new Set([
     "HOME",
     "PATH",
     "TMPDIR",
@@ -72,9 +72,9 @@ async function runCodexProcess(
     stdio: "pipe",
     detached: true,
     cwd: "cwd" in options ? options.cwd : undefined,
-    env: disposableDaytona
+    env: disposableEnvironment
       ? Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => daytonaEnvironment.has(key)),
+          Object.entries(process.env).filter(([key]) => environmentVariables.has(key)),
         )
       : undefined,
   });
@@ -140,7 +140,7 @@ async function runCodexProcess(
         lines,
         send,
         timeoutMs,
-        "disposableDaytona" in options && options.disposableDaytona,
+        "disposableEnvironment" in options && options.disposableEnvironment,
       ),
     ]);
     if ("project" in options) {
@@ -152,7 +152,7 @@ async function runCodexProcess(
           send,
           options.cwd,
           timeoutMs,
-          options.disposableDaytona,
+          options.disposableEnvironment,
           options.model,
         ),
       ]);
@@ -167,7 +167,7 @@ async function runCodexProcess(
             reasoningEffort: options.reasoningEffort,
             timeoutMs: options.turnTimeoutMs,
             interruptTimeoutMs: options.interruptTimeoutMs,
-            disposableDaytona: options.disposableDaytona,
+            disposableEnvironment: options.disposableEnvironment,
             onActivity: options.onActivity,
           }),
         ]);

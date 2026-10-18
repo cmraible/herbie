@@ -1117,3 +1117,18 @@ textarea::placeholder {
     min-height: 44px;
   }
 }
+
+.agent-session {
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+.agent-session > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.agent-session p,
+.agent-session li {
+  overflow-wrap: anywhere;
+}

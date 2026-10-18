@@ -66,6 +66,10 @@ export const environmentSchema = z
     GITHUB_WEBHOOK_SECRET: text.optional(),
     HERBIE_DATABASE_CA: text.optional(),
     HERBIE_DATABASE_CA_FILE: text.optional(),
+    HERBIE_ENVIRONMENT_PROVIDER: z.enum(["daytona", "e2b"]).default("daytona"),
+    E2B_API_KEY: text.optional(),
+    HERBIE_E2B_TEMPLATE: text.optional(),
+    HERBIE_E2B_OPENAI_SECRET: text.optional(),
     DAYTONA_API_KEY: text.optional(),
     DAYTONA_API_URL: httpUrl
       .refine((value) => {
@@ -119,7 +123,9 @@ export const environmentSchema = z
       if (!env[name]) issue(name, "Required for live runs");
     }
     if (env.HERBIE_EXECUTION_ENABLED === "true")
-      for (const name of ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"] as const)
+      for (const name of (env.HERBIE_ENVIRONMENT_PROVIDER === "e2b"
+        ? ["E2B_API_KEY", "HERBIE_E2B_TEMPLATE", "HERBIE_E2B_OPENAI_SECRET"]
+        : ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"]) as (keyof typeof env)[])
         if (!env[name]) issue(name, "Required when live runs are enabled");
     if (!env.GITHUB_PRIVATE_KEY && !env.GITHUB_PRIVATE_KEY_FILE)
       issue(
@@ -201,6 +207,16 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseCaFile: env.HERBIE_DATABASE_CA_FILE,
     openaiApiKey: mode === "live" ? env.OPENAI_API_KEY : undefined,
     projectNameModel: env.HERBIE_PROJECT_NAME_MODEL ?? env.HERBIE_GOAL_NAME_MODEL,
+    environmentProvider: env.HERBIE_ENVIRONMENT_PROVIDER,
+    e2b:
+      env.E2B_API_KEY && env.HERBIE_E2B_TEMPLATE && env.HERBIE_E2B_OPENAI_SECRET
+        ? {
+            provider: "e2b" as const,
+            apiKey: env.E2B_API_KEY,
+            template: env.HERBIE_E2B_TEMPLATE,
+            openaiSecretName: env.HERBIE_E2B_OPENAI_SECRET,
+          }
+        : undefined,
     daytona:
       env.DAYTONA_API_KEY && env.HERBIE_DAYTONA_OPENAI_SECRET
         ? {

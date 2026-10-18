@@ -188,6 +188,19 @@ for (const outcome of [
           )
         ).rowCount,
       );
+    const sessions =
+      (await store.getProject(project.id))?.attempts?.find((run) => run.id === job.id)?.sessions ??
+      [];
+    assert.equal(sessions.length, 1 + attempts);
+    assert.equal(sessions[0]?.kind, "implementation");
+    if (attempts) {
+      assert.equal(sessions[1]?.kind, "pr_feedback");
+      const activity = await store.pool.query(
+        "SELECT agent_session_id FROM project_events WHERE job_id=$1 AND type='agent'",
+        [job.id],
+      );
+      assert.ok(activity.rows.every((event) => event.agent_session_id === sessions[1]?.id));
+    }
     assert.equal(pushes, ["update", "reply-failed"].includes(outcome) ? 1 : 0);
     assert.equal(replies, ["reply", "update", "acknowledge-failed"].includes(outcome) ? 1 : 0);
     if (pushes)

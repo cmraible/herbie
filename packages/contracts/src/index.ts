@@ -100,7 +100,22 @@ export const ciRepairSchema = z.object({
   state: z.enum(["running", "waiting", "completed", "failed"]),
   canRetry: z.boolean(),
 });
+export const agentSessionSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(["implementation", "ci_repair", "pr_feedback"]),
+  state: z.enum(["running", "completed", "failed", "cancelled", "interrupted"]),
+  model: z.string(),
+  reasoningEffort: z.string(),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  environment: z.object({ provider: z.string(), id: z.string() }).nullable(),
+  cleanup: z.enum(["pending", "confirmed", "unconfirmed"]),
+  threadId: z.string().nullable(),
+  usage: z.record(z.string(), z.unknown()).nullable(),
+});
+export type AgentSession = z.infer<typeof agentSessionSchema>;
 export const attemptSchema = z.object({
+  sessions: z.array(agentSessionSchema).optional(),
   ciRepair: ciRepairSchema.nullable().optional(),
   id: z.string().uuid(),
   number: z.number().int().positive(),
@@ -138,6 +153,7 @@ export const projectSchema = projectInput.extend({
   error: z.string().nullable(),
 });
 export const eventSchema = z.object({
+  agentSessionId: z.string().uuid().nullable().optional(),
   attemptId: z.string().uuid().nullable().optional(),
   id: z.number().int(),
   projectId: z.string().uuid(),

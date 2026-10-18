@@ -1,4 +1,4 @@
-import type { DaytonaAttemptArtifact } from "./daytona-attempt.js";
+import type { AgentAttemptArtifact } from "./agent-attempt.js";
 import { parseFeedbackDecision } from "./feedback-decision.js";
 import { sandboxFailureOutput, registerDiagnosticSecret } from "./diagnostic-log.js";
 import { appendFileSync } from "node:fs";
@@ -55,7 +55,7 @@ Explain the specific change you actually made, why you chose it, and how it help
         ? input.reasoningEffort
         : undefined,
     turnTimeoutMs: 20 * 60_000,
-    disposableDaytona: true,
+    disposableEnvironment: true,
     onActivity: (message) =>
       appendFileSync(
         new URL("./transcript.jsonl", import.meta.url),
@@ -117,7 +117,7 @@ Explain the specific change you actually made, why you chose it, and how it help
       pullRequestBody,
       pullRequestTitle,
       patchBase64: patch.toString("base64"),
-    } satisfies DaytonaAttemptArtifact),
+    } satisfies AgentAttemptArtifact),
   );
   process.stdout.write("herbie-attempt-completed\n");
 } catch (error) {

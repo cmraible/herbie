@@ -57,7 +57,11 @@ export async function createRuntime(startup?: StartupProgress) {
     startup?.begin("adapter-setup");
     if (!github) throw new Error("Live runs require GitHub configuration");
     const adapters = createLiveAdapters(
-      config.executionEnabled ? config.daytona : undefined,
+      config.executionEnabled
+        ? config.environmentProvider === "e2b"
+          ? config.e2b
+          : config.daytona
+        : undefined,
       github,
       auth,
     );

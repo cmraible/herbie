@@ -1,8 +1,9 @@
+import { runAgentSession } from "./agent-session.js";
 import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { logFailure, failureDiagnosticRecord } from "./diagnostic-log.js";
-import { DaytonaAttemptError } from "@herbie/loop/daytona-attempt";
+import { AgentAttemptError } from "@herbie/loop/agent-attempt";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   KnownAttemptFailure,
@@ -31,6 +32,7 @@ export async function runWorkerOnce(
 ): Promise<boolean> {
   const { leaseMs, heartbeatMs } = timing;
   await store.recoverExpired();
+  await store.recoverAgentSessions();
   const job = await store.claim(workerId, leaseMs, adapters.mode);
   if (!job) return false;
   let leaseLost = false;
@@ -154,14 +156,13 @@ export async function runWorkerOnce(
     if (!changes) {
       // Authorization can outlive the lease; fence the paid operation after that read.
       await requireLease();
-      changes = await adapters.attempt(
-        {
-          ...execution,
-          onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
-        },
-        async (message) => {
-          await store.appendEvent(job.project.id, "attempt", message.slice(0, 2000), job.id);
-        },
+      changes = await runAgentSession(
+        store,
+        adapters,
+        execution,
+        job.id,
+        workerId,
+        "implementation",
       );
       await requireLease();
       await store.saveArtifact(job.id, workerId, changes);
@@ -196,12 +197,12 @@ export async function runWorkerOnce(
         job.id,
         workerId,
         !publishing &&
-          (error instanceof DaytonaAttemptError
+          (error instanceof AgentAttemptError
             ? error.cleanup === "confirmed"
             : changes?.verification?.sandboxDeleted === true)
           ? "complete"
           : "needs_attention",
-        changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
+        changes ?? (error instanceof AgentAttemptError ? error.changes : undefined),
         published,
       );
       return true;
@@ -212,7 +213,7 @@ export async function runWorkerOnce(
       jobId: job.id,
       stage: publishing
         ? publicationPhase
-        : error instanceof DaytonaAttemptError
+        : error instanceof AgentAttemptError
           ? error.diagnostics[0]?.stage
           : undefined,
     };
@@ -236,11 +237,11 @@ export async function runWorkerOnce(
           workerId,
           error instanceof KnownAttemptFailure
             ? error.message
-            : error instanceof DaytonaAttemptError
+            : error instanceof AgentAttemptError
               ? `Run failed. ${error.changes ? "Your patches are saved." : "No patches were saved."} Reference: ${errorId}`
               : `Run failed. No patches were saved. Reference: ${errorId}`,
           !(error instanceof KnownAttemptFailure),
-          changes ?? (error instanceof DaytonaAttemptError ? error.changes : undefined),
+          changes ?? (error instanceof AgentAttemptError ? error.changes : undefined),
           failureDiagnosticRecord(error, diagnosticContext, errorId),
         );
     } catch (saveError) {

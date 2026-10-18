@@ -4,7 +4,7 @@ import type {
   Repository,
   RepositoryDiscovery,
 } from "@herbie/contracts";
-import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
+import type { AgentAttemptChanges } from "@herbie/loop/agent-attempt";
 
 export interface RepositoryAccess {
   repository: string;
@@ -12,6 +12,8 @@ export interface RepositoryAccess {
   installationId: number;
 }
 export interface Execution {
+  agentSessionId?: string;
+  onEnvironment?: (environment: { provider: string; id: string }) => Promise<void>;
   project: Project;
   repository: RepositoryAccess;
   attemptId: string;
@@ -95,11 +97,11 @@ export interface Adapters {
   attempt(
     execution: Execution,
     report: (message: string) => Promise<void>,
-  ): Promise<DaytonaAttemptChanges>;
+  ): Promise<AgentAttemptChanges>;
   // Recheck ownership after awaited preparation and immediately before each remote write.
   publish(
     execution: Execution,
-    changes: DaytonaAttemptChanges,
+    changes: AgentAttemptChanges,
     requireLease: () => Promise<void>,
     reportPhase?: (phase: PublicationPhase) => Promise<void>,
   ): Promise<Omit<PullRequest, "state"> & { state?: PullRequest["state"] }>;
@@ -108,7 +110,7 @@ export interface Adapters {
   ): Promise<"absent" | "pull_request_exists" | "branch_exists">;
   checkPublicationRetry?(
     execution: Execution,
-    changes: DaytonaAttemptChanges,
+    changes: AgentAttemptChanges,
   ): Promise<PublicationRetryCheck>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
 }

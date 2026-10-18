@@ -1,7 +1,13 @@
-import { createEnvironmentLimits, validateEnvironmentResources } from "./environment-limits.js";
+import {
+  createEnvironmentLimits,
+  validateEnvironmentResources,
+  EnvironmentLimitsError,
+} from "./environment-limits.js";
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 import { Daytona } from "@daytona/sdk";
-import { runDaytonaAttempt } from "@herbie/loop/daytona-attempt";
+import { runAgentAttempt } from "@herbie/loop/agent-attempt";
+import { createE2BProvider, type E2BConfig } from "@herbie/loop/e2b";
+import { createDaytonaProvider } from "@herbie/loop/daytona-attempt";
 import {
   publishPatch,
   PatchPublicationError,
@@ -19,6 +25,7 @@ import type { Auth } from "./auth.js";
 import type { Github } from "./github.js";
 
 export interface LiveConfig {
+  provider?: "daytona";
   apiKey: string;
   apiUrl?: string;
   target?: string;
@@ -28,21 +35,28 @@ export interface LiveConfig {
   outboundProxyUrl?: string;
 }
 export function createLiveAdapters(
-  config: LiveConfig | undefined,
+  config: LiveConfig | (E2BConfig & { provider: "e2b" }) | undefined,
   github: Github,
   auth: Pick<Auth, "userToken">,
 ): Adapters {
   registerDiagnosticSecret(config?.apiKey);
   if (config && (!config.apiKey.trim() || !config.openaiSecretName.trim()))
-    throw new Error(
-      "Live mode requires Daytona API key and an existing OpenAI Daytona secret name",
-    );
-  if (config?.apiUrl) {
+    throw new Error("Live mode requires an environment API key and an existing OpenAI secret name");
+  if (config?.provider !== "e2b" && config?.apiUrl) {
     const url = new URL(config.apiUrl);
     if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
       throw new Error("Daytona API URL must use HTTPS without credentials");
   }
-  const environmentLimits = config ? createEnvironmentLimits(config) : undefined;
+  const environmentLimits =
+    config?.provider === "e2b"
+      ? async () => {
+          throw new EnvironmentLimitsError(
+            "E2B resources are set by the configured template; custom resources are unavailable.",
+          );
+        }
+      : config
+        ? createEnvironmentLimits(config)
+        : undefined;
   return {
     mode: "live",
     environmentLimits,
@@ -203,16 +217,29 @@ Inspect these branches before choosing your change. Make one small, independentl
       if (execution.project.resources) {
         validateEnvironmentResources(execution.project.resources, await environmentLimits!());
       }
-      const daytona = new Daytona({
-        apiKey: config.apiKey,
-        apiUrl: config.apiUrl,
-        target: config.target,
-        requestTimeoutMs: 30_000,
-      });
-      const changes = await runDaytonaAttempt(
-        (params, options) => daytona.create(params, options),
+      const provider =
+        config.provider === "e2b"
+          ? createE2BProvider(config)
+          : createDaytonaProvider(
+              (params, options) =>
+                new Daytona({
+                  apiKey: config.apiKey,
+                  apiUrl: config.apiUrl,
+                  target: config.target,
+                  requestTimeoutMs: 30_000,
+                }).create(params, options),
+              {
+                secrets: { OPENAI_API_KEY: config.openaiSecretName },
+                snapshot: config.snapshot,
+                domainAllowList: config.domainAllowList,
+                outboundProxyUrl: config.outboundProxyUrl,
+              },
+            );
+      const changes = await runAgentAttempt(
+        provider,
         {
           signal: execution.signal,
+          onEnvironment: execution.onEnvironment,
           onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,
           project,
@@ -222,11 +249,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           commit: (execution.feedback ?? execution.ciRepair)?.head,
           feedback: !!execution.feedback,
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),
-          secrets: { OPENAI_API_KEY: config.openaiSecretName },
-          snapshot: config.snapshot,
           resources: execution.project.resources ?? undefined,
-          domainAllowList: config.domainAllowList,
-          outboundProxyUrl: config.outboundProxyUrl,
         },
         report,
       );

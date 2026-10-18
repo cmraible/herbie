@@ -12,7 +12,7 @@ export function startCodexThread(
   send: (message: unknown) => void,
   cwd: string,
   timeoutMs = 10_000,
-  disposableDaytona = false,
+  disposableEnvironment = false,
   model?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -57,8 +57,8 @@ export function startCodexThread(
           cwd,
           ephemeral: true,
           ...(model ? { model } : {}),
-          ...(disposableDaytona
-            ? { model: model ?? "gpt-6-luna", modelProvider: "daytona_openai" }
+          ...(disposableEnvironment
+            ? { model: model ?? "gpt-6-luna", modelProvider: "herbie_openai" }
             : {}),
         },
       });

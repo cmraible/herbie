@@ -18,7 +18,7 @@ export function runCodexTurn(
     timeoutMs = 60_000,
     signal,
     interruptTimeoutMs = 5_000,
-    disposableDaytona = false,
+    disposableEnvironment = false,
     onActivity,
     model,
     reasoningEffort,
@@ -28,7 +28,7 @@ export function runCodexTurn(
     timeoutMs?: number;
     signal?: AbortSignal;
     interruptTimeoutMs?: number;
-    disposableDaytona?: boolean;
+    disposableEnvironment?: boolean;
     onActivity?: (message: Record<string, unknown>) => void;
   } = {},
 ): Promise<void> {
@@ -137,7 +137,7 @@ export function runCodexTurn(
           input: [{ type: "text", text: project }],
           ...(model ? { model } : {}),
           ...(reasoningEffort ? { effort: reasoningEffort } : {}),
-          ...(disposableDaytona
+          ...(disposableEnvironment
             ? {
                 model: model ?? "gpt-6-luna",
                 effort: reasoningEffort ?? "low",

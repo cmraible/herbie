@@ -164,3 +164,21 @@ test("normalizes file-based private keys before passing them to GitHub", async (
   assert.equal(config.github?.privateKey, privateKey.trim());
   assert.ok(createSign("RSA-SHA256").update("jwt").sign(config.github!.privateKey).length);
 });
+
+test("E2B selection requires its template and secret without requiring Daytona credentials", async () => {
+  const env = {
+    ...live,
+    HERBIE_EXECUTION_ENABLED: "true",
+    HERBIE_ENVIRONMENT_PROVIDER: "e2b",
+    E2B_API_KEY: "e2b-key",
+    HERBIE_E2B_TEMPLATE: "runtime",
+    HERBIE_E2B_OPENAI_SECRET: "openai",
+  };
+  const config = await readConfig(env);
+  assert.equal(config.environmentProvider, "e2b");
+  assert.equal(config.e2b?.template, "runtime");
+  assert.equal(config.daytona, undefined);
+  for (const field of ["E2B_API_KEY", "HERBIE_E2B_TEMPLATE", "HERBIE_E2B_OPENAI_SECRET"])
+    await assert.rejects(readConfig({ ...env, [field]: undefined }));
+  await assert.rejects(readConfig({ ...env, HERBIE_ENVIRONMENT_PROVIDER: "unknown" }));
+});

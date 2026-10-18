@@ -206,7 +206,7 @@ test(
     await runCodexAttempt(process.execPath, [fixture, "high-usage", record], {
       cwd,
       project,
-      disposableDaytona: true,
+      disposableEnvironment: true,
       turnTimeoutMs: 3_000,
       shutdownMs: 100,
     });
