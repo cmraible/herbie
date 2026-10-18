@@ -1,10 +1,10 @@
-export const daytonaPath = "/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin";
+export const environmentPath = "/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin";
 
 const runtimeFailureTrap = String.raw`trap 'runtime_status=$?; if [ "$runtime_status" -ne 0 ]; then printf "herbie-runtime-failure step=%s exit=%s\n" "$runtime_step" "$runtime_status"; fi' EXIT`;
 
 // Commands sent only to the newly created disposable sandbox, never executed on the host.
 // Pinned archives and digests are from the successful Ubuntu 22.04 compatibility probe.
-export const installDaytonaRuntime = String.raw`set -eu
+export const installEnvironmentRuntime = String.raw`set -eu
 export DEBIAN_FRONTEND=noninteractive
 ${runtimeFailureTrap}
 runtime_step=system_packages
@@ -41,8 +41,8 @@ ln -sf /opt/herbie-tools/package/vendor/x86_64-unknown-linux-musl/bin/codex /usr
 rm node.tar.xz codex.tgz python.tar.gz
 `;
 
-// No secret values: Daytona supplies the existing secret reference through its egress proxy.
-export const configureDaytonaRuntime = String.raw`set -eu
+// No secret values: The environment provider supplies the existing secret reference through its egress proxy.
+export const configureEnvironmentRuntime = String.raw`set -eu
 ${runtimeFailureTrap}
 runtime_step=docker_startup
 id -u compat >/dev/null 2>&1 || useradd -m -s /bin/bash compat
@@ -65,14 +65,14 @@ runuser -u compat -- jq --version
 runtime_step=agent_configuration
 mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
-model_provider = "daytona_openai"
+model_provider = "herbie_openai"
 model_reasoning_effort = "low"
 model_context_window = 32768
 model_auto_compact_token_limit = 30000
 tool_output_token_limit = 1024
 web_search = "disabled"
-[model_providers.daytona_openai]
-name = "Daytona OpenAI"
+[model_providers.herbie_openai]
+name = "Herbie OpenAI"
 base_url = "https://api.openai.com/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -87,11 +87,11 @@ chown -R compat:compat /home/compat/.codex
 chmod 700 /home/compat/.codex
 chmod 600 /home/compat/.codex/config.toml
 runtime_step=toolchain_preflight
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} codex --version
-env PATH=${daytonaPath} node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
-env PATH=${daytonaPath} git --version
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} npm --version
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} corepack --version
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -c 'import pathlib, sys, sysconfig; sys.exit("Snapshot Python must allow user installs; provide standalone Python") if pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").exists() else None; print(sys.version)'
-runuser -u compat -- env HOME=/home/compat PATH=${daytonaPath} python3 -m pip --version
+runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} codex --version
+env PATH=${environmentPath} node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
+env PATH=${environmentPath} git --version
+runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} npm --version
+runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} corepack --version
+runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} python3 -c 'import pathlib, sys, sysconfig; sys.exit("Snapshot Python must allow user installs; provide standalone Python") if pathlib.Path(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED").exists() else None; print(sys.version)'
+runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} python3 -m pip --version
 `;

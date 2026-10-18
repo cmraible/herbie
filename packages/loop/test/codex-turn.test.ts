@@ -317,7 +317,7 @@ for (const early of [false, true]) {
     const { lines, sent, send, receive } = connection(t);
     let settled = false;
     const done = runCodexTurn(lines, send, "thread-1", "Fix addition", {
-      disposableDaytona: true,
+      disposableEnvironment: true,
       model: "custom-model",
     }).then(() => {
       settled = true;
@@ -369,7 +369,7 @@ for (const reason of ["timeout", "cancel"] as const) {
     const controller = new AbortController();
     const rejected = assert.rejects(
       runCodexTurn(lines, send, "thread-1", "Fix addition", {
-        disposableDaytona: true,
+        disposableEnvironment: true,
         timeoutMs: 20,
         signal: controller.signal,
       }),
@@ -427,7 +427,7 @@ test("project reasoning effort is sent as the turn effort", async (t) => {
   const turn = runCodexTurn(lines, send, "thread-1", "Fix addition", {
     model: "custom-model",
     reasoningEffort: "high",
-    disposableDaytona: true,
+    disposableEnvironment: true,
   });
   assert.equal((sent[0] as { params: { effort: string } }).params.effort, "high");
   receive(started);

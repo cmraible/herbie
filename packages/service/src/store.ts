@@ -20,13 +20,13 @@ import {
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import type { PullRequestFeedback, PublicationPhase } from "./adapters.js";
-import type { DaytonaAttemptChanges } from "@herbie/loop/daytona-attempt";
+import type { AgentAttemptChanges } from "@herbie/loop/agent-attempt";
 
 const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
   max_wip AS "maxWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
-  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request,'ciRepair',(SELECT jsonb_build_object('id',r.id,'state',r.state,'canRetry',r.state='failed' AND r.retryable AND NOT r.publication_started) FROM ci_repairs r WHERE r.job_id=j.id AND r.state <> 'superseded' ORDER BY r.created_at DESC LIMIT 1)) ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id),'[]'::jsonb) AS attempts,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request,'sessions',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',s.id,'kind',s.kind,'state',s.state,'model',s.model,'reasoningEffort',s.reasoning_effort,'startedAt',s.started_at,'finishedAt',s.finished_at,'environment',s.environment,'cleanup',s.cleanup,'threadId',s.thread_id,'usage',s.usage) ORDER BY s.started_at,s.id) FROM agent_sessions s WHERE s.job_id=j.id),'[]'::jsonb),'ciRepair',(SELECT jsonb_build_object('id',r.id,'state',r.state,'canRetry',r.state='failed' AND r.retryable AND NOT r.publication_started) FROM ci_repairs r WHERE r.job_id=j.id AND r.state <> 'superseded' ORDER BY r.created_at DESC LIMIT 1)) ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id),'[]'::jsonb) AS attempts,
   cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const databaseProject = projectSchema.extend({
   createdAt: z.date().transform((d) => d.toISOString()),
@@ -84,7 +84,7 @@ export interface Job {
   project: Project;
   branch: string;
   stage: z.infer<typeof jobRow>["stage"];
-  artifact: DaytonaAttemptChanges | null;
+  artifact: AgentAttemptChanges | null;
 }
 export type PublicationRetryCandidate =
   | { kind: "retryable"; job: Job }
@@ -123,7 +123,7 @@ function requestFingerprint(
 }
 function decodeArtifact(
   encoded: z.infer<typeof artifactSchema> | null,
-): DaytonaAttemptChanges | null {
+): AgentAttemptChanges | null {
   if (!encoded) return null;
   const { patchBase64, ...metadata } = encoded;
   return { ...metadata, patch: Buffer.from(patchBase64, "base64") };
@@ -528,7 +528,7 @@ export class Store {
   }
   async events(projectId: string, after = 0): Promise<ProjectEvent[]> {
     const result = await this.pool.query<Record<string, unknown>>(
-      'SELECT id::text,project_id AS "projectId",job_id AS "attemptId",type,message,created_at AS "createdAt" FROM project_events WHERE project_id=$1 AND id>$2 ORDER BY project_events.id LIMIT 1000',
+      'SELECT id::text,project_id AS "projectId",job_id AS "attemptId",agent_session_id AS "agentSessionId",type,message,created_at AS "createdAt" FROM project_events WHERE project_id=$1 AND id>$2 ORDER BY project_events.id LIMIT 1000',
       [projectId, after],
     );
     return result.rows.map((row) =>
@@ -604,7 +604,7 @@ export class Store {
     jobId: string,
     workerId: string,
     cleanup: "complete" | "needs_attention",
-    changes?: DaytonaAttemptChanges,
+    changes?: AgentAttemptChanges,
     pullRequest?: Omit<PullRequest, "state">,
   ): Promise<boolean> {
     return this.transaction(async (client) => {
@@ -707,13 +707,80 @@ export class Store {
     );
     return result.rowCount === 1;
   }
+  async startAgentSession(
+    jobId: string,
+    sourceId: string,
+    kind: "implementation" | "ci_repair" | "pr_feedback",
+    workerId: string,
+    settings: Pick<Project, "model" | "reasoningEffort">,
+  ): Promise<string> {
+    return this.transaction(async (client) => {
+      const { project } = await lockJob(client, jobId);
+      const table =
+        kind === "implementation" ? "jobs" : kind === "ci_repair" ? "ci_repairs" : "pr_feedback";
+      const lease = await client.query(
+        `SELECT id FROM ${table} WHERE id=$1 AND lease_owner=$2 AND lease_expires_at>clock_timestamp() AND ${kind === "implementation" ? "id=$3 AND stage" : "job_id=$3 AND state"}='running'`,
+        [sourceId, workerId, jobId],
+      );
+      if (!lease.rowCount || project.stopRequested === "cancel" || project.state === "cancelled")
+        throw conflict("Agent session requires an active worker lease");
+      const id = randomUUID();
+      await client.query(
+        "INSERT INTO agent_sessions(id,job_id,source_id,kind,model,reasoning_effort) VALUES($1,$2,$3,$4,$5,$6)",
+        [id, jobId, sourceId, kind, settings.model, settings.reasoningEffort],
+      );
+      return id;
+    });
+  }
+  async recordAgentSession(id: string, metadata: Record<string, unknown>): Promise<void> {
+    await this.pool.query(
+      `UPDATE agent_sessions SET environment=COALESCE($2::jsonb,environment),thread_id=COALESCE($3,thread_id),usage=COALESCE($4::jsonb,usage) WHERE id=$1 AND state='running'`,
+      [
+        id,
+        metadata.environment ? JSON.stringify(metadata.environment) : null,
+        metadata.threadId ?? null,
+        metadata.usage ? JSON.stringify(metadata.usage) : null,
+      ],
+    );
+  }
+  async finishAgentSession(
+    id: string,
+    state: string,
+    cleanup: string,
+    changes?: AgentAttemptChanges,
+    diagnostic?: Record<string, unknown>,
+  ): Promise<void> {
+    const artifact = changes
+      ? JSON.stringify({
+          ...changes,
+          patch: undefined,
+          patchBase64: changes.patch.toString("base64"),
+        })
+      : null;
+    await this.pool.query(
+      "UPDATE agent_sessions SET state=$2,cleanup=$3,artifact=$4,failure_diagnostic=$5,finished_at=clock_timestamp() WHERE id=$1 AND state='running'",
+      [id, state, cleanup, artifact, diagnostic ? JSON.stringify(diagnostic) : null],
+    );
+  }
+  async recoverAgentSessions(): Promise<void> {
+    await this.pool
+      .query(`UPDATE agent_sessions s SET state='interrupted',cleanup='unconfirmed',finished_at=clock_timestamp() WHERE s.state='running' AND NOT (
+      (s.kind='implementation' AND EXISTS(SELECT 1 FROM jobs j WHERE j.id=s.source_id AND j.stage='running' AND j.lease_expires_at>clock_timestamp())) OR
+      (s.kind='ci_repair' AND EXISTS(SELECT 1 FROM ci_repairs r WHERE r.id=s.source_id AND r.state='running' AND r.lease_expires_at>clock_timestamp())) OR
+      (s.kind='pr_feedback' AND EXISTS(SELECT 1 FROM pr_feedback f WHERE f.id=s.source_id AND f.state='running' AND f.lease_expires_at>clock_timestamp()))
+    )`);
+  }
   async appendEvent(
     projectId: string,
     type: string,
     message: string,
     attemptId?: string,
+    agentSessionId?: string,
   ): Promise<void> {
-    await this.transaction((client) => addEvent(client, projectId, type, message, attemptId));
+    await this.pool.query(
+      "INSERT INTO project_events(project_id,type,message,job_id,agent_session_id) VALUES($1,$2,$3,$4,$5)",
+      [projectId, type, message, attemptId ?? null, agentSessionId ?? null],
+    );
   }
   async recordPublicationPhase(
     jobId: string,
@@ -732,11 +799,7 @@ export class Store {
         await addEvent(client, project.id, "publication_phase", message, jobId);
     });
   }
-  async saveArtifact(
-    jobId: string,
-    workerId: string,
-    changes: DaytonaAttemptChanges,
-  ): Promise<Job> {
+  async saveArtifact(jobId: string, workerId: string, changes: AgentAttemptChanges): Promise<Job> {
     const artifact = artifactSchema.parse({
       ...changes,
       patchBase64: changes.patch.toString("base64"),
@@ -929,7 +992,7 @@ export class Store {
     workerId: string,
     error: string,
     needsAttention = false,
-    changes?: DaytonaAttemptChanges,
+    changes?: AgentAttemptChanges,
     diagnostic?: Record<string, unknown>,
   ): Promise<void> {
     await this.transaction(async (client) => {
@@ -1099,7 +1162,7 @@ export class Store {
   async saveFeedbackArtifact(
     id: string,
     workerId: string,
-    changes: DaytonaAttemptChanges,
+    changes: AgentAttemptChanges,
   ): Promise<void> {
     const { patch, ...metadata } = changes;
     const result = await this.pool.query(
@@ -1442,7 +1505,7 @@ export class Store {
     return result.rowCount === 1;
   }
 
-  async ciArtifact(id: string): Promise<DaytonaAttemptChanges | null> {
+  async ciArtifact(id: string): Promise<AgentAttemptChanges | null> {
     const result = await this.pool.query<{ artifact: unknown }>(
       "SELECT artifact FROM ci_repairs WHERE id=$1",
       [id],
@@ -1488,11 +1551,7 @@ export class Store {
       );
   }
 
-  async saveCiArtifact(
-    id: string,
-    workerId: string,
-    changes: DaytonaAttemptChanges,
-  ): Promise<void> {
+  async saveCiArtifact(id: string, workerId: string, changes: AgentAttemptChanges): Promise<void> {
     const { patch, ...metadata } = changes;
     const result = await this.pool.query(
       `UPDATE ci_repairs SET artifact=$3 WHERE id=$1 AND lease_owner=$2

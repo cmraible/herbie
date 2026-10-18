@@ -97,7 +97,7 @@ test("uses the project model with the Daytona provider", async (t) => {
         cwd: "/fixture",
         ephemeral: true,
         model: "custom-model",
-        modelProvider: "daytona_openai",
+        modelProvider: "herbie_openai",
       },
     },
   ]);

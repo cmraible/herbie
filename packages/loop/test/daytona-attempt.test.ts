@@ -156,7 +156,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     reasoningEffort: request.reasoningEffort,
   });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
-    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/daytona-runner.js`,
+    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node ${root}/agent-runner.js`,
     root,
     undefined,
     22 * 60,
@@ -325,7 +325,7 @@ async function localFixture(t: TestContext, edits = "") {
     // Execute the uploaded coding runner with a local fake Codex.
     const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin node `;
     const runner = command.slice(prefix.length);
-    assert.equal(command, `${prefix}${cwd}/daytona-runner.js`);
+    assert.equal(command, `${prefix}${cwd}/agent-runner.js`);
     const { stdout } = await promisify(execFile)(process.execPath, [runner], {
       cwd,
       env: { PATH: `${bin}:${process.env.PATH}` },
@@ -427,7 +427,7 @@ test(
       cwd: sandbox.git.clone.mock.calls[0].arguments[1],
       ephemeral: true,
       model: request.model,
-      modelProvider: "daytona_openai",
+      modelProvider: "herbie_openai",
     });
     assert.equal((paramsFor("turn/start") as { model: string }).model, request.model);
     assert.equal((paramsFor("turn/start") as { effort: string }).effort, request.reasoningEffort);
@@ -748,7 +748,7 @@ test("runner transports nested original failures to the host with sandbox creden
   );
   let output = "";
   try {
-    await promisify(execFile)(process.execPath, [join(directory, "daytona-runner.js")], {
+    await promisify(execFile)(process.execPath, [join(directory, "agent-runner.js")], {
       env: { PATH: process.env.PATH, OPENAI_API_KEY: secret },
     });
     assert.fail("Runner should fail");
@@ -758,7 +758,7 @@ test("runner transports nested original failures to the host with sandbox creden
   }
   assert.match(output, /herbie-sandbox-failure:/);
   assert.match(output, /original RPC failure/);
-  assert.match(output, /daytona-runner.js/);
+  assert.match(output, /agent-runner.js/);
   assert.ok(!output.includes(secret));
   assert.ok(!output.includes(prompt));
   assert.ok(Buffer.byteLength(output) < 32_800);
@@ -944,7 +944,7 @@ test("persists full agent activity while running and drains it before cleanup on
   });
   let reads = 0;
   sandbox.process.executeCommand.mock.mockImplementation(async (command) => {
-    if (command.includes("daytona-runner.js")) {
+    if (command.includes("agent-runner.js")) {
       await running;
       return { exitCode: 1, result: "failed" };
     }
@@ -1080,4 +1080,23 @@ test("runtime failure captures stderr and named step before deleting the environ
   });
   assert.equal(sandbox.process.executeCommand.mock.callCount(), 1);
   assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+test("environment identity persistence failure cleans up before executing the agent", async (t) => {
+  const { sandbox, run } = await fixture(t);
+  await assert.rejects(
+    run({
+      onEnvironment: async (environment) => {
+        assert.deepEqual(environment, { provider: "daytona", id: sandbox.id });
+        throw new Error("database unavailable");
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof DaytonaAttemptError);
+      assert.equal(error.cleanup, "confirmed");
+      return true;
+    },
+  );
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+  assert.equal(sandbox.process.executeCommand.mock.callCount(), 0);
 });

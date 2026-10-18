@@ -209,41 +209,103 @@ export function AttemptHistory({
               </details>
             </div>
           ))}
-          <AgentTranscript events={group.events} />
+          {project.attempts
+            ?.find((run) => run.id === group.id)
+            ?.sessions?.map((session, index) => (
+              <details
+                key={session.id}
+                className="agent-session"
+                open={session.state === "running"}
+              >
+                <summary>
+                  Session {index + 1} ·{" "}
+                  {
+                    {
+                      implementation: "Implementation",
+                      ci_repair: "Check repair",
+                      pr_feedback: "Review feedback",
+                    }[session.kind]
+                  }{" "}
+                  · {session.state}
+                </summary>
+                <p>
+                  {session.model} · {session.reasoningEffort} reasoning · Started{" "}
+                  {time(session.startedAt)}
+                  {session.finishedAt ? ` · Finished ${time(session.finishedAt)}` : ""}
+                </p>
+                {session.environment && (
+                  <p>
+                    Environment: {session.environment.provider} · {session.environment.id} · Cleanup{" "}
+                    {session.cleanup}
+                  </p>
+                )}
+                {session.usage && (
+                  <details>
+                    <summary>Token usage</summary>
+                    <pre>{JSON.stringify(session.usage, null, 2)}</pre>
+                  </details>
+                )}
+                <AgentTranscript
+                  events={group.events.filter((event) => event.agentSessionId === session.id)}
+                />
+                <ol>
+                  {group.events
+                    .filter(
+                      (event) => event.agentSessionId === session.id && event.type !== "agent",
+                    )
+                    .map((event) => {
+                      const text = activityMessage(project, event);
+                      if (!text) return null;
+                      return (
+                        <li key={event.id}>
+                          {text} <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
+                        </li>
+                      );
+                    })}
+                </ol>
+              </details>
+            ))}
+          <AgentTranscript events={group.events.filter((event) => !event.agentSessionId)} />
           <section className="activity">
-            <h3>Activity</h3>
-            {group.events.every((event) => activityMessage(project, event) === null) ? (
+            <h3>Run activity</h3>
+            {group.events
+              .filter((event) => !event.agentSessionId)
+              .every((event) => activityMessage(project, event) === null) ? (
               <p className="subtle-note">
                 {eventsState === "loading" ? "Loading activity…" : "No activity yet."}
               </p>
             ) : (
               <ol>
-                {group.events.map((event) => {
-                  const text = activityMessage(project, event);
-                  if (!text) return null;
-                  const number = /Pull request #(\d+)/.exec(text)?.[1];
-                  const pullRequest = group.pullRequests.find((pr) => pr.number === Number(number));
-                  return (
-                    <li key={event.id}>
-                      <span>
-                        {pullRequest ? (
-                          <a href={pullRequest.url} target="_blank" rel="noreferrer">
-                            {text}
-                          </a>
-                        ) : (
-                          text
+                {group.events
+                  .filter((event) => !event.agentSessionId)
+                  .map((event) => {
+                    const text = activityMessage(project, event);
+                    if (!text) return null;
+                    const number = /Pull request #(\d+)/.exec(text)?.[1];
+                    const pullRequest = group.pullRequests.find(
+                      (pr) => pr.number === Number(number),
+                    );
+                    return (
+                      <li key={event.id}>
+                        <span>
+                          {pullRequest ? (
+                            <a href={pullRequest.url} target="_blank" rel="noreferrer">
+                              {text}
+                            </a>
+                          ) : (
+                            text
+                          )}
+                        </span>
+                        <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
+                        {errorReference(event.message) && (
+                          <details>
+                            <summary>Error reference</summary>
+                            <p>{errorReference(event.message)}</p>
+                          </details>
                         )}
-                      </span>
-                      <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
-                      {errorReference(event.message) && (
-                        <details>
-                          <summary>Error reference</summary>
-                          <p>{errorReference(event.message)}</p>
-                        </details>
-                      )}
-                    </li>
-                  );
-                })}
+                      </li>
+                    );
+                  })}
               </ol>
             )}
           </section>

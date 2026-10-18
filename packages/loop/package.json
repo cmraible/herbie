@@ -8,7 +8,9 @@
   "exports": {
     "./daytona-attempt": "./dist/daytona-attempt.js",
     "./publish-patch": "./dist/publish-patch.js",
-    "./diagnostic-log": "./dist/diagnostic-log.js"
+    "./diagnostic-log": "./dist/diagnostic-log.js",
+    "./agent-attempt": "./dist/agent-attempt.js",
+    "./e2b": "./dist/e2b.js"
   },
   "scripts": {
     "start": "tsx src/index.ts",
@@ -16,10 +18,12 @@
     "typecheck": "tsc --project tsconfig.test.json",
     "test": "tsx --test test/*.test.ts",
     "test:e2e": "tsx test/e2e.ts",
-    "test:daytona": "tsx test/daytona.ts"
+    "test:daytona": "tsx test/daytona.ts",
+    "build:e2b-template": "tsx src/e2b-template.ts"
   },
   "dependencies": {
-    "@daytona/sdk": "0.220.0"
+    "@daytona/sdk": "0.220.0",
+    "e2b": "2.56.0"
   },
   "engines": {
     "node": ">=24"

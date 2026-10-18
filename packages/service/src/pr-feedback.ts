@@ -1,4 +1,5 @@
-import { parseFeedbackDecision } from "@herbie/loop/daytona-attempt";
+import { runAgentSession } from "./agent-session.js";
+import { parseFeedbackDecision } from "@herbie/loop/agent-attempt";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { StaleRepairError, type Adapters, type Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -11,6 +12,7 @@ export async function runFeedbackOnce(
 ): Promise<boolean> {
   if (!adapters.feedback || !adapters.replyToFeedback) return false;
   await store.recoverFeedback();
+  await store.recoverAgentSessions();
   const job = await store.takeFeedbackReview();
   if (!job) return false;
   let id: string | undefined;
@@ -64,8 +66,13 @@ export async function runFeedbackOnce(
       logFailure(error, { component: "feedback-acknowledgement", jobId: job.id });
     }
     await requireLease();
-    const changes = await adapters.attempt(execution, (message) =>
-      store.appendEvent(job.project.id, "pr_feedback", message.slice(0, 2000), job.id),
+    const changes = await runAgentSession(
+      store,
+      adapters,
+      execution,
+      job.id,
+      workerId,
+      "pr_feedback",
     );
     await requireLease();
     const decision = parseFeedbackDecision(changes.feedbackDecision);

@@ -202,3 +202,35 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS resources jsonb CHECK (resources I
 
 -- Private, bounded/redacted failure details; intentionally omitted from API projections.
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failure_diagnostic jsonb;
+
+-- Sessions describe agent execution, independently of publication/review work.
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id uuid PRIMARY KEY,
+  job_id uuid NOT NULL REFERENCES jobs(id),
+  source_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('implementation','ci_repair','pr_feedback')),
+  state text NOT NULL DEFAULT 'running' CHECK (state IN ('running','completed','failed','cancelled','interrupted')),
+  model text NOT NULL,
+  reasoning_effort text NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  finished_at timestamptz,
+  environment jsonb,
+  cleanup text NOT NULL DEFAULT 'pending' CHECK (cleanup IN ('pending','confirmed','unconfirmed')),
+  thread_id text,
+  usage jsonb,
+  artifact jsonb,
+  failure_diagnostic jsonb
+);
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS failure_diagnostic jsonb;
+CREATE INDEX IF NOT EXISTS agent_sessions_run ON agent_sessions(job_id,started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_sessions_one_running ON agent_sessions(job_id) WHERE state='running';
+ALTER TABLE project_events ADD COLUMN IF NOT EXISTS agent_session_id uuid REFERENCES agent_sessions(id);
+DROP TRIGGER IF EXISTS notify_agent_session_change ON agent_sessions;
+CREATE OR REPLACE FUNCTION notify_agent_session_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('herbie_changes', (SELECT project_id::text FROM jobs WHERE id=NEW.job_id));
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER notify_agent_session_change AFTER INSERT OR UPDATE ON agent_sessions
+  FOR EACH ROW EXECUTE FUNCTION notify_agent_session_change();

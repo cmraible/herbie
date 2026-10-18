@@ -104,6 +104,7 @@ test("a failed review request stays pending and reconciliation retries it before
   let confirmations = 0;
   const store = {
     recoverCiRepairs: async () => {},
+    recoverAgentSessions: async () => {},
     takeCiReview: async () => job,
     discardWaitingCi: async () => {},
     beginReadiness: async () => {

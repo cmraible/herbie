@@ -29,7 +29,8 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
     case "cancel":
       return "Project cancelled";
     case "attempt":
-    case "ci_repair": {
+    case "ci_repair":
+    case "pr_feedback": {
       const stage = /Attempt stage: ([a-z_]+)/.exec(event.message)?.[1];
       if (stage === "sandbox_creation") return "Preparing the agent's environment";
       if (stage === "repository_clone") return `Cloning ${project.repository}`;
@@ -37,7 +38,9 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       if (stage === "runtime_preparation" || stage === "runtime_upload") return null;
       if (stage === "artifact_download" || stage === "sandbox_deletion") return null;
       if (event.message.startsWith("Project completed in sandbox "))
-        return "Preparing pull request";
+        return event.type === "pr_feedback"
+          ? "Review feedback considered"
+          : "Preparing pull request";
       return null;
     }
     case "publication_phase":
