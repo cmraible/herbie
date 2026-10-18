@@ -9,6 +9,10 @@ require this status in branch protection. The container job calls the reusable
 For same-repository PRs, it also uploads that exact image to GHCR before the
 container check passes. Fork PRs verify without uploading.
 
+The unit job builds the non-web packages and runs every workspace's unit tests.
+Web unit tests run from source, so this job skips the web typecheck and Vite
+bundle already covered by the build and browser jobs.
+
 When PR image publishing is enabled, same-repository PRs share intermediate
 BuildKit layers through `ghcr.io/<owner>/<repo>:buildcache-linux-amd64`.
 Recovery builds on main use the same cache; ordinary manifest-only promotion

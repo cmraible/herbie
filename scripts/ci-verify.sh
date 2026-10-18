@@ -140,7 +140,8 @@ run_unit_tests() {
   run_step unit-tests node scripts/verify-timing.mjs workspace_checks.unit-tests -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
-  run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
+  # Web unit tests use source files; the build and browser stages verify its bundle.
+  run_step build node scripts/verify-timing.mjs workspace_checks.build --filter '!@herbie/web' -r build
   run_unit_tests
 }
 start_web_preview() {
