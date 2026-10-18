@@ -1390,3 +1390,76 @@ integration("renaming the WIP column preserves configured targets across migrati
   await store.migrate();
   assert.equal((await store.getProject(project.id))?.targetWip, 2);
 });
+
+integration("retry publishes a sibling's saved work after another run fails", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await store.claim("first");
+  const second = await store.claim("second");
+  assert.ok(first && second);
+  await store.fail(first.id, "first", "Implementation failed");
+  await store.saveArtifact(second.id, "second", { baseCommit: "abc", patch: Buffer.from("saved") });
+  assert.equal(await store.beginPublication(second.id, "second"), false);
+  await store.retryAttempt(project.id, "owner");
+  const resumed = await store.claim("resumed");
+  assert.equal(resumed?.id, second.id);
+  assert.equal(resumed?.artifact?.patch.toString(), "saved");
+  assert.equal(await store.beginPublication(second.id, "resumed"), true);
+});
+
+integration("cancelling a failed project revokes its running sibling", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await store.claim("first");
+  const second = await store.claim("second");
+  assert.ok(first && second);
+  await store.fail(first.id, "first", "Implementation failed");
+  assert.equal((await store.control(project.id, "owner", "cancel")).state, "cancelled");
+  assert.equal(await store.heartbeat(second.id, "second"), false);
+  assert.equal(await store.claim("extra"), null);
+});
+
+for (const blocked of [true, false])
+  integration(
+    `sibling publication preserves ${blocked ? "blocked" : "uncertain"} publication`,
+    async () => {
+      const { project } = await store.createProject(
+        "owner",
+        { ...input(), targetWip: 2 },
+        "demo",
+        randomUUID(),
+      );
+      const first = await store.claim("first");
+      const second = await store.claim("second");
+      assert.ok(first && second);
+      for (const [job, worker] of [
+        [first, "first"],
+        [second, "second"],
+      ] as const) {
+        await store.saveArtifact(job.id, worker, {
+          baseCommit: "abc",
+          patch: Buffer.from("saved"),
+        });
+        await store.beginPublication(job.id, worker);
+      }
+      if (blocked) await store.blockPublication(first.id, "first", "Conflict");
+      else await store.publicationUncertain(first.id, "first", "Unavailable");
+      const before = await store.getProject(project.id);
+      const after = await store.completePublication(second.id, "second", {
+        url: "https://github.com/example/repo/pull/2",
+        number: 2,
+        branch: second.branch,
+      });
+      assert.equal(after.state, "needs_attention");
+      assert.equal(after.error, before?.error);
+      assert.equal(await store.claim("extra"), null);
+    },
+  );

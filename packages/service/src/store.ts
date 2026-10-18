@@ -492,7 +492,7 @@ export class Store {
         "SELECT stage FROM jobs WHERE project_id=$1 FOR UPDATE",
         [id],
       );
-      if (rows.some((row) => ["running", "ready", "publishing"].includes(row.stage)))
+      if (rows.some((row) => ["running", "publishing"].includes(row.stage)))
         throw conflict(
           "Saved work must finish publication recovery before a new attempt can start",
         );
@@ -504,6 +504,10 @@ export class Store {
         throw conflict("Review or close an open pull request before retrying this project");
       await client.query(
         "UPDATE projects SET state='queued',error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
+        [id],
+      );
+      await client.query(
+        "UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE project_id=$1 AND stage='ready'",
         [id],
       );
       await advanceProject(client, {
@@ -549,7 +553,7 @@ export class Store {
       if (action === "cancel") {
         // Cancellation is a local durable decision, never dependent on GitHub or
         // remote cleanup. Revoking every lease fences callbacks and future claims.
-        if (["cancelled", "completed", "failed"].includes(project.state)) return project;
+        if (["cancelled", "completed"].includes(project.state)) return project;
         await cancelProject(client, project);
         const jobs = await client.query<{ id: string }>("SELECT id FROM jobs WHERE project_id=$1", [
           id,
@@ -886,8 +890,8 @@ export class Store {
       );
       await client.query(
         `UPDATE projects SET pull_request=$2,
-        state=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND stage IN ('failed','needs_attention')) THEN state ELSE 'awaiting_review' END,
-        error=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND stage IN ('failed','needs_attention')) THEN error ELSE NULL END,
+        state=CASE WHEN (state='failed' OR EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND (stage='needs_attention' OR (stage='publishing' AND (publication_blocked OR lease_owner IS NULL OR lease_expires_at<=clock_timestamp()))))) THEN state ELSE 'awaiting_review' END,
+        error=CASE WHEN (state='failed' OR EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND (stage='needs_attention' OR (stage='publishing' AND (publication_blocked OR lease_owner IS NULL OR lease_expires_at<=clock_timestamp()))))) THEN error ELSE NULL END,
         updated_at=clock_timestamp() WHERE id=$1`,
         [project.id, JSON.stringify(pr)],
       );
