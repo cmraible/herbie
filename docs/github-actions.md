@@ -102,3 +102,45 @@ application CI no longer uses Workers, Durable Objects or Wrangler.
 
 References: [GitHub PR merge checkout](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request),
 [Docker manifest copying](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/).
+
+## Experimental PR classification
+
+`classify-pr.yml` uses OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+with `gpt-6-luna` and the repository's `OPENAI_API_KEY` Actions secret. It runs on
+PR creation, reopening, pushes, title/description edits, and ready-for-review events.
+It sends the title, description, changed paths, and patches to OpenAI in one request.
+No dependency installation or PR code execution is involved.
+
+Automatic runs maintain `ai:change_type:*` and `ai:risk:*` labels, preserving other
+labels. The Actions summary includes independent subsystem and risk-signal
+probabilities. The `pr-classification-*` artifact retains the raw answers, token
+usage, effective classification, and base/head SHAs for 30 days; it excludes the
+submitted source. These assessments are advisory and are not part of **All tests
+passed**. OpenAI API errors fail this separate workflow and leave previous labels unchanged.
+
+Risk means potential unintended production impact: low for narrow, reversible
+changes without runtime behavior changes; medium for bounded runtime changes;
+high for authentication, authorization, data integrity, destructive migrations,
+public contracts, or broadly shared runtime behavior. Missing/truncated patches,
+GitHub's 3,000-file cap, or the 120,000-character patch budget force
+`insufficient_context`. A model refusal also produces an unknown classification.
+The raw answer remains in the artifact even when incomplete evidence overrides it.
+Probabilities have not been calibrated against this repository.
+
+The workflow executes the trusted base revision via `pull_request_target`, never
+the PR head, and reads PR contents only through the GitHub API. It must be merged
+into the base branch before automatic classification works. Repository Actions
+policies must allow this event (see [GitHub's policy guidance](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target)).
+It checks that the PR title, description, and base/head SHAs are still current
+before applying labels. Labels describe the last successful assessment; consult
+the run's head SHA when a newer run fails or is still in progress.
+
+For historical evaluation, select **Actions → Classify PR → Run workflow** on
+`main` and enter a PR number. Manual runs produce the summary and artifact without
+changing labels, including for closed PRs. Start with 50 manually labeled PRs,
+including high-risk examples, then compare change-type accuracy and high-risk
+false negatives. Historical results use the PR data GitHub returns at run time,
+not a reconstruction of the original review context.
+
+Run the classifier's offline regression tests with
+`node --test scripts/classify-pr.test.mjs`; these also run in unit verification.
