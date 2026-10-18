@@ -1596,3 +1596,35 @@ for (const expired of [false, true])
       assert.ok(await store.claim("replacement"));
     },
   );
+
+for (const expired of [false, true])
+  integration(
+    `a paused sibling's saved work stays held after failure (expired: ${expired})`,
+    async () => {
+      const { project } = await store.createProject(
+        "owner",
+        { ...input(), targetWip: 2 },
+        "demo",
+        randomUUID(),
+      );
+      const first = await store.claim("first");
+      const second = await store.claim("second");
+      assert.ok(first && second);
+      await store.control(project.id, "owner", "pause");
+      await store.saveArtifact(first.id, "first", {
+        baseCommit: "abc",
+        patch: Buffer.from("saved"),
+      });
+      if (expired) {
+        await store.pool.query(
+          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+          [second.id],
+        );
+        await store.recoverExpired();
+      } else await store.fail(second.id, "second", "Failed");
+      assert.equal((await store.getProject(project.id))?.stopRequested, "pause");
+      assert.equal(await store.claim("automatic"), null);
+      await store.retryAttempt(project.id, "owner");
+      assert.equal((await store.claim("explicit-retry"))?.id, first.id);
+    },
+  );

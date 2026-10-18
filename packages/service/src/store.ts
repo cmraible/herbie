@@ -512,7 +512,10 @@ export class Store {
         !project.stopRequested
       )
         return project;
-      if (!["failed", "needs_attention"].includes(project.state) || project.stopRequested)
+      if (
+        !["failed", "needs_attention"].includes(project.state) ||
+        project.stopRequested === "cancel"
+      )
         throw conflict("Only failed or interrupted projects can be retried");
       const { rows } = await client.query<{ stage: string }>(
         "SELECT stage FROM jobs WHERE project_id=$1 FOR UPDATE",
@@ -1064,7 +1067,7 @@ export class Store {
         [jobId, state, saved, diagnostic],
       );
       await client.query(
-        "UPDATE projects SET state=$2,error=$3,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
+        "UPDATE projects SET state=$2,error=$3,stop_requested=CASE WHEN stop_requested='pause' THEN stop_requested ELSE NULL END,updated_at=clock_timestamp() WHERE id=$1",
         [project.id, state, error],
       );
       await addEvent(client, project.id, state, error, jobId);
@@ -1114,7 +1117,7 @@ export class Store {
               : "Worker lease expired during publication; checking the existing branch before any further action.";
           await client.query(
             "UPDATE projects SET state='needs_attention',error=$2,stop_requested=$3,updated_at=clock_timestamp() WHERE id=$1",
-            [project.id, error, row.stage === "publishing" ? project.stopRequested : null],
+            [project.id, error, project.stopRequested],
           );
           await addEvent(client, project.id, "recovery_required", error, row.id);
         } else
