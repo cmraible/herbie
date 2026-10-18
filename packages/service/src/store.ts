@@ -197,7 +197,11 @@ async function insertJob(client: PoolClient, projectId: string, cycle: number): 
 }
 
 // Call with the project locked. Unpublished runs and open PRs each occupy a slot.
-async function advanceProject(client: PoolClient, project: Project): Promise<void> {
+async function advanceProject(
+  client: PoolClient,
+  project: Project,
+  replenish = true,
+): Promise<void> {
   if (project.state === "cancelled") return;
   const { rows } = await client.query<{
     stage: string;
@@ -230,6 +234,7 @@ async function advanceProject(client: PoolClient, project: Project): Promise<voi
   const reviewing = rows.filter((job) => job.stage === "awaiting_review").length;
   const cycle = rows.at(-1)?.cycle ?? 0;
   if (
+    replenish &&
     !pending.some((job) => job.stage === "queued") &&
     pending.length + reviewing < project.targetWip
   ) {
@@ -1795,7 +1800,9 @@ export class Store {
       "UPDATE projects SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1",
       [project.id, row.branch, updatedPr],
     );
-    if (closed && !["cancelled", "failed", "needs_attention"].includes(project.state)) {
+    if (closed) await advanceProject(client, project, false);
+    const currentProject = closed ? (await projectFrom(client, project.id))! : project;
+    if (closed && !["cancelled", "failed", "needs_attention"].includes(currentProject.state)) {
       const active = await client.query(
         "SELECT 1 FROM jobs WHERE project_id=$1 AND stage IN ('running','publishing')",
         [project.id],
@@ -1809,7 +1816,7 @@ export class Store {
           "UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE project_id=$1 AND stage IN ('queued','ready')",
           [project.id],
         );
-    } else await advanceProject(client, project);
+    } else await advanceProject(client, currentProject);
     const updated = await projectFrom(client, project.id);
     if (!updated) throw new Error("Missing reconciled project");
     await addEvent(

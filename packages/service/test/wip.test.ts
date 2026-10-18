@@ -52,6 +52,15 @@ test("coordinator fills WIP and replaces a merged PR while a sibling is running"
   };
   worker = runWorker(store, adapters, "coordinator", stop.signal);
   await until(async () => releases.size === 2);
+  const owners = await store.pool.query(
+    "SELECT lease_owner FROM jobs WHERE project_id=$1 AND stage='running'",
+    [project.id],
+  );
+  assert.equal(
+    new Set(owners.rows.map((row) => row.lease_owner)).size,
+    2,
+    "concurrent tasks must have distinct lease owners",
+  );
   const [first, second] = [...releases.keys()];
   releases.get(first!)!();
   await until(async () => (await store.getProject(project.id))?.pullRequests.length === 1);

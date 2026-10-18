@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { runAgentSession } from "./agent-session.js";
 import { runFeedbackOnce } from "./pr-feedback.js";
 import { runCiRepairOnce } from "./ci-repair.js";
@@ -331,9 +332,9 @@ export async function runWorker(
         if (adapters.feedback) await store.requestFeedbackReview();
         nextCiPoll = Date.now() + 10 * 60_000;
       }
-      if (!signal.aborted) launch(runFeedbackOnce(store, adapters, workerId));
-      if (!signal.aborted) launch(runCiRepairOnce(store, adapters, workerId));
-      if (!signal.aborted) launch(runWorkerOnce(store, adapters, workerId));
+      if (!signal.aborted) launch(runFeedbackOnce(store, adapters, `${workerId}:${randomUUID()}`));
+      if (!signal.aborted) launch(runCiRepairOnce(store, adapters, `${workerId}:${randomUUID()}`));
+      if (!signal.aborted) launch(runWorkerOnce(store, adapters, `${workerId}:${randomUUID()}`));
     } catch (error) {
       logFailure(error, { component: "worker-tick" });
       // Database interruptions leave leases to expire safely; keep the daemon alive.
