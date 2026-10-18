@@ -102,9 +102,12 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     }),
   );
   stream!.send(JSON.stringify({ type: "events", projectId: id, events }));
-  await expect(page.getByText("Checking the implementation", { exact: true })).not.toBeVisible();
+  await expect(page.locator(".transcript-reasoning .transcript-preview")).toHaveText(
+    "Checking the implementation",
+  );
+  await expect(page.locator(".transcript-reasoning .transcript-message")).not.toBeVisible();
   await page.locator(".transcript-reasoning summary").click();
-  await expect(page.getByText("Checking the implementation", { exact: true })).toBeVisible();
+  await expect(page.locator(".transcript-reasoning .transcript-message")).toBeVisible();
   await expect(
     page.locator(".transcript-message").filter({ hasText: "Implemented" }),
   ).toBeVisible();
@@ -138,7 +141,7 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   stream!.close({ code: 1012, reason: "Service restart" });
   await expect.poll(() => connections).toBe(2);
   await expect(page.getByText("Agent started working", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("Checking the implementation", { exact: true })).toHaveCount(1);
+  await expect(page.locator(".transcript-reasoning")).toHaveCount(1);
   await expect(page.locator(".transcript-message").filter({ hasText: "Implemented" })).toHaveCount(
     1,
   );

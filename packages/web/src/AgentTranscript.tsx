@@ -93,9 +93,26 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
                   {typeof item.command === "string" && (
                     <code className="transcript-command">{item.command}</code>
                   )}
+                  {typeof item.command !== "string" && (
+                    <span className="transcript-preview">
+                      {item.type === "reasoning"
+                        ? activityText(item).replace(/[#*`]/g, "")
+                        : item.type === "mcpToolCall"
+                          ? [item.server, item.tool].filter(Boolean).join(" / ")
+                          : item.type === "webSearch"
+                            ? String(item.query ?? "")
+                            : ""}
+                    </span>
+                  )}
                   {typeof item.status === "string" && (
-                    <span className="transcript-status">
-                      {item.status === "inProgress" ? "Running" : item.status}
+                    <span className={`transcript-status transcript-status-${item.status}`}>
+                      {item.status === "inProgress"
+                        ? "Running"
+                        : item.status === "completed"
+                          ? "Completed"
+                          : item.status === "failed"
+                            ? "Failed"
+                            : item.status}
                     </span>
                   )}
                 </summary>
