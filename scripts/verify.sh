@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the blocking CI checks on macOS or Linux without host Node or Postgres.
+# Run workspace and promotion checks on macOS or Linux without host Node or Postgres.
 set -Eeuo pipefail
 # Give each background stage a process group so interruption reaches its children.
 set -m
@@ -46,18 +46,9 @@ start_database() {
   done
   docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U herbie
 }
-container_checks() {
-  local revision
-  revision="$(git rev-parse HEAD)"
-  time_step container_checks runtime-image docker build --platform linux/amd64 --provenance=false \
-    --build-arg "HERBIE_RUNTIME_REVISION=$revision" --iidfile "$artifact_dir/runtime-image" .
-  time_step container_checks portable-smoke bash scripts/test-portable-container.sh "$(cat "$artifact_dir/runtime-image")" "$revision"
-}
-
-stages=(workspace_checks container_checks)
 # Promotion uses an isolated local registry; it never publishes remotely.
 promotion_checks() { bash scripts/test-image-promotion.sh; }
-stages+=(promotion_checks)
+stages=(workspace_checks promotion_checks)
 for stage in "${stages[@]}"; do
   echo "Running $stage"
   time_step "" "$stage" "$stage" >"$artifact_dir/$stage.log" 2>&1 &

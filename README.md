@@ -13,10 +13,11 @@ exits. Postgres owns projects, attempts, jobs, captured artifacts, PRs and event
 Follow the [setup guide](docs/setup.md) to configure credentials and run Herbie
 locally with Docker Compose.
 
-Run **`pnpm verify`** for all CI validation locally, including PostgreSQL,
-browser, CLI and production container checks. Docker provisions the test tools
-and disposable databases. After the initial tool/image downloads, runs target
-under two minutes. See [local CI requirements and logs](docs/github-actions.md).
+Run **`pnpm verify`** for local validation, including PostgreSQL, browser, CLI
+and image-promotion checks. Production image builds and smoke tests run in CI.
+Docker provisions the test tools and disposable databases. After the initial
+tool/image downloads, runs target under two minutes. See
+[local CI requirements and logs](docs/github-actions.md).
 
 For UI design work, run `pnpm --filter @herbie/web preview:ui` and open
 http://127.0.0.1:5173. This uses realistic local data fixtures with the production

@@ -25,23 +25,22 @@ The runner and Debian package repositories still receive upstream updates.
 Tests use disposable PostgreSQL and injected test adapters, without live OAuth,
 Daytona, or model calls. Failure evidence expires after seven days.
 
-Run **`pnpm verify`** (or `bash scripts/verify.sh` without host Node/pnpm) for all
-blocking CI validation locally. Requires a running Docker engine with Buildx,
+Run **`pnpm verify`** (or `bash scripts/verify.sh` without host Node/pnpm) for
+local validation. Requires a running Docker engine with Buildx,
 Bash, Git, curl and jq. It runs builds, typechecks, release-artifact tests,
-unit/PostgreSQL tests, compiled CLI and Chromium scenarios, the production
-`linux/amd64` container smoke test, and manifest promotion against a disposable
-local registry. Nothing is published to GHCR or deployed. The workspace has no
-separate lint script.
+unit/PostgreSQL tests, compiled CLI and Chromium scenarios, and manifest promotion
+against a disposable local registry. Production image builds and container smoke
+tests run in CI through `portable-smoke.yml`. Nothing is published to GHCR or
+deployed. The workspace has no separate lint script.
 
 The first run downloads and caches Linux tools, dependencies and Chromium;
 allow extra time for this bootstrap and after dependency changes. Subsequent
-runs target under two minutes, with workspace, container and promotion checks
+runs target under two minutes, with workspace and promotion checks
 running concurrently. Every invocation executes the tests against the current
 working tree, including uncommitted edits; only Docker build layers are cached.
 An Apple Silicon Mac with OrbStack completed a cached run in 56 seconds; the
 first successful run, including tool installation, took 125 seconds.
-The workspace runner uses the Docker engine's native architecture, while the
-production image retains CI's AMD64 target (Docker needs emulation on ARM).
+The local workspace runner uses the Docker engine's native architecture.
 Each run creates and removes its own databases and containers, without loading
 your `.env` or exposing database ports. Logs and browser evidence are saved in
 the printed `artifacts/ci/herbie-verify-*` directory. Any failed stage fails the
