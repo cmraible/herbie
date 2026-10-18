@@ -138,7 +138,7 @@ run_build() {
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
   # avoids serializing the package test scripts behind the longest suite.
-  run_step release-artifact node --test scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs scripts/ship-watch.test.mjs scripts/verify-timing.test.mjs scripts/deploy-watch.test.mjs
+  run_step release-artifact node --test scripts/classify-pr.test.mjs scripts/build-release-artifact.test.mjs scripts/promote-portable-image.test.mjs scripts/ship-watch.test.mjs scripts/verify-timing.test.mjs scripts/deploy-watch.test.mjs
   run_step unit-tests node scripts/verify-timing.mjs workspace_checks.unit-tests -r --parallel --workspace-concurrency=2 test
 }
 run_unit() {
