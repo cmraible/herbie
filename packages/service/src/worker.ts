@@ -360,9 +360,12 @@ export async function runWorker(
           if (adapters.feedback) await store.requestFeedbackReview();
           nextCiPoll = Date.now() + 10 * 60_000;
         }
-        if (!signal.aborted) launch(runFeedbackOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
-        if (!signal.aborted) launch(runCiRepairOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
-        if (!signal.aborted) launch(runWorkerOnce(store, adapters, `${workerId}:${randomUUID()}`, undefined, options));
+        if (!signal.aborted)
+          launch(runFeedbackOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
+        if (!signal.aborted)
+          launch(runCiRepairOnce(store, adapters, `${workerId}:${randomUUID()}`, options));
+        if (!signal.aborted)
+          launch(runWorkerOnce(store, adapters, `${workerId}:${randomUUID()}`, undefined, options));
       }
     } catch (error) {
       logFailure(error, { component: "worker-tick" });
