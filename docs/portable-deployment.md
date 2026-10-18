@@ -92,12 +92,9 @@ release check, not a claim that a generic secret scan can prove absence of secre
   `maxSurge: 1`, and no autoscaler. During a rollout, both pods may serve HTTP,
   but a PostgreSQL session advisory lock permits only one background coordinator.
   The old coordinator drains before releasing ownership to the replacement.
-  During an upgrade from before `maxWip` support, keep new projects at the default
-  WIP of 1 until every HTTP replica is upgraded. Clients omit that default field
-  for older strict APIs; larger limits require the new API and are never silently
-  downgraded. New clients request version 2 project responses; older clients keep
-  receiving the original shape without the new fields. A database trigger mirrors old coordinators' PR writes into job
-  history throughout the overlap, including publications after migration.
+  Deploy the API, coordinator, and clients together when changing the project contract.
+  The WIP column migration preserves configured targets; older binaries must be stopped
+  before applying this rename.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
   Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
 - Starting the process runs migrations even when `HERBIE_EXECUTION_ENABLED=false`.

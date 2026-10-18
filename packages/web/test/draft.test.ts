@@ -7,7 +7,7 @@ test("a new project needs only a repository and prompt", () => {
   assert.deepEqual(parseDraft(draft), {
     repository: "demo/example",
     prompt: "Add regression coverage",
-    maxWip: 1,
+    targetWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
@@ -30,7 +30,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     repository: "demo/example",
     name: "Old custom name",
     prompt: "Fix arithmetic",
-    maxWip: 1,
+    targetWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
@@ -38,13 +38,13 @@ test("legacy named drafts preserve the original request for idempotent retries",
 });
 
 test("WIP defaults to one for saved drafts and rejects invalid limits", () => {
-  const { maxWip: _maxWip, ...oldDraft } = {
+  const { targetWip: _targetWip, ...oldDraft } = {
     ...newDraft("demo/example"),
     prompt: "Fix arithmetic",
   };
-  assert.equal(draftSchema.parse(oldDraft).maxWip, "1");
-  for (const maxWip of ["0", "-1", "1.5", "no"])
-    assert.throws(() => parseDraft({ ...oldDraft, maxWip }), /maxWip/);
+  assert.equal(draftSchema.parse(oldDraft).targetWip, "1");
+  for (const targetWip of ["0", "-1", "1.5", "no"])
+    assert.throws(() => parseDraft({ ...oldDraft, targetWip }), /targetWip/);
 });
 
 test("old drafts default reasoning effort and new selections survive restoration", () => {

@@ -9,7 +9,7 @@ import { projectInput, actionSchema } from "@herbie/contracts";
 import { createClient, ApiError } from "@herbie/contracts/client";
 
 const savedSession = z.object({ baseUrl: z.string().url(), token: z.string().min(1) }).strict();
-const help = `Herbie — coding projects\n\nCommands:\n  login --url URL\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--model MODEL] [--max-wip 1] [--request-id UUID]\n  rename PROJECT_ID --name TEXT\n  edit PROJECT_ID [--prompt TEXT] [--model MODEL]\n  status [PROJECT_ID]\n  logs PROJECT_ID [--after EVENT_ID]\n  pause|resume|cancel PROJECT_ID\n  retry-publication PROJECT_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nRuns continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
+const help = `Herbie — coding projects\n\nCommands:\n  login --url URL\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--model MODEL] [--target-wip 1] [--request-id UUID]\n  rename PROJECT_ID --name TEXT\n  edit PROJECT_ID [--prompt TEXT] [--model MODEL]\n  status [PROJECT_ID]\n  logs PROJECT_ID [--after EVENT_ID]\n  pause|resume|cancel PROJECT_ID\n  retry-publication PROJECT_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nRuns continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
 
 export type CliIO = {
   configPath?: string;
@@ -82,7 +82,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
         prompt: { type: "string" },
         name: { type: "string" },
         model: { type: "string" },
-        "max-wip": { type: "string" },
+        "target-wip": { type: "string" },
         "request-id": { type: "string" },
         after: { type: "string" },
         help: { type: "boolean", short: "h" },
@@ -148,7 +148,7 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
         name: values.name,
         prompt: values.prompt,
         model: values.model,
-        maxWip: Number(values["max-wip"] ?? 1),
+        targetWip: Number(values["target-wip"] ?? 1),
       });
       const requestId = z.uuid().parse(values["request-id"] ?? randomUUID());
       io.stderr(

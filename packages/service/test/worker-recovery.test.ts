@@ -255,7 +255,7 @@ for (const recovering of [false, true])
       if (!store) return;
       const { project } = await store.createProject(
         "demo-user",
-        { ...request, maxWip: 2 },
+        { ...request, targetWip: 2 },
         "demo",
         randomUUID(),
       );
@@ -309,7 +309,7 @@ for (const recovering of [false, true])
               project.id,
             ])
           ).rows[0].n,
-          1,
+          2,
         );
       } else {
         assert.ok(competing);

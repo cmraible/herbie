@@ -708,20 +708,20 @@ async function publishNext(number: number) {
 }
 
 integration(
-  "maxWip fills capacity, survives restart, and replenishes each merge exactly once",
+  "targetWip fills capacity, survives restart, and replenishes each merge exactly once",
   async () => {
-    const request = { ...input(), maxWip: 2 };
+    const request = { ...input(), targetWip: 2 };
     const key = randomUUID();
     const { project } = await store.createProject("owner", request, "demo", key);
     await assert.rejects(
-      store.createProject("owner", { ...request, maxWip: 3 }, "demo", key),
+      store.createProject("owner", { ...request, targetWip: 3 }, "demo", key),
       /different request/,
     );
     const first = await publishNext(1);
     const second = await publishNext(2);
     store = new Store(store.pool);
     const full = await store.getProject(project.id);
-    assert.equal(full?.maxWip, 2);
+    assert.equal(full?.targetWip, 2);
     assert.equal(full?.state, "awaiting_review");
     assert.equal(full?.pullRequests.length, 2);
     assert.equal((await store.listProjects("owner"))[0]?.pullRequests.length, 2);
@@ -777,7 +777,7 @@ integration(
   async () => {
     const { project } = await store.createProject(
       "owner",
-      { ...input(), maxWip: 2 },
+      { ...input(), targetWip: 2 },
       "demo",
       randomUUID(),
     );
@@ -815,7 +815,7 @@ integration(
   async () => {
     const { project } = await store.createProject(
       "owner",
-      { ...input(), maxWip: 3 },
+      { ...input(), targetWip: 3 },
       "demo",
       randomUUID(),
     );
@@ -847,7 +847,7 @@ integration(
 integration("closing a sibling PR holds a saved artifact and releases it for resume", async () => {
   const { project } = await store.createProject(
     "owner",
-    { ...input(), maxWip: 2 },
+    { ...input(), targetWip: 2 },
     "demo",
     randomUUID(),
   );
@@ -866,7 +866,7 @@ integration(
   async () => {
     const { project } = await store.createProject(
       "owner",
-      { ...input(), maxWip: 2 },
+      { ...input(), targetWip: 2 },
       "demo",
       randomUUID(),
     );
@@ -894,7 +894,7 @@ integration(
 integration("a sibling merge preserves the closure pause until publication finishes", async () => {
   const { project } = await store.createProject(
     "owner",
-    { ...input(), maxWip: 3 },
+    { ...input(), targetWip: 3 },
     "demo",
     randomUUID(),
   );
@@ -922,7 +922,7 @@ for (const recovery of ["uncertain", "expired", "blocked"] as const)
   integration(`closure pause survives ${recovery} publication recovery`, async () => {
     const { project } = await store.createProject(
       "owner",
-      { ...input(), name: "Recovery fixture", maxWip: 2 },
+      { ...input(), name: "Recovery fixture", targetWip: 2 },
       "live",
       randomUUID(),
     );
@@ -1009,7 +1009,7 @@ integration(
     for (const stage of ["failure", "publication"] as const) {
       const { project } = await store.createProject(
         "owner",
-        { ...input(), maxWip: 2 },
+        { ...input(), targetWip: 2 },
         "demo",
         randomUUID(),
       );
@@ -1044,11 +1044,11 @@ integration(
     const first = await publishNext(1);
     await store.pool.query("DROP TRIGGER IF EXISTS notify_project_change ON jobs");
     await store.pool.query("ALTER TABLE jobs DROP COLUMN pull_request");
-    await store.pool.query("ALTER TABLE projects DROP COLUMN max_wip");
+    await store.pool.query("ALTER TABLE projects DROP COLUMN target_wip");
     await store.migrate();
     await store.migrate();
     const migrated = await store.getProject(project.id);
-    assert.equal(migrated?.maxWip, 1);
+    assert.equal(migrated?.targetWip, 1);
     assert.deepEqual(migrated?.pullRequests, [migrated?.pullRequest]);
     assert.equal(await store.claim("full"), null);
     await store.reconcile(first.id, "merged");
@@ -1070,7 +1070,7 @@ for (const outcome of ["merged", "closed"] as const)
     async () => {
       const { project } = await store.createProject(
         "owner",
-        { ...input(), maxWip: 2 },
+        { ...input(), targetWip: 2 },
         "demo",
         randomUUID(),
       );
@@ -1147,7 +1147,7 @@ integration(
   async () => {
     const owner = randomUUID(),
       key = randomUUID(),
-      request = { ...input(), maxWip: 2 };
+      request = { ...input(), targetWip: 2 };
     const { project } = await store.createProject(owner, request, "demo", key);
     await assert.rejects(
       store.editProjectPrompt(project.id, "another-owner", "Private edit"),
@@ -1209,7 +1209,11 @@ integration(
       /Project not found/,
     );
     await assert.rejects(
-      store.updateProject(project.id, "owner", { name: "Changed", prompt: "Changed", maxWip: 0 }),
+      store.updateProject(project.id, "owner", {
+        name: "Changed",
+        prompt: "Changed",
+        targetWip: 0,
+      }),
     );
     assert.deepEqual(await store.getProject(project.id), project);
     const first = await publishNext(1);
@@ -1218,7 +1222,7 @@ integration(
       name: "New name",
       prompt: "New prompt",
       model: "custom-model",
-      maxWip: 2,
+      targetWip: 2,
     });
     assert.equal(edited.name, "New name");
     assert.equal(edited.prompt, "New prompt");
@@ -1226,7 +1230,7 @@ integration(
     assert.equal((await store.getProject(project.id))?.model, "custom-model");
     assert.equal(edited.state, "queued");
     // Reducing capacity must also hold work already queued under the higher limit.
-    await store.updateProject(project.id, "owner", { maxWip: 1 });
+    await store.updateProject(project.id, "owner", { targetWip: 1 });
     assert.equal(await store.claim("worker"), null);
     await store.reconcile(first.id, "merged");
     const running = await store.claim("worker");
@@ -1237,14 +1241,17 @@ integration(
       baseCommit: "abc",
       patch: Buffer.from("saved"),
     });
-    assert.equal((await store.updateProject(project.id, "owner", { maxWip: 3 })).state, "paused");
+    assert.equal(
+      (await store.updateProject(project.id, "owner", { targetWip: 3 })).state,
+      "paused",
+    );
     assert.equal(await store.claim("worker"), null);
     await store.control(project.id, "owner", "cancel");
     await assert.rejects(
-      store.updateProject(project.id, "owner", { maxWip: 4 }),
+      store.updateProject(project.id, "owner", { targetWip: 4 }),
       /Cancelled projects cannot be edited/,
     );
-    assert.equal((await store.createProject("owner", request, "demo", key)).project.maxWip, 3);
+    assert.equal((await store.createProject("owner", request, "demo", key)).project.targetWip, 3);
   },
 );
 
@@ -1314,3 +1321,72 @@ integration(
     );
   },
 );
+
+integration("a merge refills WIP while another run is still running", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await publishNext(1);
+  const second = await store.claim("second");
+  assert.ok(second);
+  await store.reconcile(first.id, "merged");
+  await store.reconcile(first.id, "merged");
+  const replacement = await store.claim("replacement");
+  assert.ok(replacement, "merge must start a replacement without waiting for the running sibling");
+  assert.equal(await store.claim("overflow"), null);
+  assert.equal(
+    (await store.getProject(project.id))?.attempts?.filter((run) => run.state === "running").length,
+    2,
+  );
+});
+
+integration(
+  "polling refills legacy running projects and lowering WIP holds queued work",
+  async () => {
+    const { project } = await store.createProject(
+      "owner",
+      { ...input(), targetWip: 3 },
+      "demo",
+      randomUUID(),
+    );
+    assert.ok(await store.claim("first"));
+    // Simulate an older coordinator that left only a running job behind.
+    await store.pool.query("DELETE FROM jobs WHERE project_id=$1 AND stage='queued'", [project.id]);
+    store = new Store(store.pool);
+    assert.ok(await store.claim("second"));
+    await store.updateProject(project.id, "owner", { targetWip: 1 });
+    assert.equal(await store.claim("overflow"), null);
+    assert.equal((await store.getProject(project.id))?.attemptCount, 2);
+  },
+);
+
+integration("a failed run can retry using its queued WIP reservation", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await store.claim("first");
+  assert.ok(first);
+  await store.fail(first.id, "first", "Failed before publication");
+  assert.equal(await store.claim("stopped"), null);
+  await store.retryAttempt(project.id, "owner");
+  assert.ok(await store.claim("retry"));
+});
+
+integration("renaming the WIP column preserves configured targets across migrations", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  await store.pool.query("ALTER TABLE projects RENAME COLUMN target_wip TO max_wip");
+  await store.migrate();
+  await store.migrate();
+  assert.equal((await store.getProject(project.id))?.targetWip, 2);
+});

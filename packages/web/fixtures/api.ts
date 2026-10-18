@@ -52,7 +52,7 @@ function fixtures() {
     prompt:
       "Validate email addresses before submitting the signup form. Show clear, actionable errors next to each field, preserve entered values after a failed submission, and add coverage for the common failure cases.",
     resources: null,
-    maxWip: 1,
+    targetWip: 1,
     model: "gpt-6-luna",
     reasoningEffort: "low",
     attemptCount: 3,

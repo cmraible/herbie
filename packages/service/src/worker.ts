@@ -309,6 +309,15 @@ export async function runWorker(
   workerId: string,
   signal: AbortSignal,
 ): Promise<void> {
+  const tasks = new Set<Promise<unknown>>();
+  const launch = (task: Promise<unknown>) => {
+    const tracked = task
+      .catch((error) => {
+        logFailure(error, { component: "worker-task" });
+      })
+      .finally(() => tasks.delete(tracked));
+    tasks.add(tracked);
+  };
   let nextReconciliation = 0;
   let nextCiPoll = 0;
   while (!signal.aborted) {
@@ -322,9 +331,9 @@ export async function runWorker(
         if (adapters.feedback) await store.requestFeedbackReview();
         nextCiPoll = Date.now() + 10 * 60_000;
       }
-      if (!signal.aborted) await runFeedbackOnce(store, adapters, workerId);
-      if (!signal.aborted) await runCiRepairOnce(store, adapters, workerId);
-      if (!signal.aborted) await runWorkerOnce(store, adapters, workerId);
+      if (!signal.aborted) launch(runFeedbackOnce(store, adapters, workerId));
+      if (!signal.aborted) launch(runCiRepairOnce(store, adapters, workerId));
+      if (!signal.aborted) launch(runWorkerOnce(store, adapters, workerId));
     } catch (error) {
       logFailure(error, { component: "worker-tick" });
       // Database interruptions leave leases to expire safely; keep the daemon alive.
@@ -335,6 +344,7 @@ export async function runWorker(
     }
     await delay(1000, undefined, { signal }).catch(() => undefined);
   }
+  await Promise.all(tasks);
 }
 
 /**
