@@ -67,8 +67,6 @@ mkdir -p /home/compat/.codex
 cat > /home/compat/.codex/config.toml <<'HERBIE_CONFIG'
 model_provider = "herbie_openai"
 model_reasoning_effort = "low"
-model_context_window = 32768
-model_auto_compact_token_limit = 30000
 tool_output_token_limit = 1024
 web_search = "disabled"
 [model_providers.herbie_openai]
