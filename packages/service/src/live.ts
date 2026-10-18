@@ -59,6 +59,7 @@ export function createLiveAdapters(
         : undefined;
   return {
     mode: "live",
+    durableSessions: true,
     environmentLimits,
     ...(config
       ? {
@@ -214,9 +215,6 @@ ${execution.ciRepair.details}`
 Other pull requests for this project are still open:
 ${openPullRequests.map((pr) => `- ${pr.url} (branch: ${pr.branch})`).join("\n")}
 Inspect these branches before choosing your change. Make one small, independently mergeable contribution on the current default branch. Do not duplicate or depend on their unmerged changes.`;
-      if (execution.project.resources) {
-        validateEnvironmentResources(execution.project.resources, await environmentLimits!());
-      }
       const provider =
         config.provider === "e2b"
           ? createE2BProvider(config)
@@ -234,11 +232,26 @@ Inspect these branches before choosing your change. Make one small, independentl
                 domainAllowList: config.domainAllowList,
                 outboundProxyUrl: config.outboundProxyUrl,
               },
+              (id) =>
+                new Daytona({
+                  apiKey: config.apiKey,
+                  apiUrl: config.apiUrl,
+                  target: config.target,
+                  requestTimeoutMs: 30_000,
+                }).get(id),
             );
       const changes = await runAgentAttempt(
-        provider,
+        {
+          ...provider,
+          async create(request) {
+            if (request.resources)
+              validateEnvironmentResources(request.resources, await environmentLimits!());
+            return provider.create(request);
+          },
+        },
         {
           signal: execution.signal,
+          durable: execution.durable,
           onEnvironment: execution.onEnvironment,
           onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,

@@ -3,12 +3,13 @@ import { StringDecoder } from "node:string_decoder";
 // Read bounded byte ranges so polling never re-downloads an expanding transcript.
 export async function streamAgentTranscript(
   read: (offset: number) => Promise<Buffer>,
-  report: (message: string) => Promise<void>,
+  report: (message: string, offset: number) => Promise<void>,
   finished: () => boolean,
 ): Promise<void> {
   const decoder = new StringDecoder("utf8");
   let offset = 0;
   let pending = "";
+  let recordedOffset = 0;
   for (;;) {
     const finalRead = finished();
     const chunk = await read(offset);
@@ -23,7 +24,8 @@ export async function streamAgentTranscript(
       } catch {
         throw new Error("Invalid agent transcript record");
       }
-      await report(line);
+      recordedOffset += Buffer.byteLength(line + "\n");
+      await report(line, recordedOffset);
     }
     if (chunk.length === 0) {
       if (finalRead) {

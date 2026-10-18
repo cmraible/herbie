@@ -1,10 +1,12 @@
+import { executeDurably } from "./durable-execution.js";
+import { DaytonaNotFoundError } from "@daytona/sdk";
 import type {
   CreateSandboxFromImageParams,
   CreateSandboxFromSnapshotParams,
   Sandbox,
 } from "@daytona/sdk";
 import type { Readable } from "node:stream";
-import type { EnvironmentProvider } from "./environment.js";
+import type { Environment, EnvironmentProvider } from "./environment.js";
 import { runAgentAttempt, type AttemptRequest } from "./agent-attempt.js";
 import { installEnvironmentRuntime, configureEnvironmentRuntime } from "./environment-runtime.js";
 import { AttemptCommandError } from "./attempt-diagnostics.js";
@@ -39,9 +41,65 @@ type DaytonaOptions = Pick<CreateSandboxFromSnapshotParams, "secrets" | "outboun
 export function createDaytonaProvider(
   create: CreateSandbox,
   config: DaytonaOptions,
+  connect?: (id: string) => Promise<AttemptSandbox>,
 ): EnvironmentProvider {
+  const wrap = (
+    sandbox: AttemptSandbox,
+    resources?: { cpu: number; memory: number; disk: number },
+  ): Environment => ({
+    id: sandbox.id,
+    async prepare(durable) {
+      if (resources)
+        for (const key of ["cpu", "memory", "disk"] as const)
+          if (sandbox[key] !== resources[key])
+            throw new Error(
+              `Daytona did not allocate the requested ${key}: expected ${resources[key]}, received ${sandbox[key]}`,
+            );
+      const command = `(\n${(config.snapshot ? "" : installEnvironmentRuntime) + configureEnvironmentRuntime}\n) 2>&1`;
+      const result = durable
+        ? await executeDurably(
+            wrap(sandbox),
+            durable.directory,
+            command,
+            durable.deadline,
+            durable.signal,
+          )
+        : await sandbox.process.executeCommand(
+            command,
+            undefined,
+            undefined,
+            config.snapshot ? 60 : 300,
+          );
+      if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
+    },
+    mkdir: (path) => sandbox.fs.createFolder(path, "700"),
+    writeFile: (contents, path) => sandbox.fs.uploadFile(contents, path, 30),
+    readFile: (path, options) =>
+      sandbox.fs.downloadFileStream(path, {
+        timeout: options.timeoutMs / 1000,
+        signal: options.signal,
+      }),
+    async clone(url, path, branch, commit) {
+      await sandbox.git.clone(url, path, branch, commit);
+    },
+    exec: (command, options) =>
+      sandbox.process.executeCommand(command, options.cwd, undefined, options.timeoutMs / 1000),
+    destroy: () => sandbox.delete(60, true),
+  });
+  const reconnect = async (
+    id: string,
+    resources?: { cpu: number; memory: number; disk: number },
+  ) => {
+    try {
+      return wrap(await connect!(id), resources);
+    } catch (error) {
+      if (error instanceof DaytonaNotFoundError) return null;
+      throw error;
+    }
+  };
   return {
     name: "daytona",
+    ...(connect ? { find: reconnect, connect: reconnect } : {}),
     async create({ name, resources, timeoutMs }) {
       if (config.snapshot && resources)
         throw new Error(
@@ -65,37 +123,7 @@ export function createDaytonaProvider(
         },
         { timeout: 120 },
       );
-      return {
-        id: sandbox.id,
-        async prepare() {
-          if (resources)
-            for (const key of ["cpu", "memory", "disk"] as const)
-              if (sandbox[key] !== resources[key])
-                throw new Error(
-                  `Daytona did not allocate the requested ${key}: expected ${resources[key]}, received ${sandbox[key]}`,
-                );
-          const result = await sandbox.process.executeCommand(
-            `(\n${(config.snapshot ? "" : installEnvironmentRuntime) + configureEnvironmentRuntime}\n) 2>&1`,
-            undefined,
-            undefined,
-            config.snapshot ? 60 : 300,
-          );
-          if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
-        },
-        mkdir: (path) => sandbox.fs.createFolder(path, "700"),
-        writeFile: (contents, path) => sandbox.fs.uploadFile(contents, path, 30),
-        readFile: (path, options) =>
-          sandbox.fs.downloadFileStream(path, {
-            timeout: options.timeoutMs / 1000,
-            signal: options.signal,
-          }),
-        async clone(url, path, branch, commit) {
-          await sandbox.git.clone(url, path, branch, commit);
-        },
-        exec: (command, options) =>
-          sandbox.process.executeCommand(command, options.cwd, undefined, options.timeoutMs / 1000),
-        destroy: () => sandbox.delete(60, true),
-      };
+      return wrap(sandbox, resources);
     },
   };
 }

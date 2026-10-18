@@ -1,3 +1,9 @@
+import { executeDurably, SessionDetached, type DurableAttempt } from "./durable-execution.js";
+export {
+  SessionDetached,
+  type DurableAttempt,
+  type AttemptCheckpoint,
+} from "./durable-execution.js";
 import { streamAgentTranscript } from "./agent-transcript.js";
 export { parseFeedbackDecision } from "./feedback-decision.js";
 import { parseFeedbackDecision, type FeedbackDecision } from "./feedback-decision.js";
@@ -38,6 +44,7 @@ export interface AgentAttemptArtifact {
 }
 
 export type AttemptRequest = {
+  durable?: DurableAttempt;
   onEnvironment?: (environment: { provider: string; id: string }) => Promise<void>;
   signal?: AbortSignal;
   resources?: { cpu: number; memory: number; disk: number };
@@ -48,7 +55,7 @@ export type AttemptRequest = {
   model?: string;
   reasoningEffort?: string;
   verifyLocally?: boolean;
-  onActivity?: (message: string) => Promise<void>;
+  onActivity?: (message: string, offset?: number) => Promise<void>;
   feedback?: boolean;
 };
 
@@ -131,6 +138,8 @@ export async function runAgentAttempt(
         }),
       ]);
     } catch (cause) {
+      if (request.durable)
+        throw new SessionDetached("Session observer persistence unavailable", { cause });
       throw new AttemptReportError("Attempt event persistence failed", { cause });
     } finally {
       clearTimeout(timer);
@@ -154,20 +163,74 @@ export async function runAgentAttempt(
       contents: await readFile(new URL(name, runtimeDirectory)),
     })),
   );
-  const name = `herbie-attempt-${randomUUID()}`;
+  const durable = request.durable;
+  let checkpoint = durable?.checkpoint;
+  if (
+    checkpoint &&
+    (checkpoint.version !== 1 || (checkpoint.provider && checkpoint.provider !== provider.name))
+  )
+    throw new SessionDetached("Session requires its original environment provider and protocol");
+  const save = async (update: Partial<NonNullable<typeof checkpoint>>) => {
+    if (!durable || !checkpoint) return;
+    checkpoint = { ...checkpoint, ...update };
+    try {
+      await durable.save(checkpoint);
+    } catch (cause) {
+      throw new SessionDetached("Session checkpoint could not be saved", { cause });
+    }
+  };
+  const name = checkpoint?.name ?? `herbie-attempt-${randomUUID()}`;
+  if (!/^herbie-attempt-[a-f0-9-]+$/.test(name))
+    throw new Error("Invalid session environment name");
   const directory = `/tmp/${name}`;
   const cwd = `${directory}/repo`;
-  await begin("sandbox_creation");
-  await emit(`Creating sandbox ${name}`);
+  if (!checkpoint || !request.signal?.aborted) {
+    await begin("sandbox_creation");
+    await emit(`Creating sandbox ${name}`);
+  }
   let sandbox: Environment;
   try {
-    request.signal?.throwIfAborted();
-    sandbox = await provider.create({
-      name,
-      resources: request.resources,
-      timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
-    });
+    if (!checkpoint || request.signal?.reason instanceof SessionDetached)
+      request.signal?.throwIfAborted();
+    await save({ provider: provider.name });
+    const connected =
+      checkpoint?.phase === "deleted"
+        ? null
+        : checkpoint?.environmentId
+          ? await provider.connect!(checkpoint.environmentId, request.resources)
+          : ((checkpoint ? await provider.find?.(name, request.resources) : null) ??
+            (request.signal?.aborted
+              ? null
+              : await provider.create({
+                  name,
+                  resources: request.resources,
+                  timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
+                })));
+    if (!connected && !["collected", "deleted"].includes(checkpoint?.phase ?? "")) {
+      const error = new AgentAttemptError(
+        [],
+        "Session environment no longer exists; execution cannot be repeated automatically",
+      );
+      error.cleanup = checkpoint?.environmentId || provider.find ? "confirmed" : "unconfirmed";
+      throw error;
+    }
+    const absent = async (): Promise<never> => {
+      throw new Error("Environment already deleted");
+    };
+    sandbox = connected ?? {
+      id: checkpoint!.environmentId!,
+      prepare: absent,
+      mkdir: absent,
+      writeFile: absent,
+      readFile: absent,
+      clone: absent,
+      exec: absent,
+      destroy: async () => {},
+    };
+    if (!request.signal?.aborted) await save({ environmentId: sandbox.id });
   } catch (cause) {
+    if (cause instanceof AgentAttemptError) throw cause;
+    if (durable) throw new SessionDetached("Environment connection unavailable", { cause });
     const error = new AgentAttemptError(
       [cause],
       `Creation failed for ${name}; cleanup is unconfirmed. Check the environment provider by name.`,
@@ -199,90 +262,133 @@ export async function runAgentAttempt(
       throw lastError;
     })());
   const abort = () => {
+    if (request.signal?.reason instanceof SessionDetached) return;
     void removeSandbox().catch(() => undefined);
   };
   request.signal?.addEventListener("abort", abort, { once: true });
   if (request.signal?.aborted) abort();
   let changes: AgentAttemptChanges | undefined;
+  let legacyArtifact: string | undefined;
+  let detached = false;
+  let cleanupPending: SessionDetached | undefined;
   try {
     request.signal?.throwIfAborted();
     await emit(`Created sandbox ${sandbox.id}`);
     if (request.onEnvironment)
       await persist(() => request.onEnvironment!({ provider: provider.name, id: sandbox.id }));
-    await begin("runtime_preparation");
-    await sandbox.prepare();
-    if (request.resources)
-      await emit(
-        `Environment resources: ${request.resources.cpu} CPUs, ${request.resources.memory} GiB memory, ${request.resources.disk} GiB disk`,
+    if (!checkpoint || checkpoint.phase === "created") {
+      await begin("runtime_preparation");
+      await sandbox.prepare(
+        checkpoint
+          ? {
+              directory: `${directory}/setup`,
+              deadline: checkpoint.deadline,
+              signal: request.signal,
+            }
+          : undefined,
       );
-    await begin("runtime_upload");
-    await sandbox.mkdir(directory);
-    for (const file of runtime) {
-      await sandbox.writeFile(file.contents, `${directory}/${file.name}`);
+      if (request.resources)
+        await emit(
+          `Environment resources: ${request.resources.cpu} CPUs, ${request.resources.memory} GiB memory, ${request.resources.disk} GiB disk`,
+        );
+      await begin("runtime_upload");
+      if (checkpoint) {
+        const created = await sandbox.exec(`mkdir -p ${directory}`, { timeoutMs: 30_000 });
+        if (created.exitCode !== 0) throw new Error("Cannot create runtime directory");
+      } else await sandbox.mkdir(directory);
+      for (const file of runtime) {
+        await sandbox.writeFile(file.contents, `${directory}/${file.name}`);
+      }
+      await sandbox.writeFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`);
+      await sandbox.writeFile(
+        Buffer.from(
+          JSON.stringify({
+            cwd,
+            project: request.project,
+            model: request.model,
+            reasoningEffort: request.reasoningEffort,
+            verifyLocally: request.verifyLocally,
+            feedback: request.feedback,
+          }),
+        ),
+        `${directory}/attempt.json`,
+      );
+      await begin("repository_clone");
+      if (checkpoint) {
+        const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+        const cloned = await executeDurably(
+          sandbox,
+          `${directory}/checkout`,
+          `git clone ${request.branch ? `--branch ${quote(request.branch)} ` : ""}-- ${quote(repo.href)} ${cwd}${request.commit ? ` && git -C ${cwd} checkout --detach ${quote(request.commit)}` : ""}`,
+          checkpoint.deadline,
+          request.signal,
+        );
+        if (cloned.exitCode !== 0) throw new AttemptCommandError(cloned.exitCode, cloned.result);
+      } else await sandbox.clone(repo.href, cwd, request.branch, request.commit);
+      await save({ phase: "prepared" });
     }
-    await sandbox.writeFile(Buffer.from('{"type":"module"}'), `${directory}/package.json`);
-    await sandbox.writeFile(
-      Buffer.from(
-        JSON.stringify({
-          cwd,
-          project: request.project,
-          model: request.model,
-          reasoningEffort: request.reasoningEffort,
-          verifyLocally: request.verifyLocally,
-          feedback: request.feedback,
-        }),
-      ),
-      `${directory}/attempt.json`,
-    );
-    await begin("repository_clone");
-    await sandbox.clone(repo.href, cwd, request.branch, request.commit);
-    await begin("model_execution");
-    await emit(`Running project in sandbox ${sandbox.id}`);
-    // Only the generated UUID path enters the shell. The project and repo URL never do.
-    request.signal?.throwIfAborted();
-    const execution = sandbox.exec(
-      `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} node ${directory}/agent-runner.js`,
-      { cwd: directory, timeoutMs: (request.verifyLocally ? 32 : 22) * 60_000 },
-    );
-    let finished = false;
-    const command = execution.finally(() => {
-      finished = true;
-    });
-    const transcript = request.onActivity
-      ? streamAgentTranscript(
-          async (offset) => {
-            const response = await sandbox.exec(
-              `bash -o pipefail -c 'if [ -f ${directory}/transcript.jsonl ]; then dd if=${directory}/transcript.jsonl iflag=skip_bytes,count_bytes skip=${offset} count=65536 status=none | base64 -w0; fi'`,
-              { timeoutMs: 30_000 },
-            );
-            if (response.exitCode !== 0) throw new Error("Agent transcript read failed");
-            const bytes = Buffer.from(response.result, "base64");
-            if (bytes.toString("base64") !== response.result)
-              throw new Error("Invalid agent transcript encoding");
-            return bytes;
-          },
-          (message) => emit(message, request.onActivity),
-          () => finished,
-        ).catch(async (error) => {
-          await removeSandbox();
-          throw error;
-        })
-      : Promise.resolve();
-    // Drain the transcript even if execution failed, before deleting the environment.
-    const [outcome, recording] = await Promise.allSettled([command, transcript]);
-    if (recording.status === "rejected") throw recording.reason;
-    if (outcome.status === "rejected") throw outcome.reason;
-    const result = outcome.value;
-    if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
-    if (result.result !== "herbie-attempt-completed\n")
-      throw new AttemptResultError("Invalid project completion marker", result.result);
-    await emit(`Project completed in sandbox ${sandbox.id}`);
-    await begin("artifact_download");
-    const artifact: unknown = JSON.parse(
-      (await downloadBounded(sandbox, `${directory}/changes.json`, MAX_ARTIFACT_BYTES)).toString(
-        "utf8",
-      ),
-    );
+    if (!checkpoint || !["collected", "deleted"].includes(checkpoint.phase)) {
+      await begin("model_execution");
+      await emit(`Running project in sandbox ${sandbox.id}`);
+      // Only the generated UUID path enters the shell. The project and repo URL never do.
+      request.signal?.throwIfAborted();
+      const commandText = `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} node ${directory}/agent-runner.js`;
+      await save({ phase: "running" });
+      const execution = checkpoint
+        ? executeDurably(sandbox, directory, commandText, checkpoint.deadline, request.signal)
+        : sandbox.exec(commandText, {
+            cwd: directory,
+            timeoutMs: (request.verifyLocally ? 32 : 22) * 60_000,
+          });
+      let finished = false;
+      const command = execution.finally(() => {
+        finished = true;
+      });
+      const transcript = request.onActivity
+        ? streamAgentTranscript(
+            async (offset) => {
+              request.signal?.throwIfAborted();
+              const response = await sandbox.exec(
+                `bash -o pipefail -c 'if [ -f ${directory}/transcript.jsonl ]; then dd if=${directory}/transcript.jsonl iflag=skip_bytes,count_bytes skip=${offset} count=65536 status=none | base64 -w0; fi'`,
+                { timeoutMs: 30_000 },
+              );
+              if (response.exitCode !== 0) throw new Error("Agent transcript read failed");
+              const bytes = Buffer.from(response.result, "base64");
+              if (bytes.toString("base64") !== response.result)
+                throw new Error("Invalid agent transcript encoding");
+              return bytes;
+            },
+            (message, offset) => persist(() => request.onActivity!(message, offset)),
+            () => finished,
+          ).catch(async (error) => {
+            if (request.signal?.aborted && !(request.signal.reason instanceof SessionDetached))
+              throw error;
+            if (durable)
+              throw new SessionDetached("Transcript observer disconnected", { cause: error });
+            await removeSandbox();
+            throw error;
+          })
+        : Promise.resolve();
+      // Drain the transcript even if execution failed, before deleting the environment.
+      const [outcome, recording] = await Promise.allSettled([command, transcript]);
+      if (outcome.status === "rejected" && outcome.reason instanceof SessionDetached)
+        throw outcome.reason;
+      if (recording.status === "rejected") throw recording.reason;
+      if (outcome.status === "rejected") throw outcome.reason;
+      const result = outcome.value;
+      if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
+      if (result.result !== "herbie-attempt-completed\n")
+        throw new AttemptResultError("Invalid project completion marker", result.result);
+      await emit(`Project completed in sandbox ${sandbox.id}`);
+      await begin("artifact_download");
+      const artifactText = (
+        await downloadBounded(sandbox, `${directory}/changes.json`, MAX_ARTIFACT_BYTES)
+      ).toString("utf8");
+      await save({ phase: "collected", artifact: artifactText });
+      // Legacy callers do not persist checkpoints, but share artifact validation.
+      legacyArtifact = artifactText;
+    }
+    const artifact: unknown = JSON.parse(checkpoint?.artifact ?? legacyArtifact!);
     if (
       typeof artifact !== "object" ||
       artifact === null ||
@@ -336,32 +442,57 @@ export async function runAgentAttempt(
     };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
+    if (cause instanceof SessionDetached || request.signal?.reason instanceof SessionDetached) {
+      detached = true;
+      throw cause;
+    }
+    if (
+      durable &&
+      !request.signal?.aborted &&
+      !["collected", "deleted"].includes(checkpoint?.phase ?? "") &&
+      !(cause instanceof AttemptCommandError) &&
+      !(cause instanceof AttemptResultError)
+    ) {
+      detached = true;
+      throw new SessionDetached("Session observation will resume", { cause });
+    }
     diagnostics.push(attemptDiagnostic(cause, stage));
     failures.push(new Error(`Attempt failed in sandbox ${sandbox.id}`, { cause }));
   } finally {
-    // A failed event write must never prevent sandbox cleanup.
-    try {
-      await begin("sandbox_deletion");
-    } catch (cause) {
-      diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
-      failures.push(new Error("Cleanup stage could not be persisted", { cause }));
-    }
-    try {
-      await removeSandbox();
-      await emit(`Deletion confirmed for sandbox ${sandbox.id}`);
-    } catch (cause) {
-      diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
-      failures.push(
-        new Error(
-          cleanupConfirmed
-            ? "Deletion confirmation event could not be persisted"
-            : `Deletion unconfirmed for sandbox ${sandbox.id}; check the environment provider before retrying`,
-          { cause },
-        ),
-      );
+    request.signal?.removeEventListener("abort", abort);
+    if (!detached) {
+      // A failed event write must never prevent sandbox cleanup.
+      try {
+        await begin("sandbox_deletion");
+      } catch (cause) {
+        if (durable)
+          cleanupPending = new SessionDetached("Session cleanup checkpoint pending", { cause });
+        diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
+        failures.push(new Error("Cleanup stage could not be persisted", { cause }));
+      }
+      try {
+        if (!cleanupPending) {
+          await removeSandbox();
+          await save({ phase: "deleted" });
+          await emit(`Deletion confirmed for sandbox ${sandbox.id}`);
+        }
+      } catch (cause) {
+        if (durable)
+          cleanupPending = new SessionDetached("Session cleanup checkpoint pending", { cause });
+        diagnostics.push(attemptDiagnostic(cause, "sandbox_deletion"));
+        failures.push(
+          new Error(
+            cleanupConfirmed
+              ? "Deletion confirmation event could not be persisted"
+              : `Deletion unconfirmed for sandbox ${sandbox.id}; check the environment provider before retrying`,
+            { cause },
+          ),
+        );
+      }
     }
   }
   request.signal?.removeEventListener("abort", abort);
+  if (cleanupPending) throw cleanupPending;
   if (!failures.length && changes) {
     changes.verification = {
       ...(request.verifyLocally &&

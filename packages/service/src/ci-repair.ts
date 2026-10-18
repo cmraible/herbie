@@ -1,20 +1,21 @@
 import { runAgentSession } from "./agent-session.js";
-import { AgentAttemptError } from "@herbie/loop/agent-attempt";
+import { AgentAttemptError, SessionDetached } from "@herbie/loop/agent-attempt";
 import { StaleRepairError } from "./adapters.js";
 import type { Adapters, Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
-import type { Store } from "./store.js";
+import type { Store, WorkerOptions } from "./store.js";
 
 // Webhooks only request a review. GitHub API reads establish the current PR and CI state.
 export async function runCiRepairOnce(
   store: Store,
   adapters: Adapters,
   workerId: string,
+  options: WorkerOptions = {},
 ): Promise<boolean> {
   if (!adapters.ciStatus) return false;
   await store.recoverCiRepairs();
   await store.recoverAgentSessions();
-  const job = await store.takeCiReview();
+  const job = options.recovered?.job ?? (await store.takeCiReview());
   if (!job) return false;
   let id: string | null = null;
   let cleanupConfirmed = false;
@@ -22,13 +23,20 @@ export async function runCiRepairOnce(
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      project: job.project,
+      ...options.recovered?.execution,
+      project: options.recovered?.execution.project ?? job.project,
       branch: job.branch,
       attemptId: job.attemptId,
-      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
-      signal: controller.signal,
+      repository:
+        options.recovered?.execution.repository ??
+        (await adapters.authorize(job.project.ownerId, job.project.repository)),
+      signal: options.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal,
     };
-    const failure = await adapters.ciStatus(execution);
+    const failure = options.recovered?.execution.ciRepair
+      ? { ...options.recovered.execution.ciRepair, state: "failed" as const }
+      : await adapters.ciStatus(execution);
     if (!failure) return true;
     if (failure.state === "passed") {
       await store.discardWaitingCi(job.id);
@@ -42,15 +50,34 @@ export async function runCiRepairOnce(
       }
       return true;
     }
-    id = await store.startCiRepair(job.id, failure.head, workerId);
+    id =
+      options.recovered?.execution.attemptId ??
+      (await store.startCiRepair(job.id, failure.head, workerId));
     if (!id) return true;
     execution.attemptId = id;
     execution.ciRepair = failure;
+    if (
+      options.recovered &&
+      (job.project.state === "cancelled" ||
+        job.project.state === "paused" ||
+        job.project.stopRequested)
+    ) {
+      controller.abort(new Error("Project stopped"));
+      await runAgentSession(store, adapters, execution, job.id, workerId, "ci_repair");
+      throw new Error("Project stopped before publication");
+    }
     const requireLease = async () => {
       controller.signal.throwIfAborted();
       if (!(await store.heartbeatCiRepair(id!, workerId))) {
-        controller.abort();
-        throw new Error("CI repair lease lost or project stopped");
+        const project = await store.getProject(job.project.id);
+        const cancelled =
+          project?.state === "cancelled" || project?.state === "paused" || !!project?.stopRequested;
+        controller.abort(
+          cancelled
+            ? new Error("Project cancelled")
+            : new SessionDetached("CI repair observer lease lost"),
+        );
+        throw controller.signal.reason;
       }
       controller.signal.throwIfAborted();
     };
@@ -59,7 +86,13 @@ export async function runCiRepairOnce(
       if (renewing) return;
       renewing = true;
       void requireLease()
-        .catch(() => controller.abort())
+        .catch((error) =>
+          controller.abort(
+            error instanceof SessionDetached
+              ? error
+              : new SessionDetached("CI heartbeat unavailable", { cause: error }),
+          ),
+        )
         .finally(() => {
           renewing = false;
         });
@@ -102,6 +135,7 @@ export async function runCiRepairOnce(
       published.headSha,
     );
   } catch (error) {
+    if (error instanceof SessionDetached || options.signal?.aborted) return true;
     if (id && error instanceof StaleRepairError) {
       await store.pauseCiRepairForExternalChange(id, job.id);
       return true;

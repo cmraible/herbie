@@ -19,8 +19,8 @@ import {
   type ProjectEvent,
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
-import type { PullRequestFeedback, PublicationPhase } from "./adapters.js";
-import type { AgentAttemptChanges } from "@herbie/loop/agent-attempt";
+import type { PullRequestFeedback, PublicationPhase, Execution } from "./adapters.js";
+import type { AgentAttemptChanges, AttemptCheckpoint } from "@herbie/loop/agent-attempt";
 
 const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
   max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
@@ -85,6 +85,15 @@ export interface Job {
   branch: string;
   stage: z.infer<typeof jobRow>["stage"];
   artifact: AgentAttemptChanges | null;
+}
+export interface SessionRecovery {
+  job: Job;
+  execution: Execution;
+  kind: "implementation" | "ci_repair" | "pr_feedback";
+}
+export interface WorkerOptions {
+  signal?: AbortSignal;
+  recovered?: SessionRecovery;
 }
 export type PublicationRetryCandidate =
   | { kind: "retryable"; job: Job }
@@ -765,6 +774,7 @@ export class Store {
     kind: "implementation" | "ci_repair" | "pr_feedback",
     workerId: string,
     settings: Pick<Project, "model" | "reasoningEffort">,
+    execution?: Execution,
   ): Promise<string> {
     return this.transaction(async (client) => {
       const { project } = await lockJob(client, jobId);
@@ -778,20 +788,129 @@ export class Store {
         throw conflict("Agent session requires an active worker lease");
       const id = randomUUID();
       await client.query(
-        "INSERT INTO agent_sessions(id,job_id,source_id,kind,model,reasoning_effort) VALUES($1,$2,$3,$4,$5,$6)",
-        [id, jobId, sourceId, kind, settings.model, settings.reasoningEffort],
+        "INSERT INTO agent_sessions(id,job_id,source_id,kind,model,reasoning_effort,execution,checkpoint,observer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        [
+          id,
+          jobId,
+          sourceId,
+          kind,
+          settings.model,
+          settings.reasoningEffort,
+          execution
+            ? JSON.stringify({ ...execution, signal: undefined, durable: undefined })
+            : null,
+          execution
+            ? JSON.stringify({
+                version: 1,
+                name: `herbie-attempt-${id}`,
+                phase: "created",
+                deadline: Date.now() + 45 * 60_000,
+              })
+            : null,
+          workerId,
+        ],
       );
       return id;
     });
   }
-  async recordAgentSession(id: string, metadata: Record<string, unknown>): Promise<void> {
+  async agentSessionExecution(
+    id: string,
+  ): Promise<{ checkpoint: AttemptCheckpoint; artifact: AgentAttemptChanges | null }> {
+    const { rows } = await this.pool.query(
+      "SELECT checkpoint,artifact FROM agent_sessions WHERE id=$1",
+      [id],
+    );
+    const row = rows[0];
+    if (!row) throw conflict("Missing agent session");
+    return {
+      checkpoint: row.checkpoint,
+      artifact: row.artifact
+        ? { ...row.artifact, patch: Buffer.from(row.artifact.patchBase64, "base64") }
+        : null,
+    };
+  }
+
+  async checkpointAgentSession(
+    id: string,
+    workerId: string,
+    checkpoint: AttemptCheckpoint,
+  ): Promise<void> {
+    const result = await this.pool.query(
+      "UPDATE agent_sessions SET checkpoint=$3 WHERE id=$1 AND observer=$2 AND state='running'",
+      [id, workerId, JSON.stringify(checkpoint)],
+    );
+    if (result.rowCount !== 1) throw conflict("Agent session observer changed");
+  }
+
+  // Called only by the exclusive coordinator. Recovery renews the original source
+  // lease and uses the original input, session, and environment, not a new turn.
+  async releaseSessionObservers(): Promise<void> {
+    // Exclusive coordinator ownership proves previous observers are gone.
+    await this.transaction(async (client) => {
+      for (const [table, kind, state] of [
+        ["jobs", "implementation", "stage"],
+        ["ci_repairs", "ci_repair", "state"],
+        ["pr_feedback", "pr_feedback", "state"],
+      ]) {
+        await client.query(
+          `UPDATE ${table} SET lease_expires_at=clock_timestamp() WHERE ${state}='running' AND id IN (SELECT source_id FROM agent_sessions WHERE execution IS NOT NULL AND kind=$1 AND state IN ('running','completed'))`,
+          [kind],
+        );
+      }
+    });
+  }
+
+  async claimSessionRecovery(workerId: string): Promise<SessionRecovery | null> {
+    return this.transaction(async (client) => {
+      const selected =
+        await client.query(`SELECT s.* FROM agent_sessions s WHERE s.execution IS NOT NULL AND s.state IN ('running','completed') AND (
+        (s.kind='implementation' AND EXISTS(SELECT 1 FROM jobs j WHERE j.id=s.source_id AND ((j.stage='running' AND j.lease_expires_at<=clock_timestamp()) OR (j.stage='cancelled' AND s.state='running' AND (j.lease_owner IS NULL OR j.lease_expires_at<=clock_timestamp()))))) OR
+        (s.kind='ci_repair' AND EXISTS(SELECT 1 FROM ci_repairs r WHERE r.id=s.source_id AND r.state='running' AND NOT r.publication_started AND r.lease_expires_at<=clock_timestamp())) OR
+        (s.kind='pr_feedback' AND EXISTS(SELECT 1 FROM pr_feedback f WHERE f.id=s.source_id AND f.state='running' AND NOT f.publication_started AND f.lease_expires_at<=clock_timestamp()))
+      ) ORDER BY s.started_at LIMIT 1 FOR UPDATE OF s SKIP LOCKED`);
+      const session = selected.rows[0];
+      if (!session) return null;
+      const { row, project } = await lockJob(client, session.job_id);
+      const table =
+        session.kind === "implementation"
+          ? "jobs"
+          : session.kind === "ci_repair"
+            ? "ci_repairs"
+            : "pr_feedback";
+      await client.query(
+        `UPDATE ${table} SET lease_owner=$2,lease_expires_at=clock_timestamp()+interval '30 seconds' WHERE id=$1`,
+        [session.source_id, workerId],
+      );
+      if (row.stage === "cancelled" && session.kind === "implementation")
+        await client.query("UPDATE jobs SET cancelled_worker=$2 WHERE id=$1", [
+          session.source_id,
+          workerId,
+        ]);
+      await client.query("UPDATE agent_sessions SET observer=$2 WHERE id=$1", [
+        session.id,
+        workerId,
+      ]);
+      return {
+        job: decodeJob(row, project),
+        execution: { ...session.execution, agentSessionId: session.id },
+        kind: session.kind,
+      };
+    });
+  }
+
+  async recordAgentSession(
+    id: string,
+    metadata: Record<string, unknown>,
+    workerId?: string,
+  ): Promise<void> {
     await this.pool.query(
-      `UPDATE agent_sessions SET environment=COALESCE($2::jsonb,environment),thread_id=COALESCE($3,thread_id),usage=COALESCE($4::jsonb,usage) WHERE id=$1 AND state='running'`,
+      `UPDATE agent_sessions SET environment=COALESCE($2::jsonb,environment),thread_id=COALESCE($3,thread_id),usage=COALESCE($4::jsonb,usage) WHERE id=$1 AND state='running' AND ($5::text IS NULL OR observer=$5)`,
       [
         id,
         metadata.environment ? JSON.stringify(metadata.environment) : null,
         metadata.threadId ?? null,
         metadata.usage ? JSON.stringify(metadata.usage) : null,
+        workerId ?? null,
       ],
     );
   }
@@ -801,6 +920,7 @@ export class Store {
     cleanup: string,
     changes?: AgentAttemptChanges,
     diagnostic?: Record<string, unknown>,
+    workerId?: string,
   ): Promise<void> {
     const artifact = changes
       ? JSON.stringify({
@@ -810,13 +930,20 @@ export class Store {
         })
       : null;
     await this.pool.query(
-      "UPDATE agent_sessions SET state=$2,cleanup=$3,artifact=$4,failure_diagnostic=$5,finished_at=clock_timestamp() WHERE id=$1 AND state='running'",
-      [id, state, cleanup, artifact, diagnostic ? JSON.stringify(diagnostic) : null],
+      "UPDATE agent_sessions SET state=$2,cleanup=$3,artifact=$4,failure_diagnostic=$5,finished_at=clock_timestamp() WHERE id=$1 AND state='running' AND ($6::text IS NULL OR observer=$6)",
+      [
+        id,
+        state,
+        cleanup,
+        artifact,
+        diagnostic ? JSON.stringify(diagnostic) : null,
+        workerId ?? null,
+      ],
     );
   }
   async recoverAgentSessions(): Promise<void> {
     await this.pool
-      .query(`UPDATE agent_sessions s SET state='interrupted',cleanup='unconfirmed',finished_at=clock_timestamp() WHERE s.state='running' AND NOT (
+      .query(`UPDATE agent_sessions s SET state='interrupted',cleanup='unconfirmed',finished_at=clock_timestamp() WHERE s.state='running' AND s.execution IS NULL AND NOT (
       (s.kind='implementation' AND EXISTS(SELECT 1 FROM jobs j WHERE j.id=s.source_id AND j.stage='running' AND j.lease_expires_at>clock_timestamp())) OR
       (s.kind='ci_repair' AND EXISTS(SELECT 1 FROM ci_repairs r WHERE r.id=s.source_id AND r.state='running' AND r.lease_expires_at>clock_timestamp())) OR
       (s.kind='pr_feedback' AND EXISTS(SELECT 1 FROM pr_feedback f WHERE f.id=s.source_id AND f.state='running' AND f.lease_expires_at>clock_timestamp()))
@@ -828,10 +955,18 @@ export class Store {
     message: string,
     attemptId?: string,
     agentSessionId?: string,
+    transcriptOffset?: number,
   ): Promise<void> {
     await this.pool.query(
-      "INSERT INTO project_events(project_id,type,message,job_id,agent_session_id) VALUES($1,$2,$3,$4,$5)",
-      [projectId, type, message, attemptId ?? null, agentSessionId ?? null],
+      "INSERT INTO project_events(project_id,type,message,job_id,agent_session_id,transcript_offset) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
+      [
+        projectId,
+        type,
+        message,
+        attemptId ?? null,
+        agentSessionId ?? null,
+        transcriptOffset ?? null,
+      ],
     );
   }
   async recordPublicationPhase(
@@ -1101,6 +1236,7 @@ export class Store {
         Record<string, unknown>
       >(`SELECT j.id FROM jobs j JOIN projects g ON g.id=j.project_id
         WHERE j.lease_expires_at<=clock_timestamp() AND j.stage IN ('running','ready','publishing')
+        AND NOT (j.stage='running' AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.source_id=j.id AND s.execution IS NOT NULL AND s.state IN ('running','completed')))
         FOR UPDATE OF g,j SKIP LOCKED`);
       for (const selected of result.rows) {
         const id = z.object({ id: z.string().uuid() }).parse(selected).id;
@@ -1210,6 +1346,14 @@ export class Store {
     return result.rowCount === 1;
   }
 
+  async beginFeedbackPublication(id: string, workerId: string): Promise<void> {
+    const result = await this.pool.query(
+      "UPDATE pr_feedback SET publication_started=true WHERE id=$1 AND lease_owner=$2 AND state='running' AND lease_expires_at>clock_timestamp()",
+      [id, workerId],
+    );
+    if (result.rowCount !== 1) throw conflict("Feedback lease lost");
+  }
+
   async saveFeedbackArtifact(
     id: string,
     workerId: string,
@@ -1276,7 +1420,7 @@ export class Store {
         job_id: string;
         project_id: string;
       }>(`UPDATE pr_feedback f SET state='failed'
-        FROM jobs j WHERE f.job_id=j.id AND f.state='running' AND f.lease_expires_at<=clock_timestamp() RETURNING f.job_id,j.project_id`);
+        FROM jobs j WHERE f.job_id=j.id AND f.state='running' AND f.lease_expires_at<=clock_timestamp() AND (f.publication_started OR NOT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.source_id=f.id AND s.execution IS NOT NULL AND s.state IN ('running','completed'))) RETURNING f.job_id,j.project_id`);
       for (const row of result.rows)
         await addEvent(
           client,
@@ -1655,7 +1799,7 @@ export class Store {
   async recoverCiRepairs(): Promise<void> {
     await this.transaction(async (client) => {
       const expired = await client.query<{ id: string; job_id: string }>(
-        "SELECT id,job_id FROM ci_repairs WHERE state='running' AND lease_expires_at<=clock_timestamp()",
+        "SELECT id,job_id FROM ci_repairs r WHERE state='running' AND lease_expires_at<=clock_timestamp() AND (publication_started OR NOT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.source_id=r.id AND s.execution IS NOT NULL AND s.state IN ('running','completed')))",
       );
       for (const repair of expired.rows) {
         const { row: job, project } = await lockJob(client, repair.job_id);

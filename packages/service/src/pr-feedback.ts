@@ -1,37 +1,55 @@
 import { runAgentSession } from "./agent-session.js";
-import { parseFeedbackDecision } from "@herbie/loop/agent-attempt";
+import { parseFeedbackDecision, SessionDetached } from "@herbie/loop/agent-attempt";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import { StaleRepairError, type Adapters, type Execution } from "./adapters.js";
 import { logFailure } from "./diagnostic-log.js";
-import type { Store } from "./store.js";
+import type { Store, WorkerOptions } from "./store.js";
 
 export async function runFeedbackOnce(
   store: Store,
   adapters: Adapters,
   workerId: string,
+  options: WorkerOptions = {},
 ): Promise<boolean> {
   if (!adapters.feedback || !adapters.replyToFeedback) return false;
   await store.recoverFeedback();
   await store.recoverAgentSessions();
-  const job = await store.takeFeedbackReview();
+  const job = options.recovered?.job ?? (await store.takeFeedbackReview());
   if (!job) return false;
   let id: string | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const controller = new AbortController();
   try {
     const execution: Execution = {
-      project: job.project,
+      ...options.recovered?.execution,
+      project: options.recovered?.execution.project ?? job.project,
       branch: job.branch,
       attemptId: job.attemptId,
-      repository: await adapters.authorize(job.project.ownerId, job.project.repository),
-      signal: controller.signal,
+      repository:
+        options.recovered?.execution.repository ??
+        (await adapters.authorize(job.project.ownerId, job.project.repository)),
+      signal: options.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal,
       onActivity: (message) => store.appendEvent(job.project.id, "agent", message, job.id),
     };
-    const current = await adapters.reconcile(execution);
+    const current = options.recovered?.execution.feedback
+      ? {
+          ...options.recovered.execution.feedback.pullRequest,
+          state: "open" as const,
+          headSha: options.recovered.execution.feedback.head,
+        }
+      : await adapters.reconcile(execution);
     if (!current || current.state !== "open" || !current.headSha) return true;
-    if (await store.reconcilePullRequestHead(job.id, current)) return true;
-    const context = await adapters.feedback(execution);
-    const claimed = await store.startFeedback(job.id, context, workerId);
+    if (!options.recovered && (await store.reconcilePullRequestHead(job.id, current))) return true;
+    const context =
+      options.recovered?.execution.feedback?.context ?? (await adapters.feedback(execution));
+    const claimed = options.recovered?.execution.feedback
+      ? {
+          id: options.recovered.execution.attemptId,
+          item: options.recovered.execution.feedback.item,
+        }
+      : await store.startFeedback(job.id, context, workerId);
     if (!claimed) return true;
     id = claimed.id;
     execution.attemptId = id;
@@ -41,11 +59,28 @@ export async function runFeedbackOnce(
       item: claimed.item,
       context,
     };
+    if (
+      options.recovered &&
+      (job.project.state === "cancelled" ||
+        job.project.state === "paused" ||
+        job.project.stopRequested)
+    ) {
+      controller.abort(new Error("Project stopped"));
+      await runAgentSession(store, adapters, execution, job.id, workerId, "pr_feedback");
+      throw new Error("Project stopped before publication");
+    }
     const requireLease = async () => {
       controller.signal.throwIfAborted();
       if (!(await store.heartbeatFeedback(id!, workerId))) {
-        controller.abort();
-        throw new Error("Feedback lease lost or project stopped");
+        const project = await store.getProject(job.project.id);
+        const cancelled =
+          project?.state === "cancelled" || project?.state === "paused" || !!project?.stopRequested;
+        controller.abort(
+          cancelled
+            ? new Error("Project cancelled")
+            : new SessionDetached("Feedback observer lease lost"),
+        );
+        throw controller.signal.reason;
       }
       controller.signal.throwIfAborted();
     };
@@ -54,7 +89,13 @@ export async function runFeedbackOnce(
       if (renewing) return;
       renewing = true;
       void requireLease()
-        .catch(() => controller.abort())
+        .catch((error) =>
+          controller.abort(
+            error instanceof SessionDetached
+              ? error
+              : new SessionDetached("Feedback heartbeat unavailable", { cause: error }),
+          ),
+        )
         .finally(() => {
           renewing = false;
         });
@@ -111,6 +152,7 @@ export async function runFeedbackOnce(
     }
     if (fresh.headSha !== current.headSha)
       throw new StaleRepairError("PR changed while considering feedback");
+    if (decision.action !== "ignore") await store.beginFeedbackPublication(id, workerId);
     if (decision.action === "update") {
       const published = await adapters.publish(execution, changes, requireLease);
       await requireLease();
@@ -135,6 +177,7 @@ export async function runFeedbackOnce(
           : `Updated PR and replied to feedback: ${claimed.item.url}`,
     );
   } catch (error) {
+    if (error instanceof SessionDetached || options.signal?.aborted) return true;
     const reference = logFailure(error, {
       component: "pr-feedback",
       projectId: job.project.id,
