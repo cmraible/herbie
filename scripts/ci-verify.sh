@@ -131,7 +131,9 @@ run_build() {
   run_step lint pnpm lint
   run_step format pnpm format:check
   run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
-  run_step typecheck node scripts/verify-timing.mjs workspace_checks.typecheck -r typecheck
+  # Build has already produced every dependency's output. These read-only checks
+  # can run together without waiting for pnpm's dependency-ordered batches.
+  run_step typecheck node scripts/verify-timing.mjs workspace_checks.typecheck -r --parallel typecheck
 }
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
