@@ -1044,7 +1044,7 @@ integration(
     const first = await publishNext(1);
     await store.pool.query("DROP TRIGGER IF EXISTS notify_project_change ON jobs");
     await store.pool.query("ALTER TABLE jobs DROP COLUMN pull_request");
-    await store.pool.query("ALTER TABLE projects DROP COLUMN target_wip");
+    await store.pool.query("ALTER TABLE projects DROP COLUMN max_wip");
     await store.migrate();
     await store.migrate();
     const migrated = await store.getProject(project.id);
@@ -1378,19 +1378,6 @@ integration("a failed run can retry using its queued WIP reservation", async () 
   assert.ok(await store.claim("retry"));
 });
 
-integration("renaming the WIP column preserves configured targets across migrations", async () => {
-  const { project } = await store.createProject(
-    "owner",
-    { ...input(), targetWip: 2 },
-    "demo",
-    randomUUID(),
-  );
-  await store.pool.query("ALTER TABLE projects RENAME COLUMN target_wip TO max_wip");
-  await store.migrate();
-  await store.migrate();
-  assert.equal((await store.getProject(project.id))?.targetWip, 2);
-});
-
 integration("retry publishes a sibling's saved work after another run fails", async () => {
   const { project } = await store.createProject(
     "owner",
@@ -1403,7 +1390,6 @@ integration("retry publishes a sibling's saved work after another run fails", as
   assert.ok(first && second);
   await store.fail(first.id, "first", "Implementation failed");
   await store.saveArtifact(second.id, "second", { baseCommit: "abc", patch: Buffer.from("saved") });
-  assert.equal(await store.beginPublication(second.id, "second"), false);
   await store.retryAttempt(project.id, "owner");
   const resumed = await store.claim("resumed");
   assert.equal(resumed?.id, second.id);
@@ -1463,3 +1449,104 @@ for (const blocked of [true, false])
       assert.equal(await store.claim("extra"), null);
     },
   );
+
+integration("a failed sibling cannot strand uncertain publication recovery", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { ...input(), targetWip: 2 },
+    "demo",
+    randomUUID(),
+  );
+  const first = await store.claim("first");
+  const second = await store.claim("second");
+  assert.ok(first && second);
+  await store.saveArtifact(first.id, "first", { baseCommit: "abc", patch: Buffer.from("saved") });
+  await store.beginPublication(first.id, "first");
+  await store.publicationUncertain(first.id, "first", "Unavailable");
+  await store.fail(second.id, "second", "Failed");
+  assert.equal((await store.getProject(project.id))?.state, "needs_attention");
+  await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [first.id]);
+  assert.equal((await store.claim("recovery"))?.id, first.id);
+  await store.completePublication(first.id, "recovery", {
+    url: "https://github.com/example/repo/pull/1",
+    number: 1,
+    branch: first.branch,
+  });
+  assert.equal((await store.getProject(project.id))?.state, "failed");
+  assert.equal(await store.claim("extra"), null);
+  await store.retryAttempt(project.id, "owner");
+  assert.ok(await store.claim("retry"));
+});
+
+integration(
+  "acknowledged interrupted history does not block a later publication recovery",
+  async () => {
+    const { project } = await store.createProject("owner", input(), "demo", randomUUID());
+    const first = await store.claim("first");
+    assert.ok(first);
+    await store.fail(first.id, "first", "Interrupted", true);
+    await store.retryAttempt(project.id, "owner");
+    const retry = await store.claim("retry");
+    assert.ok(retry);
+    await store.saveArtifact(retry.id, "retry", { baseCommit: "abc", patch: Buffer.from("saved") });
+    await store.beginPublication(retry.id, "retry");
+    await store.publicationUncertain(retry.id, "retry", "Unavailable");
+    await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [retry.id]);
+    assert.equal((await store.claim("recovery"))?.id, retry.id);
+    const result = await store.completePublication(retry.id, "recovery", {
+      url: "https://github.com/example/repo/pull/1",
+      number: 1,
+      branch: retry.branch,
+    });
+    assert.equal(result.state, "awaiting_review");
+    assert.equal(result.attempts?.find((run) => run.id === first.id)?.state, "needs_attention");
+  },
+);
+
+integration("retrying one publication preserves another blocked publication", async () => {
+  const { project } = await store.createProject(
+    "owner",
+    { repository: "example/repo", prompt: "Work", targetWip: 2 },
+    "live",
+    randomUUID(),
+  );
+  const first = await store.claim("first");
+  const second = await store.claim("second");
+  assert.ok(first && second);
+  const baseCommit = "a".repeat(40),
+    patch = Buffer.from("saved");
+  for (const [job, worker] of [
+    [first, "first"],
+    [second, "second"],
+  ] as const) {
+    await store.saveArtifact(job.id, worker, {
+      baseCommit,
+      patch,
+      verification: {
+        version: 2,
+        repoUrl: "https://github.com/example/repo.git",
+        baseCommit,
+        patchSha256: createHash("sha256").update(patch).digest("hex"),
+        goalCompleted: true,
+        sandboxDeleted: true,
+      },
+    });
+    await store.beginPublication(job.id, worker);
+  }
+  await store.blockPublication(first.id, "first", "First conflict");
+  await store.blockPublication(second.id, "second", "Second conflict");
+  assert.equal(
+    (await store.queueSavedPublication(first.id, "owner", first.branch, baseCommit)).state,
+    "needs_attention",
+  );
+  assert.equal((await store.claim("recovery"))?.id, first.id);
+  await store.beginPublication(first.id, "recovery");
+  await store.completePublication(first.id, "recovery", {
+    url: "https://github.com/example/repo/pull/1",
+    number: 1,
+    branch: first.branch,
+  });
+  await store.reconcile(first.id, "merged");
+  assert.equal((await store.getProject(project.id))?.state, "needs_attention");
+  assert.equal(await store.claim("extra"), null);
+});

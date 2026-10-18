@@ -93,8 +93,8 @@ release check, not a claim that a generic secret scan can prove absence of secre
   but a PostgreSQL session advisory lock permits only one background coordinator.
   The old coordinator drains before releasing ownership to the replacement.
   Deploy the API, coordinator, and clients together when changing the project contract.
-  The WIP column migration preserves configured targets; older binaries must be stopped
-  before applying this rename.
+  The existing database WIP column is retained internally, preserving configured targets
+  while older coordinators drain during rollout.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
   Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
 - Starting the process runs migrations even when `HERBIE_EXECUTION_ENABLED=false`.

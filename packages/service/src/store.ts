@@ -23,7 +23,7 @@ import type { PullRequestFeedback, PublicationPhase } from "./adapters.js";
 import type { AgentAttemptChanges } from "@herbie/loop/agent-attempt";
 
 const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
-  target_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
+  max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request,'sessions',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',s.id,'kind',s.kind,'state',s.state,'model',s.model,'reasoningEffort',s.reasoning_effort,'startedAt',s.started_at,'finishedAt',s.finished_at,'environment',s.environment,'cleanup',s.cleanup,'threadId',s.thread_id,'usage',s.usage) ORDER BY s.started_at,s.id) FROM agent_sessions s WHERE s.job_id=j.id),'[]'::jsonb),'ciRepair',(SELECT jsonb_build_object('id',r.id,'state',r.state,'canRetry',r.state='failed' AND r.retryable AND NOT r.publication_started) FROM ci_repairs r WHERE r.job_id=j.id AND r.state <> 'superseded' ORDER BY r.created_at DESC LIMIT 1)) ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id),'[]'::jsonb) AS attempts,
@@ -198,12 +198,31 @@ async function insertJob(client: PoolClient, projectId: string, cycle: number): 
 
 // Call with the project locked. Unpublished runs and open PRs each occupy a slot.
 async function advanceProject(client: PoolClient, project: Project): Promise<void> {
-  if (["cancelled", "failed", "needs_attention"].includes(project.state)) return;
-  const { rows } = await client.query<{ stage: string; cycle: number }>(
-    "SELECT stage,cycle FROM jobs WHERE project_id=$1 ORDER BY cycle",
+  if (project.state === "cancelled") return;
+  const { rows } = await client.query<{
+    stage: string;
+    cycle: number;
+    failure_acknowledged: boolean;
+    publication_blocked: boolean;
+    lease_valid: boolean;
+  }>(
+    "SELECT stage,cycle,failure_acknowledged,publication_blocked,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE project_id=$1 ORDER BY cycle",
     [project.id],
   );
-  const pending = rows.filter((job) =>
+  const needsAttention = rows.some(
+    (job) =>
+      (job.stage === "needs_attention" && !job.failure_acknowledged) ||
+      (job.stage === "publishing" && (job.publication_blocked || !job.lease_valid)),
+  );
+  const failed = rows.some((job) => job.stage === "failed" && !job.failure_acknowledged);
+  if (needsAttention || failed) {
+    await client.query("UPDATE projects SET state=$2,updated_at=clock_timestamp() WHERE id=$1", [
+      project.id,
+      needsAttention ? "needs_attention" : "failed",
+    ]);
+    return;
+  }
+  const pending: { stage: string; cycle: number }[] = rows.filter((job) =>
     ["queued", "running", "ready", "publishing"].includes(job.stage),
   );
   const reviewing = rows.filter((job) => job.stage === "awaiting_review").length;
@@ -225,7 +244,7 @@ async function advanceProject(client: PoolClient, project: Project): Promise<voi
           ? "queued"
           : "awaiting_review";
   await client.query(
-    "UPDATE projects SET state=$2,stop_requested=CASE WHEN $2='paused' THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1",
+    "UPDATE projects SET state=$2,error=NULL,stop_requested=CASE WHEN $2='paused' THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1",
     [project.id, state],
   );
 }
@@ -357,7 +376,7 @@ export class Store {
       const id = randomUUID();
       if (name === undefined) throw new Error("Missing project name");
       await client.query(
-        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,target_wip,model,reasoning_effort,resources,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued')",
+        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued')",
         [
           id,
           ownerId,
@@ -415,7 +434,7 @@ export class Store {
         [id, requestFingerprint({ ...project, name: undefined }, project.mode)],
       );
       const result = await client.query<Record<string, unknown>>(
-        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),target_wip=COALESCE($4,target_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
+        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
         [
           id,
           parsed.name,
@@ -504,6 +523,10 @@ export class Store {
         throw conflict("Review or close an open pull request before retrying this project");
       await client.query(
         "UPDATE projects SET state='queued',error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
+        [id],
+      );
+      await client.query(
+        "UPDATE jobs SET failure_acknowledged=true WHERE project_id=$1 AND stage IN ('failed','needs_attention')",
         [id],
       );
       await client.query(
@@ -673,7 +696,7 @@ export class Store {
         `SELECT g.id FROM projects g WHERE g.state IN ('queued','running','awaiting_review')
         AND g.stop_requested IS NULL AND ($1::text IS NULL OR g.mode=$1)
         AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=g.id AND j.stage='queued')
-        AND (SELECT count(*) FROM jobs j WHERE j.project_id=g.id AND j.stage IN ('running','ready','publishing','awaiting_review')) < g.target_wip
+        AND (SELECT count(*) FROM jobs j WHERE j.project_id=g.id AND j.stage IN ('running','ready','publishing','awaiting_review')) < g.max_wip
         FOR UPDATE OF g SKIP LOCKED`,
         [mode ?? null],
       );
@@ -682,11 +705,11 @@ export class Store {
       const selected = await client.query<Record<string, unknown>>(
         `SELECT j.id FROM jobs j JOIN projects g ON g.id=j.project_id
         WHERE j.stage IN ('queued','ready','publishing')
-        AND (j.stage <> 'queued' OR (SELECT count(*) FROM jobs reviewing WHERE reviewing.project_id=g.id AND reviewing.stage IN ('running','ready','publishing','awaiting_review')) < g.target_wip)
+        AND (j.stage <> 'queued' OR (SELECT count(*) FROM jobs reviewing WHERE reviewing.project_id=g.id AND reviewing.stage IN ('running','ready','publishing','awaiting_review')) < g.max_wip)
         AND j.eligible_at<=clock_timestamp() AND ($1::text IS NULL OR g.mode=$1)
         AND NOT j.publication_blocked AND (g.stop_requested IS NULL OR (j.stage='publishing' AND g.stop_requested='pause'))
         AND (j.lease_owner IS NULL OR j.lease_expires_at<=clock_timestamp())
-        AND (g.state IN ('queued','running') OR (j.stage='publishing' AND g.state='needs_attention'))
+        AND (g.state IN ('queued','running') OR (j.stage IN ('ready','publishing') AND g.state IN ('failed','needs_attention')))
         ORDER BY j.created_at LIMIT 1 FOR UPDATE OF g,j SKIP LOCKED`,
         [mode ?? null],
       );
@@ -862,7 +885,6 @@ export class Store {
         throw conflict("Worker lease expired or belongs to another worker");
       if (row.stage !== "ready" || !row.artifact)
         throw conflict("Publication requires a captured artifact ready for its first publication");
-      if (["failed", "needs_attention"].includes(project.state)) return false;
       await client.query("UPDATE jobs SET stage='publishing' WHERE id=$1", [jobId]);
       await addEvent(
         client,
@@ -889,10 +911,7 @@ export class Store {
         [jobId, JSON.stringify(pr)],
       );
       await client.query(
-        `UPDATE projects SET pull_request=$2,
-        state=CASE WHEN (state='failed' OR EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND (stage='needs_attention' OR (stage='publishing' AND (publication_blocked OR lease_owner IS NULL OR lease_expires_at<=clock_timestamp()))))) THEN state ELSE 'awaiting_review' END,
-        error=CASE WHEN (state='failed' OR EXISTS(SELECT 1 FROM jobs WHERE project_id=$1 AND (stage='needs_attention' OR (stage='publishing' AND (publication_blocked OR lease_owner IS NULL OR lease_expires_at<=clock_timestamp()))))) THEN error ELSE NULL END,
-        updated_at=clock_timestamp() WHERE id=$1`,
+        "UPDATE projects SET pull_request=$2,updated_at=clock_timestamp() WHERE id=$1",
         [project.id, JSON.stringify(pr)],
       );
       // Apply an already-known merge/close in this transaction before exposing capacity.
@@ -990,9 +1009,10 @@ export class Store {
       );
       const paused = project.stopRequested === "pause" || project.state === "paused";
       await client.query(
-        "UPDATE projects SET state=$2,error=NULL,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
+        "UPDATE projects SET state=$2,stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
         [project.id, paused ? "paused" : "queued"],
       );
+      await advanceProject(client, (await projectFrom(client, project.id))!);
       await addEvent(
         client,
         project.id,
@@ -1041,6 +1061,7 @@ export class Store {
         [project.id, state, error],
       );
       await addEvent(client, project.id, state, error, jobId);
+      await advanceProject(client, (await projectFrom(client, project.id))!);
     });
   }
   async recoverExpired(): Promise<number> {

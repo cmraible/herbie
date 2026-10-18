@@ -97,13 +97,15 @@ ALTER TABLE projects DROP COLUMN IF EXISTS max_attempts;
 ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_cycle_check;
 ALTER TABLE jobs ADD CONSTRAINT jobs_cycle_check CHECK (cycle >= 1);
 
--- Preserve each project's configured target when upgrading the column name.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS max_wip integer NOT NULL DEFAULT 1 CHECK (max_wip > 0);
+-- A retry acknowledges failures without rewriting the run history.
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='projects' AND column_name='max_wip') THEN
-    ALTER TABLE projects RENAME COLUMN max_wip TO target_wip;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='jobs' AND column_name='failure_acknowledged') THEN
+    ALTER TABLE jobs ADD COLUMN failure_acknowledged boolean NOT NULL DEFAULT false;
+    UPDATE jobs SET failure_acknowledged=true WHERE stage IN ('failed','needs_attention')
+      AND project_id IN (SELECT id FROM projects WHERE state NOT IN ('failed','needs_attention'));
   END IF;
 END $$;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS target_wip integer NOT NULL DEFAULT 1 CHECK (target_wip > 0);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pull_request jsonb;
 -- Older coordinators can still publish or reconcile while draining after this migration.
 CREATE OR REPLACE FUNCTION sync_project_pull_request() RETURNS trigger LANGUAGE plpgsql AS $$
