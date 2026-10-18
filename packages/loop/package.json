@@ -16,7 +16,7 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --project tsconfig.test.json",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --test --test-concurrency=2 test/*.test.ts",
     "test:e2e": "tsx test/e2e.ts",
     "test:daytona": "tsx test/daytona.ts",
     "build:e2b-template": "tsx src/e2b-template.ts"
