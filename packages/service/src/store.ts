@@ -712,6 +712,7 @@ export class Store {
     sourceId: string,
     kind: "implementation" | "ci_repair" | "pr_feedback",
     workerId: string,
+    settings: Pick<Project, "model" | "reasoningEffort">,
   ): Promise<string> {
     return this.transaction(async (client) => {
       const { project } = await lockJob(client, jobId);
@@ -726,7 +727,7 @@ export class Store {
       const id = randomUUID();
       await client.query(
         "INSERT INTO agent_sessions(id,job_id,source_id,kind,model,reasoning_effort) VALUES($1,$2,$3,$4,$5,$6)",
-        [id, jobId, sourceId, kind, project.model, project.reasoningEffort],
+        [id, jobId, sourceId, kind, settings.model, settings.reasoningEffort],
       );
       return id;
     });
