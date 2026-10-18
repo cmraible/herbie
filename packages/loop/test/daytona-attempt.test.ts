@@ -179,6 +179,21 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
   assert.equal(sandbox.fs.downloadFileStream.mock.callCount(), 1);
 });
 
+async function advanceDeletionRetries(t: TestContext, callCount: () => number) {
+  while (!callCount()) await new Promise((resolve) => setImmediate(resolve));
+  // Let the rejected deletion schedule its backoff before advancing time.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callCount(), 1);
+  for (const [retry, delay] of [1000, 2000].entries()) {
+    t.mock.timers.tick(delay - 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(callCount(), retry + 1);
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(callCount(), retry + 2);
+  }
+}
+
 for (const phase of [
   "preflight",
   "upload",
@@ -228,15 +243,20 @@ for (const phase of [
           ),
         ]),
       );
-    if (phase === "delete" || phase.endsWith("-and-delete"))
+    const deleteFails = phase === "delete" || phase.endsWith("-and-delete");
+    if (deleteFails) {
+      t.mock.timers.enable({ apis: ["setTimeout"] });
       sandbox.delete.mock.mockImplementation(fail);
-    await assert.rejects(run(), (error) => {
+    }
+    const rejected = assert.rejects(run(), (error) => {
       assert.ok(error instanceof DaytonaAttemptError);
       assert.equal(error.errors.length, phase.endsWith("-and-delete") ? 2 : 1);
       assert.deepEqual(error.changes, phase === "delete" ? changes : undefined);
       assert.doesNotMatch(error.message, /private/);
       return true;
     });
+    if (deleteFails) await advanceDeletionRetries(t, () => sandbox.delete.mock.callCount());
+    await rejected;
     assert.equal(
       sandbox.delete.mock.callCount(),
       phase.endsWith("-and-delete") || phase === "delete" ? 3 : 1,
@@ -796,15 +816,18 @@ for (const deleteFails of [false, true])
         release.resolve();
         if (deleteFails) throw new Error("synthetic delete failure");
       });
+      if (deleteFails) t.mock.timers.enable({ apis: ["setTimeout"] });
       const work = run({ signal: controller.signal });
       await entered.promise;
       controller.abort();
-      await assert.rejects(
+      const rejected = assert.rejects(
         work,
         (error) =>
           error instanceof DaytonaAttemptError &&
           error.cleanup === (deleteFails ? "unconfirmed" : "confirmed"),
       );
+      if (deleteFails) await advanceDeletionRetries(t, () => sandbox.delete.mock.callCount());
+      await rejected;
       assert.equal(sandbox.delete.mock.callCount(), deleteFails ? 3 : 1);
       assert.equal(sandbox.fs.downloadFileStream.mock.callCount(), 0);
     },
