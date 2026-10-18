@@ -204,15 +204,17 @@ async function advanceProject(client: PoolClient, project: Project): Promise<voi
     cycle: number;
     failure_acknowledged: boolean;
     publication_blocked: boolean;
+    publication_retry_count: number;
     lease_valid: boolean;
   }>(
-    "SELECT stage,cycle,failure_acknowledged,publication_blocked,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE project_id=$1 ORDER BY cycle",
+    "SELECT stage,cycle,failure_acknowledged,publication_blocked,publication_retry_count,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE project_id=$1 ORDER BY cycle",
     [project.id],
   );
   const needsAttention = rows.some(
     (job) =>
       (job.stage === "needs_attention" && !job.failure_acknowledged) ||
-      (job.stage === "publishing" && (job.publication_blocked || !job.lease_valid)),
+      (job.stage === "publishing" &&
+        (job.publication_blocked || job.publication_retry_count > 0 || !job.lease_valid)),
   );
   const failed = rows.some((job) => job.stage === "failed" && !job.failure_acknowledged);
   if (needsAttention || failed) {
@@ -1004,7 +1006,7 @@ export class Store {
       )
         throw conflict("Saved publication is no longer eligible for a safe retry");
       await client.query(
-        "UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,publication_blocked=false,eligible_at=clock_timestamp() WHERE id=$1",
+        "UPDATE jobs SET stage='ready',lease_owner=NULL,lease_expires_at=NULL,publication_blocked=false,publication_retry_count=0,eligible_at=clock_timestamp() WHERE id=$1",
         [jobId],
       );
       const paused = project.stopRequested === "pause" || project.state === "paused";
@@ -1097,7 +1099,7 @@ export class Store {
         const { row, project } = await lockJob(client, id);
         const uncertain = row.stage === "running" || row.stage === "publishing";
         await client.query(
-          "UPDATE jobs SET stage=CASE WHEN stage='running' THEN 'needs_attention' ELSE stage END,lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1",
+          "UPDATE jobs SET publication_retry_count=CASE WHEN stage='publishing' THEN GREATEST(publication_retry_count,1) ELSE publication_retry_count END,stage=CASE WHEN stage='running' THEN 'needs_attention' ELSE stage END,lease_owner=NULL,lease_expires_at=NULL,eligible_at=clock_timestamp() WHERE id=$1",
           [id],
         );
         if (uncertain) {

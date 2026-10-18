@@ -1550,3 +1550,44 @@ integration("retrying one publication preserves another blocked publication", as
   assert.equal((await store.getProject(project.id))?.state, "needs_attention");
   assert.equal(await store.claim("extra"), null);
 });
+
+for (const expired of [false, true])
+  integration(
+    `publication recovery keeps replenishment stopped until reconciled (expired: ${expired})`,
+    async () => {
+      const { project } = await store.createProject(
+        "owner",
+        { ...input(), targetWip: 2 },
+        "demo",
+        randomUUID(),
+      );
+      const first = await publishNext(1);
+      const second = await store.claim("second");
+      assert.ok(second);
+      await store.saveArtifact(second.id, "second", {
+        baseCommit: "abc",
+        patch: Buffer.from("saved"),
+      });
+      await store.beginPublication(second.id, "second");
+      if (expired) {
+        await store.pool.query(
+          "UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+          [second.id],
+        );
+        await store.recoverExpired();
+      } else await store.publicationUncertain(second.id, "second", "Unavailable");
+      await store.reconcile(first.id, "merged");
+      await store.pool.query("UPDATE jobs SET eligible_at=clock_timestamp() WHERE id=$1", [
+        second.id,
+      ]);
+      assert.equal((await store.claim("recovery"))?.id, second.id);
+      assert.equal((await store.getProject(project.id))?.state, "needs_attention");
+      assert.equal(await store.claim("extra"), null);
+      await store.completePublication(second.id, "recovery", {
+        url: "https://github.com/example/repo/pull/2",
+        number: 2,
+        branch: second.branch,
+      });
+      assert.ok(await store.claim("replacement"));
+    },
+  );
