@@ -65,6 +65,17 @@ test("run details separate session transcripts and retain historical activity", 
       },
     }),
   }));
+  events.push(
+    {
+      ...events[0]!,
+      id: 4,
+      type: "attempt",
+      message: "Attempt stage: runtime_upload",
+      createdAt: "hidden-time",
+    },
+    { ...events[1]!, id: 5, type: "pr_feedback", message: "Attempt stage: model_execution" },
+    { ...events[1]!, id: 6, type: "pr_feedback", message: "Project completed in sandbox example" },
+  );
   const html = renderToStaticMarkup(
     createElement(AttemptHistory, {
       project,
@@ -86,4 +97,11 @@ test("run details separate session transcripts and retain historical activity", 
   ])
     assert.ok(html.includes(text), text);
   assert.equal(html.split("Initial implementation").length, 2);
+  assert.ok(
+    !html.includes("hidden-time"),
+    "hidden reports must not produce timestamp-only bullets",
+  );
+  assert.ok(html.includes("Agent started working"));
+  assert.ok(html.includes("Review feedback considered"));
+  assert.ok(!html.includes("Preparing pull request"));
 });

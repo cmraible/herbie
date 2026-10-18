@@ -253,12 +253,15 @@ export function AttemptHistory({
                     .filter(
                       (event) => event.agentSessionId === session.id && event.type !== "agent",
                     )
-                    .map((event) => (
-                      <li key={event.id}>
-                        {activityMessage(project, event)}{" "}
-                        <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
-                      </li>
-                    ))}
+                    .map((event) => {
+                      const text = activityMessage(project, event);
+                      if (!text) return null;
+                      return (
+                        <li key={event.id}>
+                          {text} <time dateTime={event.createdAt}>{time(event.createdAt)}</time>
+                        </li>
+                      );
+                    })}
                 </ol>
               </details>
             ))}
