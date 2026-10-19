@@ -30,8 +30,15 @@ trap cleanup EXIT
 trap 'for pid in "${jobs[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done; exit 130' INT TERM
 
 workspace_checks() {
-  time_step workspace_checks verification-image docker build -f Dockerfile.verify --iidfile "$artifact_dir/verify-image" .
-  time_step workspace_checks postgres-startup start_database
+  # Database startup and image preparation are independent. Reap both jobs even
+  # when one fails, so cleanup cannot race a database that is still starting.
+  local database_pid image_status=0 database_status=0
+  time_step workspace_checks postgres-startup start_database &
+  database_pid=$!
+  time_step workspace_checks verification-image docker build -f Dockerfile.verify --iidfile "$artifact_dir/verify-image" . || image_status=$?
+  wait "$database_pid" || database_status=$?
+  if ((image_status != 0)); then return "$image_status"; fi
+  if ((database_status != 0)); then return "$database_status"; fi
   # Keep disposable repositories off the image layer. Fixtures also execute
   # temporary scripts, so /tmp must allow execution.
   docker run --rm --init --name "$prefix-tests" --network "container:$prefix-db" --shm-size=1g --tmpfs /tmp:exec \
