@@ -131,9 +131,12 @@ run_build() {
   run_step lint pnpm lint
   run_step format pnpm format:check
   run_step build node scripts/verify-timing.mjs workspace_checks.build -r build
-  # Build has already produced every dependency's output. These read-only checks
-  # can run together without waiting for pnpm's dependency-ordered batches.
-  run_step typecheck node scripts/verify-timing.mjs workspace_checks.typecheck -r --parallel typecheck
+  # Build already checks the same tsconfig used by contracts, demo, and web's
+  # typecheck scripts. Only the remaining packages add test-specific checks.
+  # Dependency outputs are ready, so these read-only checks can run in parallel.
+  run_step typecheck node scripts/verify-timing.mjs workspace_checks.typecheck \
+    --filter '!@herbie/contracts' --filter '!@herbie/demo' --filter '!@herbie/web' \
+    -r --parallel typecheck
 }
 run_unit_tests() {
   # The workspace packages do not share test state. Running them together
