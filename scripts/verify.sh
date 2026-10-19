@@ -32,12 +32,15 @@ trap 'for pid in "${jobs[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; don
 workspace_checks() {
   time_step workspace_checks verification-image docker build -f Dockerfile.verify --iidfile "$artifact_dir/verify-image" .
   time_step workspace_checks postgres-startup start_database
-  docker run --rm --init --name "$prefix-tests" --network "container:$prefix-db" --shm-size=1g \
+  # Keep disposable repositories off the image layer. Fixtures also execute
+  # temporary scripts, so /tmp must allow execution.
+  docker run --rm --init --name "$prefix-tests" --network "container:$prefix-db" --shm-size=1g --tmpfs /tmp:exec \
     -e HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:5432/herbie \
     -v "$artifact_dir:/app/artifacts/ci" "$(cat "$artifact_dir/verify-image")"
 }
 start_database() {
-  docker run -d --name "$prefix-db" \
+  # No check needs database files after this container is removed.
+  docker run -d --name "$prefix-db" --tmpfs /var/lib/postgresql/data \
     -e POSTGRES_USER=herbie -e POSTGRES_PASSWORD=herbie-local-only -e POSTGRES_DB=herbie \
     postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
   for ((i=0;i<30;i++)); do
