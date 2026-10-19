@@ -30,6 +30,15 @@ export const questions = [
         "Incomplete patches or missing dependencies/context prevent a reliable assessment.",
     },
   ),
+  choice(
+    "required_approvals",
+    "How many human approvals should be required to merge this PR? Assess complexity, architectural significance, and potential impact together. Zero approvals requires clear evidence that the changes are very straightforward and low risk. Small diffs are not necessarily low risk. Choose 2 when evidence is incomplete or uncertainty prevents a reliable assessment.",
+    {
+      0: "Very straightforward, low-risk changes that need no human approval.",
+      1: "Moderate complexity with bounded risk and no significant architectural choices; one human approval.",
+      2: "Significant architectural choices, risky changes, or insufficient context; two human approvals.",
+    },
+  ),
   ...Object.entries({
     authentication: "Does this change authentication or authorization behavior?",
     destructive_migration:
@@ -123,6 +132,7 @@ export async function classify({ github, decide, number, applyLabels = false }) 
   const classification = {
     change_type: answer("change_type").choice ?? "unclear",
     risk: incomplete ? "insufficient_context" : (answer("risk").choice ?? "insufficient_context"),
+    required_approvals: incomplete ? "2" : (answer("required_approvals").choice ?? "2"),
   };
   // Do not publish an assessment of a superseded diff or edited description.
   const current = await github(`/pulls/${number}`);
@@ -164,7 +174,7 @@ export async function classify({ github, decide, number, applyLabels = false }) 
     }
     await github(`/issues/${number}/labels`, "POST", { labels });
     for (const { name } of current.labels) {
-      if (/^ai:(change_type|risk):/.test(name) && !labels.includes(name)) {
+      if (/^ai:(change_type|risk|required_approvals):/.test(name) && !labels.includes(name)) {
         try {
           await github(`/issues/${number}/labels/${encodeURIComponent(name)}`, "DELETE");
         } catch (error) {
@@ -188,8 +198,10 @@ export function summary(result) {
   });
   return (
     `## Experimental PR classification\n\nPR #${result.pr_number}, head \`${result.head_sha}\`\n\n` +
-    `Change type: **${result.classification.change_type}** · Risk: **${result.classification.risk}**\n\n` +
-    (result.incomplete ? "Incomplete diff: risk forced to insufficient_context.\n\n" : "") +
+    `Change type: **${result.classification.change_type}** · Risk: **${result.classification.risk}** · Required human approvals: **${result.classification.required_approvals}**\n\n` +
+    (result.incomplete
+      ? "Incomplete diff: risk forced to insufficient_context; required approvals forced to 2.\n\n"
+      : "") +
     (result.stale ? "PR changed during classification; labels were not updated.\n\n" : "") +
     "Advisory only; not a merge gate. Probabilities are uncalibrated. Raw model answers:\n\n" +
     "| Question | Answer / probability |\n| --- | --- |\n" +
