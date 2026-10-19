@@ -108,22 +108,39 @@ References: [GitHub PR merge checkout](https://docs.github.com/en/actions/refere
 `classify-pr.yml` uses OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions)
 with `gpt-6-luna` and the repository's `OPENAI_API_KEY` Actions secret. It runs on
 PR creation, reopening, pushes, title/description edits, and ready-for-review events.
-It sends the title, description, changed paths, and patches to OpenAI in one request.
+It sends the title, description, changed paths, patches, and available base-revision
+`README.md`, `GLOSSARY.md`, `docs/service-contract.md`, and `AGENTS.md` to OpenAI in one request.
 No dependency installation or PR code execution is involved.
 
-Automatic runs maintain `ai:change_type:*`, `ai:risk:*`, and `ai:required_approvals:*` labels, preserving other
+Automatic runs maintain `ai:grade:*`, `ai:change_type:*`, `ai:risk:*`, and `ai:required_approvals:*` labels, preserving other
 labels. The Actions summary includes independent subsystem and risk-signal
 probabilities. The `pr-classification-*` artifact retains the raw answers, token
 usage, effective classification, and base/head SHAs for 30 days; it excludes the
 submitted source. These assessments are advisory and are not part of **All tests
 passed**. OpenAI API errors fail this separate workflow and leave previous labels unchanged.
 
+Quality uses the standard A, B, C, D, F scale (no E), judging regressions,
+relevant tests, a complete and coherent description, security, and documented
+conventions. Existing test coverage can suffice; changes that do not need tests
+are not penalized. The worst applicable grade wins:
+
+- **A:** All five criteria satisfied by the available evidence.
+- **B:** Only minor description, testing, or convention gaps.
+- **C:** Material description, testing, or convention gaps.
+- **D:** Likely regression or vulnerability, or serious testing/convention failures.
+- **F:** Clear regression, vulnerability, or fundamental documented requirement violation.
+
+Missing necessary context or a refusal yields `insufficient_context`. Grades are
+advisory assessments of supplied evidence, not proof of safety or test execution.
+Only the listed convention documents are supplied; the model should abstain when
+additional context is necessary. A high-risk change can still earn an A.
+
 Risk means potential unintended production impact: low for narrow, reversible
 changes without runtime behavior changes; medium for bounded runtime changes;
 high for authentication, authorization, data integrity, destructive migrations,
 public contracts, or broadly shared runtime behavior. Missing/truncated patches,
 GitHub's 3,000-file cap, or the 120,000-character patch budget force
-`insufficient_context`. A model refusal also produces an unknown classification.
+`insufficient_context` for both grade and risk. A model refusal also produces an unknown classification.
 Required human approvals are 0 for very straightforward, low-risk changes, 1 for
 moderate complexity with bounded risk, and 2 for significant architectural choices
 or risky changes. Incomplete evidence or a refusal to answer this question defaults
