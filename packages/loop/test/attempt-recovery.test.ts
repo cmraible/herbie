@@ -95,8 +95,9 @@ test("observer loss never destroys a running environment", async () => {
   assert.equal(destroys, 0);
 });
 
-for (const fails of [false, true]) {
-  test(`stream observation ${fails ? "failure releases the observer without deletion" : "reconnects and saves the completed agent's patches"}`, async () => {
+for (const state of ["running", "failed", "completed"] as const) {
+  const fails = state !== "completed";
+  test(`stream observation with ${state} execution ${fails ? "failure releases the observer without deletion" : "reconnects and saves the completed agent's patches"}`, async () => {
     let launches = 0,
       destroys = 0,
       streams = 0,
@@ -111,7 +112,10 @@ for (const fails of [false, true]) {
         }
         if (command.includes("printf running")) {
           reads++;
-          return { exitCode: 0, result: fails ? "running" : "0" };
+          return {
+            exitCode: 0,
+            result: state === "running" ? "running" : state === "failed" ? "1" : "0",
+          };
         }
         if (command.includes("head -c"))
           return { exitCode: 0, result: "herbie-attempt-completed\n" };

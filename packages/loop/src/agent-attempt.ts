@@ -406,11 +406,18 @@ export async function runAgentAttempt(
       const [outcome, recording] = await Promise.allSettled([command, transcript]);
       if (outcome.status === "rejected" && outcome.reason instanceof SessionDetached)
         throw outcome.reason;
-      if (outcome.status === "fulfilled" && outcome.value.exitCode !== 0)
+      // A deadline deliberately interrupts the reader. Ordinary execution errors
+      // must still preserve an environment whose transcript could not be drained.
+      if (
+        outcome.status === "fulfilled" &&
+        outcome.value.exitCode === 124 &&
+        outcome.value.result === "Agent session deadline exceeded"
+      )
         throw new AttemptCommandError(outcome.value.exitCode, outcome.value.result);
       if (recording.status === "rejected") throw recording.reason;
       if (outcome.status === "rejected") throw outcome.reason;
       const result = outcome.value;
+      if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
       if (result.result !== "herbie-attempt-completed\n")
         throw new AttemptResultError("Invalid project completion marker", result.result);
       await emit(`Project completed in sandbox ${sandbox.id}`);
