@@ -1,4 +1,5 @@
 import { executeDurably } from "./durable-execution.js";
+import { randomUUID } from "node:crypto";
 import { DaytonaNotFoundError } from "@daytona/sdk";
 import type {
   CreateSandboxFromImageParams,
@@ -28,7 +29,13 @@ type AttemptSandbox = Pick<Sandbox, "id" | "delete"> &
         options: { timeout: number; signal: AbortSignal },
       ): Promise<Readable>;
     };
-    process: Pick<Sandbox["process"], "executeCommand">;
+    process: Pick<Sandbox["process"], "executeCommand"> &
+      Partial<
+        Pick<
+          Sandbox["process"],
+          "createSession" | "executeSessionCommand" | "getSessionCommandLogs" | "deleteSession"
+        >
+      >;
   };
 type CreateSandbox = (
   params: CreateSandboxFromSnapshotParams | CreateSandboxFromImageParams,
@@ -48,6 +55,70 @@ export function createDaytonaProvider(
     resources?: { cpu: number; memory: number; disk: number },
   ): Environment => ({
     id: sandbox.id,
+    ...(sandbox.process.createSession
+      ? {
+          async streamCommand(
+            command: string,
+            onStdout: (chunk: string) => Promise<void>,
+            signal: AbortSignal,
+          ) {
+            const session = `herbie-transcript-${randomUUID()}`;
+            const stop = new AbortController();
+            const connection = AbortSignal.any([signal, stop.signal, AbortSignal.timeout(75_000)]);
+            let pending = Promise.resolve();
+            let callbackError: unknown;
+            let accepting = true;
+            let abort = () => {};
+            try {
+              connection.throwIfAborted();
+              await sandbox.process.createSession!(session);
+              connection.throwIfAborted();
+              const result = await sandbox.process.executeSessionCommand!(session, {
+                command,
+                runAsync: true,
+              });
+              if (!result.cmdId) throw new Error("Transcript reader was not acknowledged");
+              connection.throwIfAborted();
+              await Promise.race([
+                sandbox.process.getSessionCommandLogs!(
+                  session,
+                  result.cmdId,
+                  (chunk) => {
+                    if (!accepting) return;
+                    pending = pending.then(async () => {
+                      if (!callbackError) {
+                        try {
+                          connection.throwIfAborted();
+                          await onStdout(chunk);
+                        } catch (error) {
+                          callbackError = error;
+                          stop.abort(error);
+                        }
+                      }
+                    });
+                  },
+                  () => {},
+                ),
+                new Promise<never>((_, reject) => {
+                  abort = () => reject(connection.reason);
+                  connection.addEventListener("abort", abort, { once: true });
+                  if (connection.aborted) abort();
+                }),
+              ]);
+            } finally {
+              accepting = false;
+              connection.removeEventListener("abort", abort);
+              // Only the read-only helper belongs to this session, never the agent.
+              try {
+                await sandbox.process.deleteSession!(session);
+              } finally {
+                await pending;
+              }
+            }
+            if (callbackError) throw callbackError;
+          },
+        }
+      : {}),
     async prepare(durable) {
       if (resources)
         for (const key of ["cpu", "memory", "disk"] as const)

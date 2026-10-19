@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import { observationIntervalMs } from "./observation.js";
 
 // Read bounded byte ranges so polling never re-downloads an expanding transcript.
 export async function streamAgentTranscript(
@@ -32,7 +33,7 @@ export async function streamAgentTranscript(
         if (pending || decoder.end()) throw new Error("Incomplete agent transcript");
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, observationIntervalMs));
     }
   }
 }

@@ -95,6 +95,102 @@ test("observer loss never destroys a running environment", async () => {
   assert.equal(destroys, 0);
 });
 
+for (const state of ["running", "failed", "completed"] as const) {
+  const fails = state !== "completed";
+  test(`stream observation with ${state} execution ${fails ? "failure releases the observer without deletion" : "reconnects and saves the completed agent's patches"}`, async () => {
+    let launches = 0,
+      destroys = 0,
+      streams = 0,
+      reads = 0;
+    const records: string[] = [];
+    const environment = {
+      id: "original",
+      exec: async (command: string) => {
+        if (command.includes("nohup")) {
+          launches++;
+          return { exitCode: 0, result: "" };
+        }
+        if (command.includes("printf running")) {
+          reads++;
+          return {
+            exitCode: 0,
+            result: state === "running" ? "running" : state === "failed" ? "1" : "0",
+          };
+        }
+        if (command.includes("head -c"))
+          return { exitCode: 0, result: "herbie-attempt-completed\n" };
+        throw new Error("Unexpected polling");
+      },
+      streamCommand: async (command: string, receive: (chunk: string) => Promise<void>) => {
+        streams++;
+        if (fails) {
+          await receive("!invalid!\n");
+          return;
+        }
+        if (streams === 1) {
+          await receive(Buffer.from("{}\n").toString("base64") + "\n");
+          throw new Error("Connection reset");
+        }
+        assert.ok(command.endsWith(" 3"));
+        await receive("done\n");
+      },
+      readFile: async () =>
+        Readable.from([
+          Buffer.from(
+            JSON.stringify({
+              baseCommit: "a".repeat(40),
+              patchBase64: Buffer.from("patch").toString("base64"),
+              pullRequestTitle: "Saved",
+              pullRequestBody: "Original work",
+            }),
+          ),
+        ]),
+      destroy: async () => {
+        destroys++;
+      },
+    } as unknown as Environment;
+    const attempt = runAgentAttempt(
+      {
+        name: "fixture",
+        create: async () => {
+          throw new Error("Must not replace the environment");
+        },
+        connect: async () => environment,
+      },
+      {
+        repoUrl: "https://github.com/example/repo.git",
+        project: "Original",
+        durable: {
+          checkpoint: {
+            version: 1,
+            name: `herbie-attempt-${randomUUID()}`,
+            environmentId: "original",
+            phase: "running",
+            deadline: Date.now() + 60_000,
+          },
+          save: async () => {},
+        },
+        onActivity: async (record) => {
+          records.push(record);
+        },
+      },
+      () => {},
+      new URL("../dist/", import.meta.url),
+    );
+    if (fails) {
+      await assert.rejects(attempt, SessionDetached);
+      assert.equal(destroys, 0);
+      assert.ok(reads <= 1);
+    } else {
+      assert.equal((await attempt).patch.toString(), "patch");
+      assert.deepEqual(records, ["{}"]);
+      assert.equal(streams, 2);
+      assert.equal(destroys, 1);
+    }
+    assert.equal(launches, 1);
+  });
+}
+
 test("explicit cancellation reconnects and deletes the original environment without executing again", async () => {
   let destroys = 0;
   const environment = {
