@@ -111,7 +111,7 @@ PR creation, reopening, pushes, title/description edits, and ready-for-review ev
 It sends the title, description, changed paths, and patches to OpenAI in one request.
 No dependency installation or PR code execution is involved.
 
-Automatic runs maintain `ai:change_type:*` and `ai:risk:*` labels, preserving other
+Automatic runs maintain `ai:change_type:*`, `ai:risk:*`, and `ai:required_approvals:*` labels, preserving other
 labels. The Actions summary includes independent subsystem and risk-signal
 probabilities. The `pr-classification-*` artifact retains the raw answers, token
 usage, effective classification, and base/head SHAs for 30 days; it excludes the
@@ -124,6 +124,10 @@ high for authentication, authorization, data integrity, destructive migrations,
 public contracts, or broadly shared runtime behavior. Missing/truncated patches,
 GitHub's 3,000-file cap, or the 120,000-character patch budget force
 `insufficient_context`. A model refusal also produces an unknown classification.
+Required human approvals are 0 for very straightforward, low-risk changes, 1 for
+moderate complexity with bounded risk, and 2 for significant architectural choices
+or risky changes. Incomplete evidence or a refusal to answer this question defaults
+to 2 approvals. This recommendation does not enforce GitHub merge requirements.
 The raw answer remains in the artifact even when incomplete evidence overrides it.
 Probabilities have not been calibrated against this repository.
 

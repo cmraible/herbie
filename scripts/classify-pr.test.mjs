@@ -9,7 +9,7 @@ const pr = {
   head: { sha: "head" },
   changed_files: 1,
   state: "open",
-  labels: [{ name: "human-label" }, { name: "ai:risk:high" }],
+  labels: [{ name: "human-label" }, { name: "ai:risk:high" }, { name: "ai:required_approvals:2" }],
 };
 const file = {
   filename: "packages/service/worker.ts",
@@ -24,7 +24,7 @@ const answers = () =>
       ? {
           name: question.name,
           type: "choice",
-          choice: question.name === "risk" ? "low" : "bug_fix",
+          choice: { change_type: "bug_fix", risk: "low", required_approvals: "0" }[question.name],
           confidence: 0.9,
         }
       : { name: question.name, type: "predicate", probability: 0.2 },
@@ -62,13 +62,17 @@ function fixture({ current = pr, files = [file], output = answers(), initial = p
 test("publishes only classifier labels and preserves unrelated labels", async () => {
   const { options, calls } = fixture();
   const result = await classify(options);
-  assert.deepEqual(result.classification, { change_type: "bug_fix", risk: "low" });
+  assert.deepEqual(result.classification, {
+    change_type: "bug_fix",
+    risk: "low",
+    required_approvals: "0",
+  });
   assert.deepEqual(calls.find((call) => call.path === "/issues/42/labels").body, {
-    labels: ["ai:change_type:bug_fix", "ai:risk:low"],
+    labels: ["ai:change_type:bug_fix", "ai:risk:low", "ai:required_approvals:0"],
   });
   assert.deepEqual(
     calls.filter((call) => call.method === "DELETE").map((call) => call.path),
-    ["/issues/42/labels/ai%3Arisk%3Ahigh"],
+    ["/issues/42/labels/ai%3Arisk%3Ahigh", "/issues/42/labels/ai%3Arequired_approvals%3A2"],
   );
   assert.match(summary(result), /confidence 0.90/);
 });
@@ -83,6 +87,7 @@ test("missing, truncated, or capped patches and missing files force insufficient
     const { options } = fixture({ files });
     const result = await classify(options);
     assert.equal(result.classification.risk, "insufficient_context");
+    assert.equal(result.classification.required_approvals, "2");
     assert.equal(result.answers.find((answer) => answer.name === "risk").choice, "low");
     assert.match(summary(result), /risk forced to insufficient_context/);
   }
@@ -123,7 +128,11 @@ test("refusals become unknown classifications, never low risk", async () => {
   const output = answers().map((answer) => ({ name: answer.name, type: "refusal" }));
   const { options } = fixture({ output });
   const result = await classify(options);
-  assert.deepEqual(result.classification, { change_type: "unclear", risk: "insufficient_context" });
+  assert.deepEqual(result.classification, {
+    change_type: "unclear",
+    risk: "insufficient_context",
+    required_approvals: "2",
+  });
   assert.match(summary(result), /refused/);
 });
 
@@ -154,4 +163,21 @@ test("malformed responses and API failures do not mutate labels", async () => {
   );
   assert.ok(calls.every((call) => call.method === "GET"));
   assert.throws(() => validateAnswers(null));
+});
+
+test("publishes each human approval count in labels and summary", async () => {
+  for (const count of ["0", "1", "2"]) {
+    const output = answers().map((answer) =>
+      answer.name === "required_approvals" ? { ...answer, choice: count } : answer,
+    );
+    const { options, calls } = fixture({ output });
+    const result = await classify(options);
+    assert.equal(result.classification.required_approvals, count);
+    assert.ok(
+      calls
+        .find((call) => call.path === "/issues/42/labels")
+        .body.labels.includes(`ai:required_approvals:${count}`),
+    );
+    assert.ok(summary(result).includes(`Required human approvals: **${count}**`));
+  }
 });
