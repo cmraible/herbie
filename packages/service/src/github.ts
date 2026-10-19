@@ -114,7 +114,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
   const oauth = testEndpoints?.oauth ?? "https://github.com";
   // A shared cooldown also covers freshly issued tokens after installation throttling.
   let retryAt = 0;
-  async function request(path: string, token: string, body?: unknown): Promise<unknown> {
+  async function request(
+    path: string,
+    token: string,
+    body?: unknown,
+    accept = "application/vnd.github+json",
+  ): Promise<unknown> {
     registerDiagnosticSecret(token);
     if (Date.now() < retryAt) throw new GithubError(429, "GitHub rate limit cooldown");
     const response = await fetch(`${api}${path}`, {
@@ -122,7 +127,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       redirect: "error",
       signal: AbortSignal.timeout(30_000),
       headers: {
-        accept: "application/vnd.github+json",
+        accept,
         authorization: `Bearer ${token}`,
         "X-GitHub-Api-Version": "2022-11-28",
         "content-type": "application/json",
@@ -160,7 +165,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           ? "GitHub authorization expired or was revoked; log in again"
           : `GitHub request failed (${response.status})`,
       );
-    return response.json();
+    return accept === "application/vnd.github.diff" ? response.text() : response.json();
   }
   function jwt() {
     const now = Math.floor(Date.now() / 1000);
@@ -661,6 +666,18 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     repositories,
     authorize,
     findPullRequest,
+    async pullRequestDiff(token: string, repository: string, number: number): Promise<string> {
+      return z
+        .string()
+        .parse(
+          await request(
+            `/repos/${repository}/pulls/${number}`,
+            token,
+            undefined,
+            "application/vnd.github.diff",
+          ),
+        );
+    },
     branchCommit,
     isAncestor,
     installationToken,

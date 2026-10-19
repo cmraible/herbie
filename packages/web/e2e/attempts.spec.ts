@@ -73,6 +73,13 @@ for (const [draft, checksPassed, label] of [
     await page.route("**/api/projects", (r) => r.fulfill(json([project])));
     await page.route("**/api/repositories", (r) => r.fulfill(json([])));
     await page.route("**/api/projects/*/events**", (r) => r.fulfill(json(events)));
+    await page.route("**/api/projects/*/pull-requests/*/diff", (r) =>
+      r.fulfill(
+        json({
+          diff: "diff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-before\n+after\n",
+        }),
+      ),
+    );
     await page.setViewportSize({ width: 796, height: 824 });
     await page.goto(`/#${projectId}`);
     const one = page.getByRole("link", { name: "Run 1 Merged" });
@@ -95,6 +102,11 @@ for (const [draft, checksPassed, label] of [
     await expect(
       page.getByRole("heading", { name: "Improve project details · #2", exact: true }),
     ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Files changed" })).toContainText("+after");
+    await expect(page.locator(".diff-file .diff-addition").filter({ hasText: "+after" })).toHaveCSS(
+      "color",
+      "rgb(142, 220, 165)",
+    );
     await expect(page.locator(".pr-number")).toHaveCSS("color", "rgb(165, 179, 170)");
     await expect(page.getByLabel("Breadcrumb").getByText("Run 2", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Run 2", exact: true })).toHaveCount(0);
@@ -102,7 +114,9 @@ for (const [draft, checksPassed, label] of [
       "Keep review in Herbie.",
     );
     await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
-    await expect(page.locator(".pr-description pre code")).toContainText("+ improved behavior");
+    await expect(page.locator(".pr-description:not(.pr-diff) pre code")).toContainText(
+      "+ improved behavior",
+    );
     await expect(page.getByText("+ improved behavior", { exact: true })).toHaveCSS(
       "color",
       "rgb(142, 220, 165)",
@@ -138,6 +152,7 @@ for (const [draft, checksPassed, label] of [
 
     await page.setViewportSize({ width: 1440, height: 1100 });
     await two.click();
+    await expect(page.getByRole("region", { name: "Files changed" })).toContainText("+after");
     await page.screenshot({ path: "test-results/attempts-desktop.png", fullPage: true });
     await expect(page.getByRole("button", { name: "Project history" })).toHaveCount(0);
     await expect(page.getByText("Project renamed", { exact: true })).toHaveCount(0);

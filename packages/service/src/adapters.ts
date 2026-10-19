@@ -77,6 +77,7 @@ export interface Adapters {
   durableSessions?: boolean;
   environmentLimits?(): Promise<Record<keyof EnvironmentResources, number | null>>;
 
+  pullRequestDiff?(userId: string, repository: string, number: number): Promise<string>;
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
   acknowledgeFeedback?(execution: Execution, requireLease: () => Promise<void>): Promise<void>;
   replyToFeedback?(

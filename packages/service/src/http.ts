@@ -434,6 +434,20 @@ export function createApiServer(options: ApiOptions) {
         projectJson(result.created ? 201 : 200, result.project);
         return;
       }
+      const diffPath = url.pathname.match(/^\/api\/projects\/([^/]+)\/pull-requests\/(\d+)\/diff$/);
+      if (method === "GET" && diffPath) {
+        const project = await store.getProject(z.string().uuid().parse(diffPath[1]), userId);
+        if (!project) throw new HttpError(404, "Project not found");
+        const number = z.coerce.number().int().positive().safe().parse(diffPath[2]);
+        if (!project.pullRequests.some((pr) => pr.number === number))
+          throw new HttpError(404, "Pull request not found");
+        if (!adapters.pullRequestDiff)
+          throw new HttpError(503, "Pull request diffs are unavailable");
+        json(response, 200, {
+          diff: await adapters.pullRequestDiff(userId, project.repository, number),
+        });
+        return;
+      }
       const projectPath = url.pathname.match(
         /^\/api\/projects\/([^/]+)(?:\/(events|pause|resume|cancel|retry|retry-publication|retry-repair|name|prompt))?$/,
       );

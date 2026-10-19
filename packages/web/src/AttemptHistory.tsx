@@ -1,36 +1,11 @@
-import { type ComponentProps } from "react";
+import { DiffCode } from "./DiffCode.js";
+import { PullRequestDiff } from "./PullRequestDiff.js";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentTranscript } from "./AgentTranscript.js";
 import type { Project, ProjectEvent } from "@herbie/contracts";
 import { attemptLabels, groupAttempts, reviewLabel } from "./attempts.js";
 import { activityMessage, errorReference } from "./activity-message.js";
-
-function MarkdownCode({ className, children }: ComponentProps<"code">) {
-  if (className !== "language-diff" || typeof children !== "string") {
-    return <code className={className}>{children}</code>;
-  }
-  return (
-    <code className={className}>
-      {children.split(/(?<=\n)/).map((line, index) => (
-        <span
-          key={index}
-          className={
-            line.startsWith("@@")
-              ? "diff-hunk"
-              : line.startsWith("+")
-                ? "diff-addition"
-                : line.startsWith("-")
-                  ? "diff-deletion"
-                  : undefined
-          }
-        >
-          {line}
-        </span>
-      ))}
-    </code>
-  );
-}
 
 export function AttemptHistory({
   project,
@@ -194,15 +169,16 @@ export function AttemptHistory({
               </div>
               {pr.body && (
                 <div className="pr-description">
-                  <Markdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{ code: MarkdownCode }}
-                    skipHtml
-                  >
+                  <Markdown remarkPlugins={[remarkGfm]} components={{ code: DiffCode }} skipHtml>
                     {pr.body}
                   </Markdown>
                 </div>
               )}
+              <PullRequestDiff
+                key={`${project.id}/${pr.number}/${pr.headSha ?? ""}`}
+                projectId={project.id}
+                number={pr.number}
+              />
               <details className="pr-branch">
                 <summary>Source branch</summary>
                 <code>{pr.branch}</code>
