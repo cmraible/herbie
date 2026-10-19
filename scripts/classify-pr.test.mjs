@@ -24,7 +24,9 @@ const answers = () =>
       ? {
           name: question.name,
           type: "choice",
-          choice: { change_type: "bug_fix", risk: "low", required_approvals: "0" }[question.name],
+          choice: { grade: "A", change_type: "bug_fix", risk: "low", required_approvals: "0" }[
+            question.name
+          ],
           confidence: 0.9,
         }
       : { name: question.name, type: "predicate", probability: 0.2 },
@@ -63,12 +65,13 @@ test("publishes only classifier labels and preserves unrelated labels", async ()
   const { options, calls } = fixture();
   const result = await classify(options);
   assert.deepEqual(result.classification, {
+    grade: "A",
     change_type: "bug_fix",
     risk: "low",
     required_approvals: "0",
   });
   assert.deepEqual(calls.find((call) => call.path === "/issues/42/labels").body, {
-    labels: ["ai:change_type:bug_fix", "ai:risk:low", "ai:required_approvals:0"],
+    labels: ["ai:grade:A", "ai:change_type:bug_fix", "ai:risk:low", "ai:required_approvals:0"],
   });
   assert.deepEqual(
     calls.filter((call) => call.method === "DELETE").map((call) => call.path),
@@ -88,6 +91,7 @@ test("missing, truncated, or capped patches and missing files force insufficient
     const result = await classify(options);
     assert.equal(result.classification.risk, "insufficient_context");
     assert.equal(result.classification.required_approvals, "2");
+    assert.equal(result.classification.grade, "insufficient_context");
     assert.equal(result.answers.find((answer) => answer.name === "risk").choice, "low");
     assert.match(summary(result), /risk forced to insufficient_context/);
   }
@@ -129,6 +133,7 @@ test("refusals become unknown classifications, never low risk", async () => {
   const { options } = fixture({ output });
   const result = await classify(options);
   assert.deepEqual(result.classification, {
+    grade: "insufficient_context",
     change_type: "unclear",
     risk: "insufficient_context",
     required_approvals: "2",
@@ -180,4 +185,73 @@ test("publishes each human approval count in labels and summary", async () => {
     );
     assert.ok(summary(result).includes(`Required human approvals: **${count}**`));
   }
+});
+
+test("publishes each grade and replaces old grades without deleting human labels", async () => {
+  for (const grade of ["A", "B", "C", "D", "F", "insufficient_context"]) {
+    const { options, calls } = fixture({
+      current: { ...pr, labels: [{ name: "ai:grade:old" }, { name: "grade:A" }] },
+      output: answers().map((answer) =>
+        answer.name === "grade" ? { ...answer, choice: grade } : answer,
+      ),
+    });
+    const result = await classify(options);
+    assert.equal(result.classification.grade, grade);
+    assert.match(summary(result), new RegExp(`Grade: \\*\\*${grade}\\*\\*`));
+    assert.ok(
+      calls
+        .find((call) => call.path === "/issues/42/labels")
+        .body.labels.includes(`ai:grade:${grade}`),
+    );
+    assert.deepEqual(
+      calls.filter((call) => call.method === "DELETE").map((call) => call.path),
+      ["/issues/42/labels/ai%3Agrade%3Aold"],
+    );
+  }
+});
+
+test("supplies conventions from the PR base and tolerates absent documents", async () => {
+  const { options } = fixture();
+  await classify({
+    ...options,
+    github: async (path, ...args) => {
+      if (!path.startsWith("/contents/")) return options.github(path, ...args);
+      assert.ok(path.endsWith("?ref=base"));
+      if (path.includes("AGENTS.md")) throw Object.assign(new Error("missing"), { status: 404 });
+      return {
+        encoding: "base64",
+        content: Buffer.from("Documented convention").toString("base64"),
+      };
+    },
+    decide: async (body) => {
+      const { conventions } = JSON.parse(body.input);
+      assert.deepEqual(
+        conventions.map(({ path }) => path),
+        ["README.md", "GLOSSARY.md", "docs/service-contract.md"],
+      );
+      assert.ok(conventions.every(({ text }) => text === "Documented convention"));
+      return options.decide(body);
+    },
+  });
+});
+
+test("invalid grades and convention retrieval failures leave labels unchanged", async () => {
+  const { options, calls } = fixture({
+    output: answers().map((answer) =>
+      answer.name === "grade" ? { ...answer, choice: "E" } : answer,
+    ),
+  });
+  await assert.rejects(classify(options), /Invalid answer: grade/);
+  await assert.rejects(
+    classify({
+      ...options,
+      github: async (path, ...args) => {
+        if (path.startsWith("/contents/"))
+          throw Object.assign(new Error("unavailable"), { status: 503 });
+        return options.github(path, ...args);
+      },
+    }),
+    /unavailable/,
+  );
+  assert.ok(calls.every((call) => call.method === "GET"));
 });

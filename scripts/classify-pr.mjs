@@ -10,6 +10,19 @@ const choice = (name, instructions, options) => ({
   choices: Object.entries(options).map(([value, description]) => ({ value, description })),
 });
 export const questions = [
+  choice(
+    "grade",
+    "Grade overall PR quality using all five criteria: no new regressions; relevant tests (existing coverage can suffice, and changes that do not need tests should not be penalized); a complete, coherent description explaining purpose, behavior, and validation; no new security vulnerabilities; and compliance with the supplied documented conventions. Assess correctness separately from inherent change risk. Do not invent conventions or treat author claims as verification. Use the worst applicable grade below; a strong description cannot offset a regression or vulnerability. Use insufficient_context when missing evidence prevents a reliable grade. An A is an evidence-based assessment, not proof of safety or passing tests.",
+    {
+      A: "All five criteria are satisfied by the available evidence; no actionable quality issues found.",
+      B: "Only minor description, test, or convention gaps; no identified regression or security vulnerability.",
+      C: "Material test, description, or convention gaps need work; no identified regression or security vulnerability.",
+      D: "Likely regression, likely security vulnerability, or serious test or convention failures require substantial fixes.",
+      F: "Clear regression, security vulnerability, or fundamental violation of documented requirements makes the PR unacceptable as written.",
+      insufficient_context:
+        "Missing code, documentation, or other necessary context prevents a reliable grade.",
+    },
+  ),
   choice("change_type", "What is the primary purpose of this PR?", {
     feature: "Adds user-facing capabilities.",
     bug_fix: "Corrects existing behavior.",
@@ -60,7 +73,7 @@ export const questions = [
   })),
 ];
 
-export function evidence(pr, files, limit = 120_000) {
+export function evidence(pr, files, limit = 120_000, conventions = []) {
   let remaining = limit;
   let incomplete = files.length !== pr.changed_files;
   const changes = files.map((file) => {
@@ -91,6 +104,7 @@ export function evidence(pr, files, limit = 120_000) {
       base_sha: pr.base.sha,
       head_sha: pr.head.sha,
       incomplete,
+      conventions,
       changes,
     }),
   };
@@ -125,11 +139,22 @@ export async function classify({ github, decide, number, applyLabels = false }) 
     files.push(...batch);
     if (batch.length < 100) break;
   }
-  const { input, incomplete } = evidence(pr, files);
+  const conventions = [];
+  for (const path of ["README.md", "GLOSSARY.md", "docs/service-contract.md", "AGENTS.md"]) {
+    try {
+      const document = await github(`/contents/${path}?ref=${encodeURIComponent(pr.base.sha)}`);
+      if (document.encoding === "base64" && typeof document.content === "string")
+        conventions.push({ path, text: Buffer.from(document.content, "base64").toString("utf8") });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  const { input, incomplete } = evidence(pr, files, 120_000, conventions);
   const decision = await decide({ model: "gpt-6-luna", input, questions });
   validateAnswers(decision.answers);
   const answer = (name) => decision.answers.find((item) => item.name === name);
   const classification = {
+    grade: incomplete ? "insufficient_context" : (answer("grade").choice ?? "insufficient_context"),
     change_type: answer("change_type").choice ?? "unclear",
     risk: incomplete ? "insufficient_context" : (answer("risk").choice ?? "insufficient_context"),
     required_approvals: incomplete ? "2" : (answer("required_approvals").choice ?? "2"),
@@ -174,7 +199,7 @@ export async function classify({ github, decide, number, applyLabels = false }) 
     }
     await github(`/issues/${number}/labels`, "POST", { labels });
     for (const { name } of current.labels) {
-      if (/^ai:(change_type|risk|required_approvals):/.test(name) && !labels.includes(name)) {
+      if (/^ai:(grade|change_type|risk|required_approvals):/.test(name) && !labels.includes(name)) {
         try {
           await github(`/issues/${number}/labels/${encodeURIComponent(name)}`, "DELETE");
         } catch (error) {
@@ -198,9 +223,9 @@ export function summary(result) {
   });
   return (
     `## Experimental PR classification\n\nPR #${result.pr_number}, head \`${result.head_sha}\`\n\n` +
-    `Change type: **${result.classification.change_type}** · Risk: **${result.classification.risk}** · Required human approvals: **${result.classification.required_approvals}**\n\n` +
+    `Grade: **${result.classification.grade}** · Change type: **${result.classification.change_type}** · Risk: **${result.classification.risk}** · Required human approvals: **${result.classification.required_approvals}**\n\n` +
     (result.incomplete
-      ? "Incomplete diff: risk forced to insufficient_context; required approvals forced to 2.\n\n"
+      ? "Incomplete diff: grade and risk forced to insufficient_context; required approvals forced to 2.\n\n"
       : "") +
     (result.stale ? "PR changed during classification; labels were not updated.\n\n" : "") +
     "Advisory only; not a merge gate. Probabilities are uncalibrated. Raw model answers:\n\n" +
