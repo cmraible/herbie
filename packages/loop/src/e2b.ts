@@ -43,6 +43,15 @@ export function createE2BProvider(
     };
     return {
       id: sandbox.sandboxId,
+      async streamCommand(command, onStdout, signal) {
+        await sandbox.commands.run(command, {
+          user: "root",
+          onStdout,
+          signal,
+          timeoutMs: 70_000,
+          requestTimeoutMs: 30_000,
+        });
+      },
       async prepare(durable) {
         if (!durable) return checked(configureEnvironmentRuntime);
         const result = await executeDurably(

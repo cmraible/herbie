@@ -5,6 +5,7 @@ export {
   type AttemptCheckpoint,
 } from "./durable-execution.js";
 import { streamAgentTranscript } from "./agent-transcript.js";
+import { followAgentTranscript } from "./transcript-stream.js";
 export { parseFeedbackDecision } from "./feedback-decision.js";
 import { parseFeedbackDecision, type FeedbackDecision } from "./feedback-decision.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -334,37 +335,69 @@ export async function runAgentAttempt(
       request.signal?.throwIfAborted();
       const commandText = `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} node ${directory}/agent-runner.js`;
       await save({ phase: "running" });
+      const observer = new AbortController();
+      const observerSignal = request.signal
+        ? AbortSignal.any([request.signal, observer.signal])
+        : observer.signal;
       const execution = checkpoint
-        ? executeDurably(sandbox, directory, commandText, checkpoint.deadline, request.signal)
+        ? executeDurably(sandbox, directory, commandText, checkpoint.deadline, observerSignal)
         : sandbox.exec(commandText, {
             cwd: directory,
             timeoutMs: (request.verifyLocally ? 32 : 22) * 60_000,
           });
       let finished = false;
-      const command = execution.finally(() => {
-        finished = true;
-      });
+      const command = execution
+        .then((result) => {
+          if (
+            durable &&
+            result.exitCode === 124 &&
+            result.result === "Agent session deadline exceeded"
+          )
+            observer.abort(new AttemptCommandError(result.exitCode, result.result));
+          return result;
+        })
+        .catch((error) => {
+          if (durable) observer.abort(error);
+          throw error;
+        })
+        .finally(() => {
+          finished = true;
+        });
       const transcript = request.onActivity
-        ? streamAgentTranscript(
-            async (offset) => {
-              request.signal?.throwIfAborted();
-              const response = await sandbox.exec(
-                `bash -o pipefail -c 'if [ -f ${directory}/transcript.jsonl ]; then dd if=${directory}/transcript.jsonl iflag=skip_bytes,count_bytes skip=${offset} count=65536 status=none | base64 -w0; fi'`,
-                { timeoutMs: 30_000 },
-              );
-              if (response.exitCode !== 0) throw new Error("Agent transcript read failed");
-              const bytes = Buffer.from(response.result, "base64");
-              if (bytes.toString("base64") !== response.result)
-                throw new Error("Invalid agent transcript encoding");
-              return bytes;
-            },
-            (message, offset) => persist(() => request.onActivity!(message, offset)),
-            () => finished,
+        ? (checkpoint && sandbox.streamCommand
+            ? followAgentTranscript(
+                sandbox.streamCommand.bind(sandbox),
+                directory,
+                (message, offset) => persist(() => request.onActivity!(message, offset)),
+                observerSignal,
+                checkpoint.transcriptOffset,
+              )
+            : streamAgentTranscript(
+                async (offset) => {
+                  request.signal?.throwIfAborted();
+                  const response = await sandbox.exec(
+                    `bash -o pipefail -c 'if [ -f ${directory}/transcript.jsonl ]; then dd if=${directory}/transcript.jsonl iflag=skip_bytes,count_bytes skip=${offset} count=65536 status=none | base64 -w0; fi'`,
+                    { timeoutMs: 30_000 },
+                  );
+                  if (response.exitCode !== 0) throw new Error("Agent transcript read failed");
+                  const bytes = Buffer.from(response.result, "base64");
+                  if (bytes.toString("base64") !== response.result)
+                    throw new Error("Invalid agent transcript encoding");
+                  return bytes;
+                },
+                (message, offset) => persist(() => request.onActivity!(message, offset)),
+                () => finished,
+              )
           ).catch(async (error) => {
             if (request.signal?.aborted && !(request.signal.reason instanceof SessionDetached))
               throw error;
-            if (durable)
-              throw new SessionDetached("Transcript observer disconnected", { cause: error });
+            if (durable) {
+              const detached = new SessionDetached("Transcript observer disconnected", {
+                cause: error,
+              });
+              observer.abort(detached);
+              throw detached;
+            }
             await removeSandbox();
             throw error;
           })
@@ -373,10 +406,11 @@ export async function runAgentAttempt(
       const [outcome, recording] = await Promise.allSettled([command, transcript]);
       if (outcome.status === "rejected" && outcome.reason instanceof SessionDetached)
         throw outcome.reason;
+      if (outcome.status === "fulfilled" && outcome.value.exitCode !== 0)
+        throw new AttemptCommandError(outcome.value.exitCode, outcome.value.result);
       if (recording.status === "rejected") throw recording.reason;
       if (outcome.status === "rejected") throw outcome.reason;
       const result = outcome.value;
-      if (result.exitCode !== 0) throw new AttemptCommandError(result.exitCode, result.result);
       if (result.result !== "herbie-attempt-completed\n")
         throw new AttemptResultError("Invalid project completion marker", result.result);
       await emit(`Project completed in sandbox ${sandbox.id}`);

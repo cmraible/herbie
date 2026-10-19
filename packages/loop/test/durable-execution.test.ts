@@ -2,8 +2,59 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { executeDurably, SessionDetached } from "../src/durable-execution.js";
+
+test("idle execution does not poll twice a second and observer abort leaves the command alone", async () => {
+  const controller = new AbortController();
+  let launches = 0,
+    reads = 0;
+  const work = executeDurably(
+    {
+      exec: async (command) => {
+        if (command.includes("nohup")) launches++;
+        else reads++;
+        return { exitCode: 0, result: command.includes("nohup") ? "" : "running" };
+      },
+    },
+    "/tmp/herbie-attempt-test",
+    "paid-command",
+    Date.now() + 60_000,
+    controller.signal,
+  );
+  await delay(650);
+  controller.abort(new SessionDetached("Observer stopped"));
+  await assert.rejects(work, SessionDetached);
+  assert.equal(launches, 1);
+  assert.equal(reads, 1);
+});
+
+test("transient status failure retries observation without relaunching the command", async () => {
+  let launches = 0,
+    reads = 0;
+  const result = await executeDurably(
+    {
+      exec: async (command) => {
+        if (command.includes("nohup")) {
+          launches++;
+          return { exitCode: 0, result: "" };
+        }
+        if (command.includes("printf running")) {
+          if (++reads === 1) throw new Error("Connection reset");
+          return { exitCode: 0, result: "0" };
+        }
+        return { exitCode: 0, result: "completed" };
+      },
+    },
+    "/tmp/herbie-attempt-test",
+    "paid-command",
+    Date.now() + 60_000,
+  );
+  assert.equal(launches, 1);
+  assert.equal(reads, 2);
+  assert.deepEqual(result, { exitCode: 0, result: "completed" });
+});
 
 // Use a disposable Linux container to test the actual nohup/flock protocol,
 // including a command that remains alive when its host observer disappears.

@@ -817,13 +817,13 @@ export class Store {
     id: string,
   ): Promise<{ checkpoint: AttemptCheckpoint; artifact: AgentAttemptChanges | null }> {
     const { rows } = await this.pool.query(
-      "SELECT checkpoint,artifact FROM agent_sessions WHERE id=$1",
+      "SELECT checkpoint,artifact,(SELECT max(transcript_offset) FROM project_events WHERE agent_session_id=$1) AS transcript_offset FROM agent_sessions WHERE id=$1",
       [id],
     );
     const row = rows[0];
     if (!row) throw conflict("Missing agent session");
     return {
-      checkpoint: row.checkpoint,
+      checkpoint: { ...row.checkpoint, transcriptOffset: Number(row.transcript_offset ?? 0) },
       artifact: row.artifact
         ? { ...row.artifact, patch: Buffer.from(row.artifact.patchBase64, "base64") }
         : null,

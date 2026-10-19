@@ -94,3 +94,46 @@ test("E2B normalizes nonzero exits without hiding transport or cleanup failures"
   await assert.rejects(environment.prepare());
   await assert.rejects(environment.destroy(), /cleanup unavailable/);
 });
+
+test("E2B streams a bounded reader and aborting it never kills the environment", async () => {
+  const controller = new AbortController();
+  let destroyed = false;
+  const provider = createE2BProvider(
+    { apiKey: "key", template: "template", openaiSecretName: "secret" },
+    async () => ({
+      sandboxId: "id",
+      files: {} as never,
+      commands: {
+        run: async (
+          _: string,
+          options: {
+            signal: AbortSignal;
+            timeoutMs: number;
+            onStdout: (chunk: string) => Promise<void>;
+          },
+        ) => {
+          assert.equal(options.signal, controller.signal);
+          assert.equal(options.timeoutMs, 70_000);
+          await options.onStdout("data");
+          options.signal.throwIfAborted();
+        },
+      } as never,
+      kill: async () => {
+        destroyed = true;
+        return true;
+      },
+    }),
+  );
+  const environment = await provider.create({ name: "test", timeoutMs: 1000 });
+  await assert.rejects(
+    environment.streamCommand!(
+      "reader",
+      async () => {
+        controller.abort(new Error("Observer detached"));
+      },
+      controller.signal,
+    ),
+    /Observer detached/,
+  );
+  assert.equal(destroyed, false);
+});

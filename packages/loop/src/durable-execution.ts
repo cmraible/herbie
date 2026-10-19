@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Environment } from "./environment.js";
+import { observationIntervalMs, retryObservation } from "./observation.js";
 
 // Losing the observer is not cancellation of the remote agent.
 export class SessionDetached extends Error {}
@@ -12,6 +13,7 @@ export interface AttemptCheckpoint {
   phase: "created" | "prepared" | "running" | "collected" | "deleted";
   deadline: number;
   artifact?: string;
+  transcriptOffset?: number;
 }
 export interface DurableAttempt {
   checkpoint: AttemptCheckpoint;
@@ -46,21 +48,31 @@ mv ${directory}/exit.tmp ${directory}/exit`;
     if (started.exitCode !== 0) throw new Error("Remote launch was not acknowledged");
     for (;;) {
       signal?.throwIfAborted();
-      const status = await sandbox.exec(
-        `if test -f ${directory}/exit; then cat ${directory}/exit; else printf running; fi`,
-        { timeoutMs: 30_000 },
+      const status = await retryObservation(
+        () =>
+          sandbox.exec(
+            `if test -f ${directory}/exit; then cat ${directory}/exit; else printf running; fi`,
+            { timeoutMs: 30_000 },
+          ),
+        signal,
       );
       if (status.exitCode !== 0) throw new Error("Remote status unavailable");
       if (/^\d+$/.test(status.result)) {
-        const output = await sandbox.exec(`head -c 65536 ${directory}/output`, {
-          timeoutMs: 30_000,
-        });
+        const output = await retryObservation(
+          () =>
+            sandbox.exec(`head -c 65536 ${directory}/output`, {
+              timeoutMs: 30_000,
+            }),
+          signal,
+        );
         if (output.exitCode !== 0) throw new Error("Remote output unavailable");
         return { exitCode: Number(status.result), result: output.result };
       }
       if (Date.now() > deadline)
         return { exitCode: 124, result: "Agent session deadline exceeded" };
-      await delay(500, undefined, { signal });
+      await delay(Math.min(observationIntervalMs, Math.max(0, deadline - Date.now())), undefined, {
+        signal,
+      });
     }
   } catch (cause) {
     // Provider/network failures leave the durable execution for another observer.

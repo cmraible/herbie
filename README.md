@@ -437,14 +437,17 @@ view assembles message deltas, reasoning, and tool activity; **Download transcri
 exports the original notifications as JSONL, including records the UI does not
 render individually. Check-repair turns are included in the same run.
 
-The runner appends notifications to a JSONL file in its environment. The worker
-reads new byte ranges every 500 ms when caught up, persists them in order, and
-drains the file before cleanup, including after execution failures. For durable
-sessions, a recording failure detaches the observer while execution continues.
-The replacement reconnects to the same environment and replays the file;
-per-session byte offsets deduplicate records already committed to Postgres.
-Worker replacement does not delete the environment. Output not yet collected can
-still be lost if the environment itself fails or reaches its TTL.
+The runner appends notifications to a JSONL file in its environment. Durable
+sessions stream new bytes through a read-only helper using E2B command streaming
+or Daytona session logs. Connections rotate after one minute or approximately
+1 MiB to bound buffering and abandoned readers. Reconnection resumes at the last
+persisted record's byte offset, including after worker replacement.
+Completion is checked every five seconds. Transient observation failures retry
+after 1, 2, 4, and 8 seconds; persistent failures detach the observer for worker
+recovery without deleting the environment or restarting the agent. Legacy callers
+without streaming use five-second transcript polling. Transcripts drain before
+cleanup. Output not yet collected can still be lost if the environment itself
+fails or reaches its TTL.
 
 Thinking includes only reasoning summaries/text emitted by Codex and the selected
 model. The transcript preserves exposed protocol output, not unavailable model

@@ -57,6 +57,7 @@ for (const boundary of ["running", "completed", "cancelled"] as const) {
           throw new SessionDetached("Process disappeared");
         }
         assert.equal(execution.durable.checkpoint.environmentId, "original-environment");
+        assert.equal(execution.durable.checkpoint.transcriptOffset, 18);
         if (boundary === "cancelled") {
           assert.equal(execution.signal?.aborted, true);
           const error = new AgentAttemptError([], "Cancelled");

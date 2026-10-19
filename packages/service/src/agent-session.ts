@@ -68,7 +68,6 @@ export async function runAgentSession(
           },
           onActivity: async (message, offset) => {
             execution.signal?.throwIfAborted();
-            await store.appendEvent(execution.project.id, "agent", message, runId, id, offset);
             const record = JSON.parse(message);
             if (
               typeof record?.params?.threadId === "string" &&
@@ -86,6 +85,8 @@ export async function runAgentSession(
                 workerId,
               );
             }
+            // The saved offset acknowledges metadata as well as the transcript.
+            await store.appendEvent(execution.project.id, "agent", message, runId, id, offset);
           },
         },
         (message) => {
