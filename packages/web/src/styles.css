@@ -1132,3 +1132,30 @@ textarea::placeholder {
 .agent-session li {
   overflow-wrap: anywhere;
 }
+
+.app-focus .workspace {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px clamp(16px, 4vw, 64px);
+  flex: 1;
+}
+.focus-mode {
+  min-height: calc(100dvh - 48px);
+}
+.focus-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #292929;
+  margin-bottom: 32px;
+}
+.focus-toolbar h1 {
+  font-size: 20px;
+  margin-right: auto;
+}
+.focus-task > .project-meta {
+  margin-bottom: 24px;
+}

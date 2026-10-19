@@ -24,6 +24,8 @@ import { ModelSelect } from "./ModelSelect.js";
 import { RepositorySelect } from "./RepositorySelect.js";
 import { projectReadyForReview } from "./attempts.js";
 
+import { focusQueue } from "./focus-queue.js";
+
 const api = createClient();
 const terminal = new Set(["completed", "cancelled", "failed"]);
 const onboardingInstallKey = "herbie-onboarding-install";
@@ -93,10 +95,35 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [projectEdit, setProjectEdit] = useState<(Draft & { id: string }) | null>(null);
+  const focusing = screen === "focus";
+  const focusHeading = useRef<HTMLHeadingElement>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const queue = focusQueue(projects, session?.user.id ?? "");
+  const focusTask = queue.find((task) => task.id === focusId) ?? queue[0];
+  useEffect(() => {
+    if (focusing) {
+      setFocusId(focusTask?.id ?? null);
+      focusHeading.current?.focus();
+    }
+  }, [focusing, focusTask?.id]);
+  useEffect(() => {
+    if (!focusing) return;
+    const exit = (event: KeyboardEvent) => {
+      if (event.key === "Escape") navigateToList();
+    };
+    window.addEventListener("keydown", exit);
+    return () => window.removeEventListener("keydown", exit);
+  }, [focusing]);
   const creating = screen === "new";
   const editing = Boolean(screen?.endsWith("/edit"));
   const [projectScreen, selectedRun = null] = (screen ?? "").split("/runs/");
-  const selected = creating ? null : editing ? screen!.slice(0, -5) : projectScreen || null;
+  const selected = focusing
+    ? (focusTask?.project.id ?? null)
+    : creating
+      ? null
+      : editing
+        ? screen!.slice(0, -5)
+        : projectScreen || null;
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [formError, setFormError] = useState<string | null>(null);
   const [installationNotice, setInstallationNotice] = useState<string | null>(null);
@@ -534,8 +561,8 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      {sessionState === "signed-in" && (
+    <div className={`app${focusing ? " app-focus" : ""}`}>
+      {sessionState === "signed-in" && !focusing && (
         <header className="app-header">
           <a className="wordmark" href="#" aria-label="Herbie home">
             Herbie<span aria-hidden="true">. 🥁</span>
@@ -580,6 +607,95 @@ export function App() {
                   GitHub access is checked separately for each repository.
                 </p>
               </>
+            )}
+          </section>
+        ) : focusing ? (
+          <section className="focus-mode" aria-label="Focus mode">
+            <div className="focus-toolbar">
+              <h1 tabIndex={-1} ref={focusHeading}>
+                Focus mode
+              </h1>
+              <span role="status">
+                {queue.length} {queue.length === 1 ? "task" : "tasks"} remaining
+              </span>
+              <button
+                disabled={queue.length < 2}
+                onClick={() =>
+                  setFocusId(
+                    queue[
+                      (queue.findIndex((task) => task.id === focusTask?.id) + 1) % queue.length
+                    ]!.id,
+                  )
+                }
+              >
+                Next task
+              </button>
+              <button onClick={navigateToList}>Exit focus mode</button>
+            </div>
+            {reconnecting && (
+              <p role="status">Reconnecting to live updates. Progress may be out of date.</p>
+            )}
+            {projectsError && (
+              <p role="alert">
+                {projectsError}
+                <button onClick={() => setProjectsRefresh((value) => value + 1)}>Retry</button>
+              </p>
+            )}
+            {!projectsLoaded ? (
+              <p role="status">Loading your queue…</p>
+            ) : focusTask && project ? (
+              <div key={focusTask.id} className="focus-task">
+                <p className="project-meta">
+                  {project.repository} · {project.name}
+                  {focusTask.attempt ? ` · Run ${focusTask.attempt.number}` : ""}
+                </p>
+                {focusTask.attention && (
+                  <div className="status-message">
+                    <span>
+                      Needs attention.{" "}
+                      {project.error
+                        ? projectErrorMessage(project)
+                        : "Review this run before continuing."}
+                    </span>
+                    {focusTask.attempt?.ciRepair?.state === "failed" ? (
+                      focusTask.attempt.ciRepair.canRetry &&
+                      !project.stopRequested &&
+                      ["queued", "running", "awaiting_review"].includes(project.state) && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            void control("retry-repair", focusTask.attempt!.ciRepair!.id)
+                          }
+                        >
+                          Retry repair
+                        </button>
+                      )
+                    ) : (
+                      <button disabled={busy} onClick={() => void control("retry")}>
+                        {workflowPermissionError ? "Retry publication" : "Retry"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {focusTask.attempt ? (
+                  <AttemptHistory
+                    key={focusTask.id}
+                    project={project}
+                    selected={focusTask.attempt.id}
+                    events={events}
+                    eventsState={eventsState}
+                    eventsError={eventsError}
+                    time={time}
+                  />
+                ) : (
+                  <p>{project.prompt}</p>
+                )}
+              </div>
+            ) : (
+              <div className="empty-state" role="status">
+                <h2>You’re all caught up</h2>
+                <p>No runs need attention or are ready for review.</p>
+              </div>
             )}
           </section>
         ) : (
@@ -633,6 +749,15 @@ export function App() {
               </div>
               {!creating && !editing && !selected && (
                 <div className="heading-actions">
+                  <button
+                    disabled={!projectsLoaded}
+                    onClick={() => {
+                      setFocusId(null);
+                      navigateToScreen("focus");
+                    }}
+                  >
+                    Focus mode
+                  </button>
                   <button
                     className="primary"
                     onClick={openCreate}
@@ -1111,23 +1236,25 @@ export function App() {
           </>
         )}
       </main>
-      <footer className="version-footer">
-        {revision ? (
-          <>
-            Version{" "}
-            <a
-              href={`https://github.com/cmraible/herbie/commit/${revision}`}
-              title={revision}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <code>{revision.slice(0, 7)}</code>
-            </a>
-          </>
-        ) : (
-          "Version unavailable"
-        )}
-      </footer>
+      {!focusing && (
+        <footer className="version-footer">
+          {revision ? (
+            <>
+              Version{" "}
+              <a
+                href={`https://github.com/cmraible/herbie/commit/${revision}`}
+                title={revision}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <code>{revision.slice(0, 7)}</code>
+              </a>
+            </>
+          ) : (
+            "Version unavailable"
+          )}
+        </footer>
+      )}
     </div>
   );
 }
