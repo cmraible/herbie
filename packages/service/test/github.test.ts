@@ -111,6 +111,11 @@ export async function githubFixture(t: TestContext) {
           expires_at: new Date(Date.now() + 3600000).toISOString(),
         }),
       );
+    else if (
+      path === "/repos/alice/project/pulls/8" &&
+      req.headers.accept === "application/vnd.github.diff"
+    )
+      res.end(fixture.patch);
     else if (path.startsWith("/repos/alice/project/pulls/8/files"))
       res.end(JSON.stringify([{ filename: "file.txt", status: "modified", patch: fixture.patch }]));
     else if (path.startsWith("/repos/alice/project/pulls")) {
@@ -974,4 +979,11 @@ test("an outdated installation prompts for updates without blocking another appr
   assert.equal(discovery.permissionsRequired, true);
   assert.equal(discovery.repositories[0]?.fullName, "alice/project");
   assert.equal((await github.authorize("ghu_fixture", "alice/project")).installationId, 11);
+});
+
+test("pull request diff returns the complete raw diff using GitHub's diff media type", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.patch =
+    "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/image.png b/image.png\nBinary files differ\n";
+  assert.equal(await github.pullRequestDiff("token", "alice/project", 8), fixture.patch);
 });

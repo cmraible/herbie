@@ -106,6 +106,11 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
     projects: () => request("/api/projects", z.array(projectSchema)),
+    pullRequestDiff: (id: string, number: number) =>
+      request(
+        `${projectPath(id)}/pull-requests/${z.number().int().positive().parse(number)}/diff`,
+        z.object({ diff: z.string() }),
+      ),
     project: (id: string) => request(projectPath(id), projectSchema),
     start: (input: ProjectInput, requestId: string) => {
       const { model, reasoningEffort, resources, ...project } = projectInput.parse(input);

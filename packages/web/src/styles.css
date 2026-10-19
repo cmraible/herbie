@@ -1159,3 +1159,30 @@ textarea::placeholder {
 .focus-task > .project-meta {
   margin-bottom: 24px;
 }
+
+.pr-diff {
+  min-width: 0;
+}
+.diff-file {
+  margin: 12px 0;
+  min-width: 0;
+}
+.diff-file summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+.diff-file pre {
+  max-height: 600px;
+  white-space: pre;
+}
+.diff-file code > span {
+  display: block;
+  min-width: max-content;
+}
+.diff-file .diff-addition {
+  background: #163522;
+}
+.diff-file .diff-deletion {
+  background: #3b2020;
+}

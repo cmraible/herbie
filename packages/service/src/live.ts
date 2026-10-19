@@ -61,6 +61,15 @@ export function createLiveAdapters(
     mode: "live",
     durableSessions: true,
     environmentLimits,
+    async pullRequestDiff(userId, repository, number) {
+      const access = await github.authorize(await auth.userToken(userId), repository);
+      const token = await github.installationToken(
+        access.installationId,
+        access.repository,
+        "read",
+      );
+      return github.pullRequestDiff(token, access.repository, number);
+    },
     ...(config
       ? {
           async feedback(execution: Execution) {
