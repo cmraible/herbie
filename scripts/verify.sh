@@ -29,13 +29,20 @@ cleanup() {
 trap cleanup EXIT
 trap 'for pid in "${jobs[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done; exit 130' INT TERM
 
-workspace_checks() {
+workspace_checks() (
+  # Keep nested jobs in this stage's process group for interruption.
+  set +m
+  # Database startup does not depend on the verification image. Reap it even
+  # when the build fails, before the outer cleanup removes the database.
+  time_step workspace_checks postgres-startup start_database &
+  database_pid=$!
+  trap 'status=$?; wait "$database_pid" || true; exit "$status"' EXIT
   time_step workspace_checks verification-image docker build -f Dockerfile.verify --iidfile "$artifact_dir/verify-image" .
-  time_step workspace_checks postgres-startup start_database
+  wait "$database_pid"
   docker run --rm --init --name "$prefix-tests" --network "container:$prefix-db" --shm-size=1g \
     -e HERBIE_TEST_DATABASE_URL=postgresql://herbie:herbie-local-only@127.0.0.1:5432/herbie \
     -v "$artifact_dir:/app/artifacts/ci" "$(cat "$artifact_dir/verify-image")"
-}
+)
 start_database() {
   docker run -d --name "$prefix-db" \
     -e POSTGRES_USER=herbie -e POSTGRES_PASSWORD=herbie-local-only -e POSTGRES_DB=herbie \

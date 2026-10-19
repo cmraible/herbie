@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -19,6 +27,81 @@ function artifacts(t) {
 }
 function read(directory, id) {
   return JSON.parse(readFileSync(join(directory, "timings", id + ".json"), "utf8"));
+}
+
+for (const failure of ["none", "image", "database"]) {
+  test(`verification overlaps image and database startup and reaps both (${failure})`, (t) => {
+    const directory = artifacts(t);
+    mkdirSync(join(directory, "scripts"));
+    mkdirSync(join(directory, "bin"));
+    for (const script of ["verify.sh", "verify-timing.sh"]) {
+      copyFileSync(join(import.meta.dirname, script), join(directory, "scripts", script));
+    }
+    writeFileSync(join(directory, "scripts", "test-image-promotion.sh"), "exit 0\n");
+    writeFileSync(
+      join(directory, "bin", "docker"),
+      `#!/usr/bin/env bash
+set -eu
+await_file() {
+  for ((i=0;i<100;i++)); do
+    if test -f "$1"; then return 0; fi
+    sleep 0.01
+  done
+  echo "Did not overlap startup: $1" >&2
+  exit 9
+}
+case "$1 \${2-}" in
+  'info '|'buildx version') ;;
+  'build -f')
+    touch image-started
+    await_file database-started
+    if [[ "$VERIFY_FAILURE" == image ]]; then exit 7; fi
+    while [[ "$1" != --iidfile ]]; do shift; done
+    echo fixture-image > "$2"
+    touch image-ready
+    ;;
+  'run -d')
+    touch database-started
+    await_file image-started
+    sleep 0.1
+    touch database-finished
+    if [[ "$VERIFY_FAILURE" == database ]]; then exit 8; fi
+    ;;
+  'exec '*) touch database-ready ;;
+  'run --rm')
+    test -f image-ready && test -f database-ready
+    touch tests-started
+    ;;
+  'rm -f')
+    test -f database-finished
+    touch cleaned-up
+    ;;
+  *) echo "Unexpected docker command: $*" >&2; exit 10 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const result = spawnSync("bash", [join(directory, "scripts", "verify.sh")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${directory}/bin:${process.env.PATH}`,
+        VERIFY_FAILURE: failure,
+      },
+      timeout: 10_000,
+    });
+    assert.equal(result.status, failure === "none" ? 0 : 1, result.stdout + result.stderr);
+    assert.equal(existsSync(join(directory, "tests-started")), failure === "none");
+    assert.ok(existsSync(join(directory, "cleaned-up")), "cleanup must wait for database startup");
+    assert.match(result.stdout + result.stderr, /postgres-startup: .*s/);
+    assert.match(result.stdout + result.stderr, /verification-image: .*s/);
+    if (failure !== "none") {
+      const stage = failure === "image" ? "verification-image" : "postgres-startup";
+      const status = failure === "image" ? 7 : 8;
+      assert.ok((result.stdout + result.stderr).includes(`${stage}:`));
+      assert.ok((result.stdout + result.stderr).includes(`[FAIL (exit ${status})]`));
+    }
+  });
 }
 
 test("timed shell functions retain errexit, stderr, and their original exit code", (t) => {
