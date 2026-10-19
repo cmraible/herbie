@@ -26,6 +26,21 @@ export function focusQueue(projects: Project[], ownerId: string): FocusTask[] {
         if (!attention && reviewLabel(pr) !== "Ready for review") return [];
         return [{ id: `${project.id}/${attempt.id}`, project, attempt, attention }];
       });
+      if (!attempts.length) {
+        const pullRequests = project.pullRequests.length
+          ? project.pullRequests
+          : project.pullRequest
+            ? [project.pullRequest]
+            : [];
+        for (const pullRequest of pullRequests) {
+          if (reviewLabel(pullRequest) === "Ready for review")
+            tasks.push({
+              id: `${project.id}/pr/${pullRequest.number}`,
+              project,
+              attention: false,
+            });
+        }
+      }
       if (needsAttention && !tasks.some((task) => task.attention))
         tasks.push({ id: project.id, project, attention: true });
       return tasks;
