@@ -18,6 +18,8 @@ E2B requires:
 
 Both providers inject model credentials through their egress proxy. The real model key is not placed in guest files or environment variables. E2B public ingress is disabled; outbound access remains available for repository dependencies, as in the default Daytona configuration.
 
+The live service checks out public and private GitHub repositories with a short-lived, repository-scoped read token. The shared checkout helper removes its root-only credential file before cloning, passes authentication through the Git process environment, and drops it before populating the worktree. No GitHub token is available to the agent. All remote branch refs are cloned initially; later authenticated fetches, private submodules, and private dependency downloads are not configured automatically.
+
 Build the E2B template explicitly, with `E2B_API_KEY` configured:
 
 ```sh

@@ -304,7 +304,7 @@ test("missing runtime and credential-bearing repo URLs fail before provisioning"
       { ...request, repoUrl: "https://user:secret@github.com/repo" },
       () => {},
     ),
-    /public HTTPS/,
+    /HTTPS/,
   );
   await rm(join(directory, "codex-process.js"));
   await assert.rejects(

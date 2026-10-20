@@ -194,7 +194,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               ),
             ).repositories;
           for (const repo of repos)
-            if (!repo.private && !repo.archived && !repo.disabled && repo.permissions?.push)
+            if (!repo.archived && !repo.disabled && repo.permissions?.push)
               result.push({
                 fullName: repo.full_name,
                 defaultBranch: repo.default_branch,
@@ -214,7 +214,6 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
   async function authorize(token: string, repository: string): Promise<RepositoryAccess> {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new GithubError(400, "Invalid repository");
     const repo = repositorySchema.parse(await request(`/repos/${repository}`, token));
-    if (repo.private) throw new GithubError(403, "Only public repositories are supported");
     if (repo.archived || repo.disabled)
       throw new GithubError(
         403,
@@ -807,7 +806,6 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       );
       const token = await installationToken(installation.id, repository, "read");
       const repo = repositorySchema.parse(await request(`/repos/${repository}`, token));
-      if (repo.private) throw new GithubError(403, "Only public repositories are supported");
       return {
         repository: repo.full_name,
         defaultBranch: repo.default_branch,

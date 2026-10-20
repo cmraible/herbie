@@ -264,6 +264,12 @@ Inspect these branches before choosing your change. Make one small, independentl
           onEnvironment: execution.onEnvironment,
           onActivity: execution.onActivity,
           repoUrl: `https://github.com/${execution.repository.repository}.git`,
+          checkoutToken: () =>
+            github.installationToken(
+              execution.repository.installationId,
+              execution.repository.repository,
+              "read",
+            ),
           project,
           branch: (execution.feedback ?? execution.ciRepair) ? execution.branch : undefined,
           model: execution.project.model,

@@ -1124,8 +1124,8 @@ export function App() {
                       )}
                       {repositories.length === 0 && !repositoryLoading && !repositoryError && (
                         <div className="status-message">
-                          No repositories available. Connect the GitHub App to a public repository
-                          you can access.
+                          No repositories available. Connect the GitHub App to a repository you can
+                          access.
                         </div>
                       )}
                     </>

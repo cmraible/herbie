@@ -214,7 +214,7 @@ async function authFixture(t: TestContext) {
   return { auth, restart, pendingLogin, pool, config };
 }
 
-test("authorizes only the intersection of public user-writable and installed app-writable repositories", async (t) => {
+test("authorizes public and private repositories only when user and app both have write access", async (t) => {
   const { github, fixture, requests, publicKey } = await githubFixture(t);
   assert.deepEqual(await github.authorize("ghu_fixture", "alice/project"), {
     repository: "alice/project",
@@ -249,9 +249,14 @@ test("authorizes only the intersection of public user-writable and installed app
   );
   fixture.push = true;
   fixture.private = true;
-  await assert.rejects(github.authorize("ghu_fixture", "alice/project"), /public/i);
-  fixture.private = false;
+  assert.equal((await github.repositories("ghu_fixture"))[0]?.fullName, "alice/project");
+  assert.equal((await github.authorize("ghu_fixture", "alice/project")).installationId, 11);
+  fixture.push = false;
+  assert.deepEqual(await github.repositories("ghu_fixture"), []);
+  await assert.rejects(github.authorize("ghu_fixture", "alice/project"), /write permission/i);
+  fixture.push = true;
   fixture.contents = "read";
+  assert.deepEqual(await github.repositories("ghu_fixture"), []);
   await assert.rejects(github.authorize("ghu_fixture", "alice/project"), /permission|access/i);
 });
 
@@ -372,11 +377,12 @@ test("review reconciliation uses only repository-scoped read permission after us
     { repositories: ["project"], permissions: { contents: "read", pull_requests: "read" } },
   );
   fixture.private = true;
-  await assert.rejects(live.reconciliationRepository("alice/project"), /public/);
+  assert.deepEqual(await live.reconciliationRepository("alice/project"), access);
 });
 
 test("publication recovery permits main to advance while retaining the original base in its history", async (t) => {
   const { github, fixture, requests } = await githubFixture(t);
+  fixture.private = true;
   const live = createLiveAdapters(
     { apiKey: "fixture-never-used", openaiSecretName: "existing-secret" },
     github,
