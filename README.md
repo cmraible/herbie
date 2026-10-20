@@ -290,15 +290,17 @@ optional and should only be supplied if the organization's policy permits it. Se
 needs the Ubuntu package repositories, nodejs.org, registry.npmjs.org, and GitHub
 release downloads (`github.com` and `release-assets.githubusercontent.com`);
 Python package installation needs pypi.org and files.pythonhosted.org. The project
-needs the public Git repository and api.openai.com. A blocked setup fails and deletes
+needs the Git repository and api.openai.com. The live service supports public and private
+GitHub repositories using a repository-scoped read token for sandbox checkout; it removes
+checkout credentials before the agent starts. A blocked setup fails and deletes
 the sandbox rather than changing network policy.
 
 Keys must not be baked into a snapshot or runner. The pinned SDK's
 [`secrets` and `outboundProxyUrl` fields](https://www.daytona.io/docs/en/typescript-sdk/daytona/)
 reference existing organization Secrets and the approved proxy setup. The dedicated
 `daytona_openai` provider uses `OPENAI_API_KEY` supplied by Daytona, the Responses
-API, and HTTP streaming without WebSockets or retries. Herbie sends only secret names,
-never host credentials. The sandbox child preserves the API placeholder and proxy/CA
+API, and HTTP streaming without WebSockets or retries. For model authentication, Herbie
+sends only secret names, never host credentials. The sandbox child preserves the API placeholder and proxy/CA
 environment variables; it does not inherit arbitrary Codex authentication overrides.
 
 Only the disposable Daytona runner requests `externalSandbox` with restricted network

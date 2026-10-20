@@ -24,6 +24,7 @@ import {
 
 import { environmentPath } from "./environment-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
+import { registerDiagnosticSecret } from "./diagnostic-log.js";
 
 export const AGENT_RUNTIME_FILES = [
   "codex-initialize.js",
@@ -33,6 +34,7 @@ export const AGENT_RUNTIME_FILES = [
   "agent-runner.js",
   "feedback-decision.js",
   "diagnostic-log.js",
+  "repository-checkout.js",
 ] as const;
 
 export interface AgentAttemptArtifact {
@@ -50,6 +52,8 @@ export type AttemptRequest = {
   signal?: AbortSignal;
   resources?: { cpu: number; memory: number; disk: number };
   repoUrl: string;
+  // Resolve only during checkout, never persist in a checkpoint or agent input.
+  checkoutToken?: () => Promise<string>;
   branch?: string;
   commit?: string;
   project: string;
@@ -155,8 +159,13 @@ export async function runAgentAttempt(
   };
   const repo = new URL(request.repoUrl);
   if (repo.protocol !== "https:" || repo.username || repo.password || repo.search || repo.hash) {
-    throw new Error("Use a public HTTPS repository URL without credentials, query, or fragment");
+    throw new Error("Use an HTTPS repository URL without credentials, query, or fragment");
   }
+  if (
+    request.checkoutToken &&
+    (repo.origin !== "https://github.com" || !/^\/[\w.-]+\/[\w.-]+\.git$/.test(repo.pathname))
+  )
+    throw new Error("Authenticated checkout requires a GitHub repository URL");
   if (!request.project.trim()) throw new Error("Project must not be empty");
   const runtime = await Promise.all(
     AGENT_RUNTIME_FILES.map(async (name) => ({
@@ -315,7 +324,43 @@ export async function runAgentAttempt(
         `${directory}/attempt.json`,
       );
       await begin("repository_clone");
-      if (checkpoint) {
+      if (request.checkoutToken) {
+        const token = await request.checkoutToken();
+        registerDiagnosticSecret(token);
+        const authDirectory = `${directory}-git-auth`;
+        const created = await sandbox.exec(
+          `mkdir -p -m 700 ${authDirectory} && chmod 700 ${authDirectory}`,
+          { timeoutMs: 30_000 },
+        );
+        if (created.exitCode !== 0) throw new AttemptCommandError(created.exitCode, created.result);
+        await sandbox.writeFile(
+          Buffer.from(
+            JSON.stringify({
+              token,
+              repoUrl: repo.href,
+              cwd,
+              branch: request.branch,
+              commit: request.commit,
+            }),
+          ),
+          `${authDirectory}/input.json`,
+        );
+        const command = `node ${directory}/repository-checkout.js ${authDirectory}/input.json`;
+        const cloned = checkpoint
+          ? await executeDurably(
+              sandbox,
+              `${directory}/checkout`,
+              command,
+              checkpoint.deadline,
+              request.signal,
+            )
+          : await sandbox.exec(command, { timeoutMs: 5 * 60_000 });
+        if (cloned.exitCode !== 0) throw new AttemptCommandError(cloned.exitCode, cloned.result);
+        // A reconnect may have uploaded a fresh credential after checkout completed.
+        // Remove it before making any attempt files accessible to the agent.
+        const removed = await sandbox.exec(`rm -rf ${authDirectory}`, { timeoutMs: 30_000 });
+        if (removed.exitCode !== 0) throw new AttemptCommandError(removed.exitCode, removed.result);
+      } else if (checkpoint) {
         const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
         const cloned = await executeDurably(
           sandbox,

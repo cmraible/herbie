@@ -8,7 +8,7 @@ Herbie, Postgres, and a Cloudflare Tunnel. GitHub, Daytona, and OpenAI calls are
 Copy `.env.example` to `.env` and fill its settings. Use separate development
 credentials:
 
-- **GitHub:** Create an App and install it on a public test repository. Follow the
+- **GitHub:** Create an App and install it on a public or private test repository. Follow the
   [App permissions and callback settings](service.md#github-app).
   Put its credentials, webhook secret, and your numeric user ID in `.env`.
 - **OpenAI and Daytona:** Supply a service OpenAI key and a Daytona API key. Store

@@ -5,7 +5,7 @@ For local installation, follow [setup](setup.md). For hosted deployment, see the
 
 ## GitHub App
 
-Install the App on a **public repository** where you have push access. Configure:
+Install the App on a **public or private repository** where you have push access. Configure:
 
 - **Permissions:** Contents, Pull requests, and Workflows read/write; Actions, Checks, and
   Commit statuses read; Issues write; Metadata read. Existing installations must approve all
