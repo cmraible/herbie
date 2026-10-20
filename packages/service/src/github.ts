@@ -480,7 +480,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       ]),
     ];
     // Evaluate the populated merge ref first; never mix it with stale head results.
-    for (const sha of refs.reverse()) {
+    for (const [refIndex, sha] of refs.reverse().entries()) {
       const details: unknown[] = [];
       let pending = false,
         passing = true,
@@ -625,7 +625,17 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       details.push(
         ...statuses.statuses.filter((status) => ["error", "failure"].includes(status.state)),
       );
-      if (!evidence && !contexts.length) continue;
+      if (!evidence && !contexts.length) {
+        const required = await requiredChecks(token, repository, pr.base.ref);
+        if (required === null || required.length) continue;
+        if (refIndex < refs.length - 1) continue;
+        return {
+          state: "passed",
+          draft: pr.draft,
+          head: pr.head.sha,
+          pullRequest: { number, url: pr.html_url },
+        };
+      }
       if (pending) return null;
       if (!details.length) {
         if (!passing || !succeeded) return null;

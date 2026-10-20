@@ -17,6 +17,7 @@ test("CI context uses current PR head and merge checks, waits for pending checks
     mergeChecks = true;
   let headPending = false;
   let headConclusion = "success";
+  let noRequiredChecks = false;
   let requiredWorkflow = false;
   let suitePending = false;
   let suiteFailure = false;
@@ -103,12 +104,18 @@ test("CI context uses current PR head and merge checks, waits for pending checks
               },
             ]
           : []),
-        {
-          type: "required_status_checks",
-          parameters: {
-            required_status_checks: [{ context: requiredContext, integration_id: requiredApp }],
-          },
-        },
+        ...(!noRequiredChecks
+          ? [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  required_status_checks: [
+                    { context: requiredContext, integration_id: requiredApp },
+                  ],
+                },
+              },
+            ]
+          : []),
       ];
     else if (path.includes("/annotations"))
       data = [{ path: "test.ts", start_line: 3, message: "Expected 2, got 1" }];
@@ -256,9 +263,28 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   );
   mergeChecks = true;
   headChecks = false;
+  noRequiredChecks = true;
   noChecks = true;
-  assert.equal(await get(), null);
-  assert.equal(await ready(), false);
+  assert.equal((await get())?.state, "passed");
+  assert.equal(await ready(), true);
+  noChecks = false;
+  mergeChecks = false;
+  headChecks = true;
+  headConclusion = "failure";
+  assert.equal((await get())?.state, "failed", "head failures still block when merge ref is empty");
+  headConclusion = "success";
+  headChecks = false;
+  noChecks = true;
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "both empty refs pass when checks are not configured",
+  );
+  noRequiredChecks = false;
+  noChecks = false;
+  mergeChecks = true;
+  draft = true;
+  writes = 0;
   suiteFailure = true;
   const startup = await get();
   assert.equal(startup?.state, "failed", "suite-only startup failures trigger repair");
