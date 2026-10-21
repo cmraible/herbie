@@ -529,6 +529,13 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         evidence = false;
       const contexts: { context: string; app: number | null }[] = [];
       // A fast check can finish before another suite has created its check runs.
+      const allSuites: {
+        id: number;
+        app: { slug: string };
+        status: string;
+        conclusion: string | null;
+        latest_check_runs_count: number;
+      }[] = [];
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI suite listing exceeds supported limit");
         const suites = z
@@ -549,48 +556,29 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               token,
             ),
           ).check_suites;
-        for (const suite of suites) {
-          if (suite.latest_check_runs_count > 0 || suite.status === "completed") evidence = true;
-          if (suite.latest_check_runs_count > 0 && suite.status !== "completed") pending = true;
-          if (
-            (suite.latest_check_runs_count > 0 || suite.status === "completed") &&
-            !["success", "neutral", "skipped"].includes(suite.conclusion ?? "")
-          )
-            passing = false;
-          if (
-            suite.status === "completed" &&
-            ["failure", "timed_out", "action_required", "startup_failure"].includes(
-              suite.conclusion ?? "",
-            )
-          )
-            details.push({
-              sha,
-              suite: suite.id,
-              app: suite.app.slug,
-              conclusion: suite.conclusion,
-            });
-        }
+        allSuites.push(...suites);
         if (suites.length < 100) break;
       }
+      const checkSchema = z.object({
+        id: z.number().int(),
+        name: z.string(),
+        app: z.object({ id: z.number() }),
+        check_suite: z.object({ id: z.number() }).optional(),
+        status: z.string(),
+        conclusion: z.string().nullable(),
+        details_url: z.string().nullable(),
+        output: z.object({
+          title: z.string().nullable(),
+          summary: z.string().nullable(),
+          text: z.string().nullable(),
+        }),
+      });
+      const allChecks: z.infer<typeof checkSchema>[] = [];
       for (let page = 1; ; page++) {
         if (page > 10) throw new Error("CI check listing exceeds supported limit");
         const checks = z
           .object({
-            check_runs: z.array(
-              z.object({
-                id: z.number().int(),
-                name: z.string(),
-                app: z.object({ id: z.number() }),
-                status: z.string(),
-                conclusion: z.string().nullable(),
-                details_url: z.string().nullable(),
-                output: z.object({
-                  title: z.string().nullable(),
-                  summary: z.string().nullable(),
-                  text: z.string().nullable(),
-                }),
-              }),
-            ),
+            check_runs: z.array(checkSchema),
           })
           .parse(
             await request(
@@ -598,51 +586,90 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
               token,
             ),
           ).check_runs;
-        for (const check of checks) {
-          contexts.push({ context: check.name, app: check.app.id });
-          if (check.status !== "completed") pending = true;
-          if (check.conclusion === "success") succeeded = true;
-          if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) passing = false;
-          if (
-            check.status !== "completed" ||
-            !["failure", "timed_out", "action_required", "startup_failure"].includes(
-              check.conclusion ?? "",
-            )
+        allChecks.push(...checks);
+        if (checks.length < 100) break;
+      }
+      // GitHub's latest filter can retain checks from multiple workflow runs.
+      // Only replace a cancellation with a newer check of the same name and app
+      // on this commit; unrelated successful workflows cannot unblock it.
+      const superseded = (check: z.infer<typeof checkSchema>) =>
+        allChecks.some(
+          (newer) =>
+            newer.id > check.id && newer.name === check.name && newer.app.id === check.app.id,
+        );
+      for (const suite of allSuites) {
+        const suiteChecks = allChecks.filter((check) => check.check_suite?.id === suite.id);
+        if (
+          suite.status === "completed" &&
+          suite.conclusion === "cancelled" &&
+          suiteChecks.length > 0 &&
+          suiteChecks.length >= suite.latest_check_runs_count &&
+          suiteChecks.every(superseded)
+        )
+          continue;
+        if (suite.latest_check_runs_count > 0 || suite.status === "completed") evidence = true;
+        if (suite.latest_check_runs_count > 0 && suite.status !== "completed") pending = true;
+        if (
+          (suite.latest_check_runs_count > 0 || suite.status === "completed") &&
+          !["success", "neutral", "skipped"].includes(suite.conclusion ?? "")
+        )
+          passing = false;
+        if (
+          suite.status === "completed" &&
+          ["failure", "timed_out", "action_required", "startup_failure"].includes(
+            suite.conclusion ?? "",
           )
-            continue;
-          const annotations = z
-            .array(z.object({ path: z.string(), start_line: z.number(), message: z.string() }))
-            .parse(
-              await request(
-                `/repos/${repository}/check-runs/${check.id}/annotations?per_page=100`,
-                token,
-              ),
-            );
+        )
           details.push({
             sha,
-            name: check.name,
-            conclusion: check.conclusion,
-            url: check.details_url,
-            output: JSON.stringify(check.output).slice(0, 12000),
-            annotations: JSON.stringify(annotations).slice(0, 16000),
+            suite: suite.id,
+            app: suite.app.slug,
+            conclusion: suite.conclusion,
           });
-          // Actions checks frequently have no output; include the failed workflow steps.
-          const job = check.details_url?.startsWith(
-            `https://github.com/${repository}/actions/runs/`,
+      }
+      for (const check of allChecks) {
+        if (check.status === "completed" && check.conclusion === "cancelled" && superseded(check))
+          continue;
+        contexts.push({ context: check.name, app: check.app.id });
+        if (check.status !== "completed") pending = true;
+        if (check.conclusion === "success") succeeded = true;
+        if (!["success", "neutral", "skipped"].includes(check.conclusion ?? "")) passing = false;
+        if (
+          check.status !== "completed" ||
+          !["failure", "timed_out", "action_required", "startup_failure"].includes(
+            check.conclusion ?? "",
           )
-            ? check.details_url.match(/\/job\/([0-9]+)$/)
-            : null;
-          if (job) {
-            const steps = z
-              .object({
-                name: z.string(),
-                steps: z.array(z.object({ name: z.string(), conclusion: z.string().nullable() })),
-              })
-              .parse(await request(`/repos/${repository}/actions/jobs/${job[1]}`, token));
-            details.push(steps);
-          }
+        )
+          continue;
+        const annotations = z
+          .array(z.object({ path: z.string(), start_line: z.number(), message: z.string() }))
+          .parse(
+            await request(
+              `/repos/${repository}/check-runs/${check.id}/annotations?per_page=100`,
+              token,
+            ),
+          );
+        details.push({
+          sha,
+          name: check.name,
+          conclusion: check.conclusion,
+          url: check.details_url,
+          output: JSON.stringify(check.output).slice(0, 12000),
+          annotations: JSON.stringify(annotations).slice(0, 16000),
+        });
+        // Actions checks frequently have no output; include the failed workflow steps.
+        const job = check.details_url?.startsWith(`https://github.com/${repository}/actions/runs/`)
+          ? check.details_url.match(/\/job\/([0-9]+)$/)
+          : null;
+        if (job) {
+          const steps = z
+            .object({
+              name: z.string(),
+              steps: z.array(z.object({ name: z.string(), conclusion: z.string().nullable() })),
+            })
+            .parse(await request(`/repos/${repository}/actions/jobs/${job[1]}`, token));
+          details.push(steps);
         }
-        if (checks.length < 100) break;
       }
       const statuses = z
         .object({

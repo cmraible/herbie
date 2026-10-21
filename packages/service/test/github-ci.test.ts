@@ -347,6 +347,153 @@ test("CI context uses current PR head and merge checks, waits for pending checks
   assert.equal(await github.readinessState("new-token", "owner/repo", 1), "draft");
 });
 
+test("newer checks supersede cancellations only for the same check and app", async (t) => {
+  const check = (
+    id: number,
+    suite: number,
+    conclusion: string | null,
+    name = "classify",
+    app = 1,
+  ) => ({
+    id,
+    name,
+    app: { id: app },
+    check_suite: { id: suite },
+    status: conclusion === null ? "in_progress" : "completed",
+    conclusion,
+    details_url: null,
+    output: { title: null, summary: null, text: null },
+  });
+  const suite = (id: number, conclusion: string | null, count = 1) => ({
+    id,
+    app: { slug: "github-actions" },
+    status: conclusion === null ? "in_progress" : "completed",
+    conclusion,
+    latest_check_runs_count: count,
+  });
+  let checks = [check(20, 200, "success"), check(10, 100, "cancelled")];
+  let suites = [suite(100, "cancelled"), suite(200, "success")];
+  const server = createServer((req, res) => {
+    const path = req.url!;
+    let data: unknown;
+    if (path === "/repos/owner/repo/pulls/1")
+      data = {
+        state: "open",
+        draft: false,
+        html_url: "https://github.com/owner/repo/pull/1",
+        head: { sha: "a".repeat(40), ref: "herbie/fix", repo: { full_name: "owner/repo" } },
+        base: { ref: "main" },
+        mergeable: false,
+        merge_commit_sha: null,
+      };
+    else if (path.includes("/check-suites?")) data = { check_suites: suites };
+    else if (path.includes("/check-runs?")) {
+      const page = Number(new URL(path, "http://localhost").searchParams.get("page"));
+      data = { check_runs: checks.slice((page - 1) * 100, page * 100) };
+    } else if (path.includes("/annotations")) data = [];
+    else if (path.includes("/status?")) data = { state: "pending", total_count: 0, statuses: [] };
+    else if (path === "/graphql")
+      data = { data: { repository: { ref: { branchProtectionRule: null } } } };
+    else if (path.startsWith("/repos/owner/repo/rules/branches/main"))
+      data = [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "classify", integration_id: 1 }],
+          },
+        },
+      ];
+    else {
+      res.statusCode = 404;
+      data = {};
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(data));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  const github = createGithub(
+    {
+      appId: "1",
+      clientId: "x",
+      clientSecret: "x",
+      privateKey: "unused",
+      callbackUrl: "https://example.com/callback",
+      webhookSecret: "secret",
+    },
+    { api: url, oauth: url },
+  );
+  const get = () => github.ciStatus("token", "owner/repo", 1, "herbie/fix");
+
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "a successful replacement overrides both cancelled job and suite",
+  );
+  checks.reverse();
+  suites.reverse();
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "API ordering does not determine which check is newer",
+  );
+  checks = [check(10, 100, "cancelled"), check(20, 200, null)];
+  suites = [suite(100, "cancelled"), suite(200, null)];
+  assert.equal(await get(), null, "wait for the replacement to complete");
+  checks[1] = check(20, 200, "failure");
+  suites[1] = suite(200, "failure");
+  assert.equal((await get())?.state, "failed", "a failed replacement is reported as failed");
+  checks = [check(20, 200, "cancelled"), check(10, 100, "success")];
+  suites = [suite(100, "success"), suite(200, "cancelled")];
+  assert.equal(await get(), null, "older success cannot override a newer cancellation");
+  checks = [check(10, 100, "cancelled"), check(20, 200, "success", "verify")];
+  suites = [suite(100, "cancelled"), suite(200, "success")];
+  assert.equal(await get(), null, "an unrelated check cannot replace a cancellation");
+  checks[1] = check(20, 200, "success", "classify", 2);
+  assert.equal(await get(), null, "the replacement must come from the same app");
+  checks = [check(10, 100, "cancelled")];
+  suites = [suite(100, "cancelled")];
+  assert.equal(await get(), null, "cancellation without a replacement still blocks");
+  checks = [check(20, 200, "success")];
+  suites = [suite(100, "cancelled", 0), suite(200, "success")];
+  assert.equal(
+    await get(),
+    null,
+    "suite-only cancellation cannot be matched to an unrelated success",
+  );
+  checks = [
+    check(10, 100, "cancelled"),
+    check(11, 100, "cancelled", "verify"),
+    check(20, 200, "success"),
+  ];
+  suites = [suite(100, "cancelled", 2), suite(200, "success")];
+  assert.equal(await get(), null, "every cancelled job in the suite needs a replacement");
+  checks.push(check(21, 200, "success", "verify"));
+  suites[1] = suite(200, "success", 2);
+  assert.equal((await get())?.state, "passed");
+  suites[0] = suite(100, "cancelled", 3);
+  assert.equal(await get(), null, "incomplete cancelled-suite evidence must still block");
+  checks = [
+    check(10, 100, "cancelled"),
+    ...Array.from({ length: 99 }, (_, index) => check(100 + index, 200, "success", `job-${index}`)),
+    check(20, 200, "success"),
+  ];
+  suites = [suite(100, "cancelled"), suite(200, "success", 100)];
+  assert.equal(
+    (await get())?.state,
+    "passed",
+    "a replacement on a later API page also supersedes cancellation",
+  );
+});
+
 test("signed CI webhooks enqueue repository reviews without executing agents", async (t) => {
   const { createApiServer } = await import("../src/http.js");
   const { createDemoAdapters } = await import("../src/demo.js");
