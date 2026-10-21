@@ -8,6 +8,7 @@ test("a new project needs only a repository and prompt", () => {
     repository: "demo/example",
     prompt: "Add regression coverage",
     targetWip: 1,
+    workflow: "loop",
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
@@ -31,6 +32,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     name: "Old custom name",
     prompt: "Fix arithmetic",
     targetWip: 1,
+    workflow: "loop",
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
@@ -65,4 +67,19 @@ test("custom environment resources survive draft restoration", () => {
     resources: { cpu: 4, memory: 8, disk: 10 },
   };
   assert.deepEqual(parseDraft(draftSchema.parse(draft)).resources, draft.resources);
+});
+
+test("single PR drafts preserve workflow and request ID across reloads", () => {
+  const draft = {
+    ...newDraft("demo/example"),
+    workflow: "single_pr" as const,
+    prompt: "Fix this ticket",
+  };
+  const restored = draftSchema.parse(JSON.parse(JSON.stringify(draft)));
+  assert.equal(restored.requestId, draft.requestId);
+  assert.equal(parseDraft(restored).workflow, "single_pr");
+  assert.equal(parseDraft(restored).targetWip, 1);
+  assert.throws(() => parseDraft({ ...restored, targetWip: "2" }), /targetWip/);
+  const { workflow: _workflow, ...legacy } = draft;
+  assert.equal(draftSchema.parse(legacy).workflow, "loop");
 });

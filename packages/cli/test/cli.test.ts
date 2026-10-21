@@ -494,3 +494,42 @@ test("edit sends a validated prompt for the selected project", async () => {
     await app.close();
   }
 });
+
+test("pr submits one durable single PR request and rejects multiple WIP slots", async () => {
+  const requests: { body: Record<string, unknown>; key: unknown }[] = [];
+  const app = await fixture((request, response) => {
+    let body = "";
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      requests.push({ body: input, key: request.headers["idempotency-key"] });
+      json(response, { ...project, ...input });
+    });
+  });
+  try {
+    await app.invoke(["login", "--url", app.baseUrl]);
+    const args = [
+      "pr",
+      "--repo",
+      "octocat/demo",
+      "--prompt",
+      "Fix the ticket",
+      "--request-id",
+      requestId,
+    ];
+    assert.equal(await app.invoke(args), 0);
+    assert.equal(await app.invoke(args), 0);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[0], requests[1]);
+    assert.equal(requests[0]!.key, requestId);
+    assert.equal(requests[0]!.body.workflow, "single_pr");
+    assert.equal(requests[0]!.body.targetWip, 1);
+    assert.equal(await app.invoke([...args, "--target-wip", "2"]), 1);
+    assert.equal(requests.length, 2);
+    assert.equal(JSON.parse(app.output.at(-1)!).workflow, "single_pr");
+  } finally {
+    await app.close();
+  }
+});

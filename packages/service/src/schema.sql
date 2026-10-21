@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS workflow text NOT NULL DEFAULT 'loop'
+  CHECK (workflow IN ('loop','single_pr'));
 DROP INDEX IF EXISTS projects_one_active_repository;
 CREATE TABLE IF NOT EXISTS project_requests (
   owner_id text NOT NULL,

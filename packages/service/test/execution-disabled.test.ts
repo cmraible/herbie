@@ -27,6 +27,7 @@ test("live adapters without approved execution configuration cannot start an att
       resources: null,
       prompt: "Disabled work",
       attemptCount: 0,
+      workflow: "loop",
       targetWip: 1,
       model: "gpt-6-luna",
       reasoningEffort: "low",
