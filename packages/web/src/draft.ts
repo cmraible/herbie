@@ -6,6 +6,7 @@ export const draftSchema = z.object({
   repository: z.string(),
   name: z.string().optional(),
   prompt: z.string(),
+  reviewer: z.string().default(""),
   model: z.string().default("gpt-6-luna"),
   reasoningEffort: reasoningEffort.default("low"),
   resources: environmentResources.nullable().default(null),
@@ -18,6 +19,7 @@ export function newDraft(repository = ""): Draft {
     workflow: "loop",
     repository,
     prompt: "",
+    reviewer: "",
     model: "gpt-6-luna",
     reasoningEffort: "low",
     targetWip: "1",
@@ -31,6 +33,9 @@ export function parseDraft(draft: Draft) {
     repository: draft.repository,
     ...(draft.name?.trim() ? { name: draft.name } : {}),
     prompt: draft.prompt,
+    ...(draft.reviewer.trim()
+      ? { reviewers: draft.reviewer.split(",").map((login) => login.trim()) }
+      : {}),
     ...(draft.resources === null ? {} : { resources: draft.resources }),
     model: draft.model,
     reasoningEffort: draft.reasoningEffort,

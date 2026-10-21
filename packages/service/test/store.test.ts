@@ -1628,3 +1628,37 @@ for (const expired of [false, true])
       assert.equal((await store.claim("explicit-retry"))?.id, first.id);
     },
   );
+
+integration("reviewer persists through creation, edits, and clearing", async () => {
+  const request = { ...input(), reviewers: ["octocat", "hubot"] };
+  const key = randomUUID();
+  const { project } = await store.createProject("owner", request, "live", key);
+  assert.deepEqual(project.reviewers, ["octocat", "hubot"]);
+  assert.deepEqual((await store.getProject(project.id))?.reviewers, ["octocat", "hubot"]);
+  assert.deepEqual(
+    (await store.updateProject(project.id, "owner", { reviewers: ["another-user"] })).reviewers,
+    ["another-user"],
+  );
+  assert.deepEqual(
+    (await store.updateProject(project.id, "owner", { prompt: "New prompt" })).reviewers,
+    ["another-user"],
+  );
+  assert.deepEqual(
+    (await store.updateProject(project.id, "owner", { reviewers: null })).reviewers,
+    null,
+  );
+  await assert.rejects(
+    store.createProject("owner", { ...request, reviewers: ["someone-else"] }, "live", key),
+    /different request/,
+  );
+});
+
+integration("single reviewer settings migrate to a reviewer list only once", async () => {
+  const { project } = await store.createProject("owner", input(), "live", randomUUID());
+  await store.pool.query("UPDATE projects SET reviewer='octocat' WHERE id=$1", [project.id]);
+  await store.migrate();
+  assert.deepEqual((await store.getProject(project.id))?.reviewers, ["octocat"]);
+  await store.updateProject(project.id, "owner", { reviewers: null });
+  await store.migrate();
+  assert.equal((await store.getProject(project.id))?.reviewers, null);
+});

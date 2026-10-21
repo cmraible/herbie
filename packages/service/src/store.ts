@@ -22,7 +22,7 @@ import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import type { PullRequestFeedback, PublicationPhase, Execution } from "./adapters.js";
 import type { AgentAttemptChanges, AttemptCheckpoint } from "@herbie/loop/agent-attempt";
 
-const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
+const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, reviewers, resources, model, reasoning_effort AS "reasoningEffort",
   workflow, max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
@@ -123,6 +123,7 @@ function requestFingerprint(
     reasoningEffort,
     resources,
     workflow,
+    reviewers,
   }: ProjectInput,
   mode: Project["mode"],
   legacyLimit?: number,
@@ -136,6 +137,11 @@ function requestFingerprint(
         mode,
         ...(workflow === "single_pr" ? { workflow } : {}),
         ...(resources == null ? {} : { resources }),
+        ...(reviewers == null || reviewers.length === 0
+          ? {}
+          : reviewers.length === 1
+            ? { reviewer: reviewers[0] }
+            : { reviewers }),
         ...(name === undefined ? {} : { name }),
         ...(model === undefined || model === "gpt-6-luna" ? {} : { model }),
         ...(reasoningEffort === undefined || reasoningEffort === "low" ? {} : { reasoningEffort }),
@@ -413,7 +419,7 @@ export class Store {
       const id = randomUUID();
       if (name === undefined) throw new Error("Missing project name");
       await client.query(
-        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,workflow,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'queued')",
+        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,workflow,reviewers,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'queued')",
         [
           id,
           ownerId,
@@ -426,6 +432,7 @@ export class Store {
           request.reasoningEffort,
           request.resources,
           request.workflow,
+          request.reviewers ?? null,
         ],
       );
       await client.query(
@@ -478,7 +485,7 @@ export class Store {
         [id, requestFingerprint({ ...project, name: undefined }, project.mode)],
       );
       const result = await client.query<Record<string, unknown>>(
-        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
+        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,reviewers=CASE WHEN $9 THEN $10::text[] ELSE reviewers END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
         [
           id,
           parsed.name,
@@ -488,6 +495,8 @@ export class Store {
           parsed.reasoningEffort,
           parsed.resources !== undefined,
           parsed.resources,
+          parsed.reviewers !== undefined,
+          parsed.reviewers,
         ],
       );
       const updated = databaseProject.parse(result.rows[0]);

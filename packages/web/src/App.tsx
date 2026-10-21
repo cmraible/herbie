@@ -150,6 +150,7 @@ export function App() {
               workflow: project.workflow,
               name: project.name,
               prompt: project.prompt,
+              reviewer: project.reviewers?.join(", ") ?? "",
               targetWip: String(project.targetWip),
               resources: project.resources,
               model: project.model,
@@ -525,6 +526,9 @@ export function App() {
         {
           name: projectEdit.name,
           prompt: projectEdit.prompt,
+          reviewers: projectEdit.reviewer.trim()
+            ? projectEdit.reviewer.split(",").map((login) => login.trim())
+            : null,
           resources: projectEdit.resources,
           model: projectEdit.model,
           reasoningEffort: projectEdit.reasoningEffort,
@@ -1188,6 +1192,19 @@ export function App() {
                       value={formDraft.prompt}
                       onChange={(event) => editForm({ prompt: event.target.value })}
                     />
+                  </label>
+                  <label>
+                    GitHub reviewers
+                    <input
+                      disabled={busy}
+                      value={formDraft.reviewer}
+                      placeholder="octocat, another-user"
+                      onChange={(event) => editForm({ reviewer: event.target.value })}
+                    />
+                    <span>
+                      Enter GitHub usernames separated by commas (up to 15). Leave blank to use the
+                      project owner.
+                    </span>
                   </label>
                   <div className="project-model-settings">
                     <ModelSelect

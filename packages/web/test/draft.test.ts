@@ -83,3 +83,15 @@ test("single PR drafts preserve workflow and request ID across reloads", () => {
   const { workflow: _workflow, ...legacy } = draft;
   assert.equal(draftSchema.parse(legacy).workflow, "loop");
 });
+
+test("reviewer survives saved drafts and blank usernames use the owner", () => {
+  const draft = {
+    ...newDraft("demo/example"),
+    prompt: "Fix arithmetic",
+    reviewer: " octocat, hubot ",
+  };
+  assert.deepEqual(parseDraft(draftSchema.parse(draft)).reviewers, ["octocat", "hubot"]);
+  assert.equal(parseDraft({ ...draft, reviewer: " " }).reviewers, undefined);
+  const { reviewer: _reviewer, ...legacy } = draft;
+  assert.equal(draftSchema.parse(legacy).reviewer, "");
+});

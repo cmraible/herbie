@@ -74,3 +74,28 @@ test("single PR workflows accept one slot and legacy inputs remain recurring", (
   );
   assert.equal(projectInput.safeParse({ ...input, workflow: "unknown" }).success, false);
 });
+
+test("reviewer accepts GitHub usernames and can be cleared on edit", async () => {
+  const { projectUpdate } = await import("../src/index.js");
+  const input = { repository: "demo/example", prompt: "Fix arithmetic" };
+  assert.equal(projectInput.parse(input).reviewers, undefined);
+  assert.deepEqual(projectInput.parse({ ...input, reviewers: [" octocat "] }).reviewers, [
+    "octocat",
+  ]);
+  assert.deepEqual(projectUpdate.parse({ reviewers: null }), { reviewers: null });
+  assert.deepEqual(projectUpdate.parse({ reviewers: ["another-user"] }), {
+    reviewers: ["another-user"],
+  });
+  for (const reviewer of [
+    "",
+    "@octocat",
+    "-user",
+    "user-",
+    "two--hyphens",
+    "a/b",
+    "x".repeat(40),
+  ]) {
+    assert.equal(projectInput.safeParse({ ...input, reviewers: [reviewer] }).success, false);
+    assert.equal(projectUpdate.safeParse({ reviewers: [reviewer] }).success, false);
+  }
+});

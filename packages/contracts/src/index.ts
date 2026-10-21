@@ -50,6 +50,10 @@ export const environmentLimits = z.object({
   memory: z.number().positive().nullable(),
   disk: z.number().positive().nullable(),
 });
+export const githubReviewer = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/, "Enter a valid GitHub username");
 export const projectInput = z
   .object({
     name: z
@@ -60,6 +64,7 @@ export const projectInput = z
       .optional(),
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     prompt: projectPrompt,
+    reviewers: z.array(githubReviewer).max(15).nullable().optional(),
     model: projectModel.default("gpt-6-luna"),
     reasoningEffort: reasoningEffort.default("low"),
     resources: environmentResources.nullable().default(null),
@@ -76,6 +81,7 @@ export const projectUpdate = z
     resources: environmentResources.nullable().optional(),
     name: projectName.optional(),
     prompt: projectPrompt.optional(),
+    reviewers: z.array(githubReviewer).max(15).nullable().optional(),
     model: projectModel.optional(),
     reasoningEffort: reasoningEffort.optional(),
     targetWip: projectInput.shape.targetWip.removeDefault().optional(),
