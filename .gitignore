@@ -148,3 +148,9 @@ artifacts/
 
 # Generated Cloudflare Worker types
 /packages/cloudflare/worker-configuration.d.ts
+
+# Native iOS build output and local Xcode state
+apps/ios/.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
