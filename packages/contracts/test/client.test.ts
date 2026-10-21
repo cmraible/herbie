@@ -4,6 +4,113 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import { ApiError, createClient } from "../src/client.js";
 
+const savedProject = {
+  id: "271de1c7-b32c-43b7-a61f-f0a2a1d53c0d",
+  ownerId: "owner",
+  repository: "demo/example",
+  name: "Work",
+  prompt: "Work",
+  state: "queued",
+  attemptCount: 0,
+  createdAt: "2026-10-15T00:00:00Z",
+  updatedAt: "2026-10-15T00:00:00Z",
+  mode: "demo",
+  stopRequested: null,
+  pullRequest: null,
+  error: null,
+};
+
+for (const operation of ["create", "update"] as const)
+  test(`${operation} polls environment preparation and preserves the save request until readiness`, async () => {
+    const preparationId = "64f70c15-692b-4d40-8249-c5a3344a377e";
+    const resources = { cpu: 3, memory: 7, disk: 15 };
+    const saves: { body: unknown; key?: string; preparation?: string }[] = [];
+    const phases: string[] = [];
+    let polled = false;
+    await withServer(
+      (request, response) => {
+        let raw = "";
+        request.on("data", (chunk) => {
+          raw += chunk;
+        });
+        request.on("end", () => {
+          let result: unknown;
+          if (request.url === "/api/project-environments") {
+            assert.deepEqual(
+              JSON.parse(raw),
+              operation === "create"
+                ? { repository: "demo/example", resources }
+                : { projectId: savedProject.id, resources },
+            );
+            result = { id: preparationId, state: "building" };
+          } else if (request.url === `/api/project-environments/${preparationId}`) {
+            polled = true;
+            result = { id: preparationId, state: "ready" };
+          } else {
+            saves.push({
+              body: JSON.parse(raw),
+              key: request.headers["idempotency-key"] as string | undefined,
+              preparation: request.headers["x-herbie-environment-preparation"] as
+                | string
+                | undefined,
+            });
+            if (!request.headers["x-herbie-environment-preparation"]) {
+              response.statusCode = 409;
+              result = { error: "Prepare first", code: "environment_preparation_required" };
+            } else {
+              assert.equal(polled, true);
+              result = { ...savedProject, resources };
+            }
+          }
+          response.end(JSON.stringify(result));
+        });
+      },
+      async (client) => {
+        const progress = (phase: string) => {
+          phases.push(phase);
+        };
+        const project =
+          operation === "create"
+            ? await client.start(
+                { repository: "demo/example", prompt: "Work", resources },
+                savedProject.id,
+                progress,
+              )
+            : await client.update(savedProject.id, { resources }, progress);
+        assert.deepEqual(project.resources, resources);
+      },
+    );
+    assert.deepEqual(phases, ["preparing", "saving"]);
+    assert.equal(saves.length, 2);
+    assert.deepEqual(saves[0]!.body, saves[1]!.body);
+    assert.equal(saves[0]!.key, saves[1]!.key);
+    assert.equal(saves[1]!.preparation, preparationId);
+  });
+
+test("a failed environment build never retries the project write", async () => {
+  let writes = 0;
+  await withServer(
+    (request, response) => {
+      if (request.url === "/api/projects") {
+        writes++;
+        response.statusCode = 409;
+        response.end(
+          JSON.stringify({ error: "Prepare first", code: "environment_preparation_required" }),
+        );
+      } else {
+        response.end(JSON.stringify({ id: savedProject.id, state: "failed" }));
+      }
+    },
+    async (client) => {
+      await assert.rejects(
+        client.start({ repository: "demo/example", prompt: "Work" }, savedProject.id),
+        /project has not been saved/,
+      );
+    },
+  );
+  assert.equal(writes, 1);
+});
+
 async function withServer(
   handler: (request: IncomingMessage, response: ServerResponse) => void,
   check: (client: ReturnType<typeof createClient>) => Promise<void>,

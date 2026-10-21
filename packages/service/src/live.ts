@@ -1,12 +1,8 @@
-import {
-  createEnvironmentLimits,
-  validateEnvironmentResources,
-  EnvironmentLimitsError,
-} from "./environment-limits.js";
+import { createEnvironmentLimits, validateEnvironmentResources } from "./environment-limits.js";
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 import { Daytona } from "@daytona/sdk";
 import { runAgentAttempt } from "@herbie/loop/agent-attempt";
-import { createE2BProvider, type E2BConfig } from "@herbie/loop/e2b";
+import { createE2BProvider, createE2BEnvironmentPreparer, type E2BConfig } from "@herbie/loop/e2b";
 import { createDaytonaProvider } from "@herbie/loop/daytona-attempt";
 import {
   publishPatch,
@@ -49,11 +45,7 @@ export function createLiveAdapters(
   }
   const environmentLimits =
     config?.provider === "e2b"
-      ? async () => {
-          throw new EnvironmentLimitsError(
-            "E2B resources are set by the configured template; custom resources are unavailable.",
-          );
-        }
+      ? async () => ({ cpu: null, memory: null, disk: null })
       : config
         ? createEnvironmentLimits(config)
         : undefined;
@@ -61,6 +53,9 @@ export function createLiveAdapters(
     mode: "live",
     durableSessions: true,
     environmentLimits,
+    ...(config?.provider === "e2b"
+      ? { prepareEnvironment: createE2BEnvironmentPreparer(config) }
+      : {}),
     async pullRequestDiff(userId, repository, number) {
       const access = await github.authorize(await auth.userToken(userId), repository);
       const token = await github.installationToken(

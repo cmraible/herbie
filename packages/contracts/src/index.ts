@@ -32,6 +32,19 @@ export const environmentResources = z
   })
   .strict();
 export type EnvironmentResources = z.infer<typeof environmentResources>;
+export const environmentPreparation = z.object({
+  id: z.string().uuid(),
+  state: z.enum(["building", "ready", "failed"]),
+});
+export const environmentPreparationInput = z.union([
+  z
+    .object({
+      repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+      resources: environmentResources.nullable(),
+    })
+    .strict(),
+  z.object({ projectId: z.string().uuid(), resources: environmentResources.nullable() }).strict(),
+]);
 export const environmentLimits = z.object({
   cpu: z.number().positive().nullable(),
   memory: z.number().positive().nullable(),

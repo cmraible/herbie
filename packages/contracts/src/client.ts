@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   reasoningEffort,
   environmentLimits,
+  environmentPreparation,
+  type EnvironmentResources,
   projectUpdate,
   type ProjectUpdate,
   projectPromptEdit,
@@ -39,6 +41,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     schema: z.ZodType<T>,
     body?: unknown,
     requestId?: string,
+    preparationId?: string,
   ): Promise<T> {
     const headers = new Headers({
       accept: "application/json",
@@ -48,6 +51,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     if (body !== undefined && options.origin) headers.set("origin", options.origin);
     if (options.token) headers.set("authorization", `Bearer ${options.token}`);
     if (requestId) headers.set("idempotency-key", z.uuid().parse(requestId));
+    if (preparationId) headers.set("x-herbie-environment-preparation", preparationId);
     const response = await fetch(`${baseUrl}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers,
@@ -85,6 +89,45 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       ]),
     );
   const projectPath = (id: string) => `/api/projects/${z.uuid().parse(id)}`;
+  async function saveProject(
+    path: string,
+    input: unknown,
+    environment:
+      | { repository: string; resources: EnvironmentResources | null }
+      | { projectId: string; resources: EnvironmentResources | null },
+    requestId?: string,
+    onProgress?: (phase: "preparing" | "saving") => void,
+  ) {
+    try {
+      return await request(path, projectSchema, input, requestId);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== "environment_preparation_required")
+        throw error;
+    }
+    onProgress?.("preparing");
+    let preparation = await request(
+      "/api/project-environments",
+      environmentPreparation,
+      environment,
+    );
+    const deadline = Date.now() + 16 * 60_000;
+    while (preparation.state === "building") {
+      if (Date.now() >= deadline)
+        throw new ApiError(504, "Environment preparation timed out. Retry saving the project.");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      preparation = await request(
+        `/api/project-environments/${preparation.id}`,
+        environmentPreparation,
+      );
+    }
+    if (preparation.state === "failed")
+      throw new ApiError(
+        502,
+        "The environment could not be built. Your project has not been saved. Retry to build it again.",
+      );
+    onProgress?.("saving");
+    return request(path, projectSchema, input, requestId, preparation.id);
+  }
   return {
     health: () =>
       request(
@@ -112,24 +155,39 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
         z.object({ diff: z.string() }),
       ),
     project: (id: string) => request(projectPath(id), projectSchema),
-    start: (input: ProjectInput, requestId: string) => {
+    start: (
+      input: ProjectInput,
+      requestId: string,
+      onProgress?: (phase: "preparing" | "saving") => void,
+    ) => {
       const { model, reasoningEffort, resources, ...project } = projectInput.parse(input);
-      return request(
+      return saveProject(
         "/api/projects",
-        projectSchema,
         {
           ...project,
           ...(resources === null ? {} : { resources }),
           ...(model === "gpt-6-luna" ? {} : { model }),
           ...(reasoningEffort === "low" ? {} : { reasoningEffort }),
         },
+        { repository: project.repository, resources },
         requestId,
+        onProgress,
       );
     },
     rename: (id: string, name: string) =>
       request(`${projectPath(id)}/name`, projectSchema, projectRename.parse({ name })),
-    update: (id: string, input: ProjectUpdate) =>
-      request(projectPath(id), projectSchema, projectUpdate.parse(input)),
+    update: (
+      id: string,
+      input: ProjectUpdate,
+      onProgress?: (phase: "preparing" | "saving") => void,
+    ) =>
+      saveProject(
+        projectPath(id),
+        projectUpdate.parse(input),
+        { projectId: id, resources: input.resources ?? null },
+        undefined,
+        onProgress,
+      ),
     editPrompt: (id: string, prompt: string) =>
       request(`${projectPath(id)}/prompt`, projectSchema, projectPromptEdit.parse({ prompt })),
     events: (id: string, after = 0) =>

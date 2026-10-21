@@ -115,6 +115,8 @@ Project creation and editing accept `resources: { cpu, memory, disk }` (whole CP
 
 Increasing resources changes Daytona consumption and does not extend the agent's execution deadline. The worker checks allocated CPU, memory, and disk before running repository code, and cleans up an environment whose allocation does not match the request.
 
+E2B supports the same numeric project resource fields. Saving a new project or changing its resources builds any missing template through E2B's API before persisting the project or queueing work. The form waits with environment preparation progress; failures leave the draft or existing project unchanged. The shared API client polls preparation and retries the save with a matching ready receipt. Templates are reused for later projects and runs. CPU and memory must match; disk is a minimum capacity. An existing `HERBIE_E2B_TEMPLATE` is optional. See [automatic E2B templates](environments.md#automatic-e2b-templates).
+
 ## Run failure diagnostics
 
 New unpublished-run failures save a bounded, redacted diagnostic in `jobs.failure_diagnostic`, in the same transaction as the failure state and activity reference. It includes the matching `errorId`, stage, nested causes, exit status, cleanup evidence, and terminal command output when available. Bootstrap failures add a fixed step label such as `node_installation` or `docker_startup`; stderr is captured alongside stdout. Output is redacted before truncation, retaining its tail so installation progress does not hide the final error.

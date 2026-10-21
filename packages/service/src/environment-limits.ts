@@ -81,6 +81,8 @@ export function validateEnvironmentResources(
   for (const key of ["cpu", "memory", "disk"] as const) {
     const max = limits[key];
     if (max !== null && resources[key] > max)
-      throw new EnvironmentLimitsError(`Environment ${key} exceeds Daytona's limit of ${max}.`);
+      throw new EnvironmentLimitsError(
+        `Environment ${key} exceeds the provider's limit of ${max}.`,
+      );
   }
 }

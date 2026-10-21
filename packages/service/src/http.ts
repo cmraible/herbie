@@ -1,4 +1,5 @@
 import { EnvironmentLimitsError, validateEnvironmentResources } from "./environment-limits.js";
+import { createEnvironmentPreparations, sameEnvironment } from "./environment-preparation.js";
 import { createReasoningEffortLister } from "./reasoning-efforts.js";
 import { attachRealtime } from "./realtime.js";
 import { logFailure } from "./diagnostic-log.js";
@@ -15,6 +16,7 @@ import {
   projectInput,
   projectPromptEdit,
   projectRename,
+  environmentPreparationInput,
   type Project,
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
@@ -42,6 +44,7 @@ class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -87,6 +90,9 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 export function createApiServer(options: ApiOptions) {
   const listReasoningEfforts = options.listReasoningEfforts ?? createReasoningEffortLister();
   const { store, auth, adapters } = options;
+  const preparations = createEnvironmentPreparations(adapters.prepareEnvironment, (error) => {
+    logFailure(error, { component: "environment-preparation" });
+  });
   const version = runningVersion(options.deploymentId, options.imageRevision);
   const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
@@ -381,7 +387,7 @@ export function createApiServer(options: ApiOptions) {
             502,
             error instanceof EnvironmentLimitsError
               ? error.message
-              : "Could not load environment limits. Check Daytona access and retry.",
+              : "Could not load environment limits. Check provider access and retry.",
           );
         }
       }
@@ -399,6 +405,46 @@ export function createApiServer(options: ApiOptions) {
         } catch (error) {
           throw new HttpError(400, (error as Error).message);
         }
+      }
+      function requirePreparedEnvironment(
+        repository: string,
+        resources: import("@herbie/contracts").EnvironmentResources | null,
+      ) {
+        if (!adapters.prepareEnvironment) return;
+        const id = request.headers["x-herbie-environment-preparation"];
+        if (typeof id !== "string" || !preparations.ready(id, userId, repository, resources))
+          throw new HttpError(
+            409,
+            "Prepare the environment before saving the project.",
+            "environment_preparation_required",
+          );
+      }
+      if (method === "POST" && url.pathname === "/api/project-environments") {
+        requireExecution();
+        const input = environmentPreparationInput.parse(await readJson(request));
+        let repository: string;
+        if ("projectId" in input) {
+          const project = await store.getProject(input.projectId, userId);
+          if (!project) throw new HttpError(404, "Project not found");
+          if (project.state === "cancelled") throw new HttpError(409, "Project is cancelled");
+          repository = project.repository;
+        } else repository = input.repository;
+        await validateResources(input.resources);
+        await adapters.authorize(userId, repository);
+        const preparation = preparations.start(userId, repository, input.resources);
+        json(response, 202, { id: preparation.id, state: preparation.state });
+        return;
+      }
+      const preparationPath = url.pathname.match(/^\/api\/project-environments\/([^/]+)$/);
+      if (method === "GET" && preparationPath) {
+        const preparation = preparations.get(z.string().uuid().parse(preparationPath[1]), userId);
+        if (!preparation)
+          throw new HttpError(
+            404,
+            "Environment preparation expired or was interrupted. Retry saving the project.",
+          );
+        json(response, 200, { id: preparation.id, state: preparation.state });
+        return;
       }
       if (method === "GET" && url.pathname === "/api/models") {
         if (!options.listModels) throw new HttpError(503, "Model discovery is unavailable");
@@ -430,6 +476,7 @@ export function createApiServer(options: ApiOptions) {
         await validateResources(input.resources);
         const key = z.string().uuid().parse(request.headers["idempotency-key"]);
         await adapters.authorize(userId, input.repository);
+        requirePreparedEnvironment(input.repository, input.resources);
         const result = await store.createProject(userId, input, adapters.mode, key);
         projectJson(result.created ? 201 : 200, result.project);
         return;
@@ -458,6 +505,15 @@ export function createApiServer(options: ApiOptions) {
         if (method === "POST" && !projectPath[2]) {
           const input = projectUpdate.parse(await readJson(request));
           await validateResources(input.resources);
+          if (
+            adapters.prepareEnvironment &&
+            input.resources !== undefined &&
+            !sameEnvironment(input.resources, project.resources)
+          ) {
+            requireExecution();
+            await adapters.authorize(userId, project.repository);
+            requirePreparedEnvironment(project.repository, input.resources);
+          }
           projectJson(200, await store.updateProject(id, userId, input));
           return;
         }
@@ -593,7 +649,10 @@ export function createApiServer(options: ApiOptions) {
   }
   const server = createServer((request, response) => {
     void handle(request, response).catch((error) => {
-      const errorId = logFailure(error, { component: "http-request" });
+      const errorId =
+        error instanceof HttpError && error.code === "environment_preparation_required"
+          ? undefined
+          : logFailure(error, { component: "http-request" });
       if (response.headersSent) {
         response.destroy();
         return;
@@ -606,7 +665,9 @@ export function createApiServer(options: ApiOptions) {
       )
         json(response, error.status, {
           error: error.message,
-          ...(error instanceof GithubError && error.code ? { code: error.code } : {}),
+          ...((error instanceof GithubError || error instanceof HttpError) && error.code
+            ? { code: error.code }
+            : {}),
         });
       else if (error instanceof z.ZodError || error instanceof URIError)
         json(response, 400, { error: "Invalid request" });

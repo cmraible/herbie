@@ -34,5 +34,6 @@ export interface EnvironmentProvider {
     name: string;
     resources?: { cpu: number; memory: number; disk: number };
     timeoutMs: number;
+    signal?: AbortSignal;
   }): Promise<Environment>;
 }

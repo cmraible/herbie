@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createLiveAdapters } from "../src/live.js";
 import {
   createEnvironmentLimits,
   validateEnvironmentResources,
 } from "../src/environment-limits.js";
 
 const organizationId = "41dfe3ad-81cd-4070-9606-292561eb4e55";
+test("E2B accepts custom resource combinations without a prebuilt template list", async () => {
+  const adapters = createLiveAdapters(
+    { provider: "e2b", apiKey: "fixture", openaiSecretName: "fixture" },
+    {} as never,
+    {} as never,
+  );
+  const limits = await adapters.environmentLimits!();
+  assert.deepEqual(limits, { cpu: null, memory: null, disk: null });
+  validateEnvironmentResources({ cpu: 4, memory: 8, disk: 20 }, limits);
+  validateEnvironmentResources({ cpu: 3, memory: 7, disk: 15 }, limits);
+});
 const region = {
   regionId: "us",
   sandboxClass: "container",
