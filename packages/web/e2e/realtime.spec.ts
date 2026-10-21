@@ -5,6 +5,8 @@ test("pushes PR and run updates without polling and reconnects without duplicate
 }) => {
   const id = "00000000-0000-4000-8000-000000000001";
   const pr = {
+    title: "Fix transcript artifact links",
+    body: "## Summary\n\nDownload saved PR metadata.",
     number: 42,
     branch: "herbie/run",
     state: "open",
@@ -98,7 +100,8 @@ test("pushes PR and run updates without polling and reconnects without duplicate
   events.push(
     activity("item/agentMessage/delta", {
       itemId: "message",
-      delta: "Implemented <script>alert(1)</script> safely",
+      delta:
+        "Implemented <script>alert(1)</script> safely. [PR title](/tmp/herbie-attempt-48d23ed4-f279-4d3c-bc2f-d90417c56848/pr-title.txt), [PR description](file:///tmp/herbie-attempt-48d23ed4-f279-4d3c-bc2f-d90417c56848/pr-description.md), [Source](/workspace/repo/src/main.ts:12), [GitHub](https://github.com/owner/repo/pull/42).",
     }),
   );
   stream!.send(JSON.stringify({ type: "events", projectId: id, events }));
@@ -115,6 +118,28 @@ test("pushes PR and run updates without polling and reconnects without duplicate
     page.locator(".agent-transcript pre").filter({ hasText: "All tests passed" }),
   ).toBeVisible();
   await expect(page.locator(".transcript-message script")).toHaveCount(0);
+  const transcript = page.getByRole("region", { name: "Agent transcript" });
+  for (const [label, filename, expected] of [
+    ["PR title", "pr-title.txt", pr.title],
+    ["PR description", "pr-description.md", pr.body],
+  ]) {
+    const downloadedArtifact = page.waitForEvent("download");
+    await transcript.getByRole("link", { name: label, exact: true }).click();
+    const artifact = await downloadedArtifact;
+    expect(artifact.suggestedFilename()).toBe(filename);
+    const contents = await artifact.createReadStream();
+    let text = "";
+    for await (const chunk of contents!) text += chunk.toString();
+    expect(text).toBe(expected);
+    await expect(page).toHaveURL(new RegExp(`/runs/${id}$`));
+  }
+  await expect(transcript.getByRole("link", { name: "Source" })).toHaveCount(0);
+  await expect(transcript.getByText("Source (sandbox file unavailable)")).toBeVisible();
+  await expect(transcript.getByRole("link", { name: "GitHub" })).toHaveAttribute(
+    "href",
+    "https://github.com/owner/repo/pull/42",
+  );
+
   await page.getByRole("searchbox", { name: "Search transcript" }).fill("pnpm test");
   await expect(page.locator(".transcript-item")).toHaveCount(1);
   await page.getByRole("searchbox", { name: "Search transcript" }).fill("no matching update");

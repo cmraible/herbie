@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { TranscriptMarkdown, type TranscriptPullRequest } from "./TranscriptMarkdown.js";
 import type { ProjectEvent } from "@herbie/contracts";
 import { agentActivity, activityText, groupActivity } from "./agent-activity.js";
 
@@ -16,7 +15,13 @@ const labels: Record<string, string> = {
   plan: "Plan",
 };
 
-export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
+export function AgentTranscript({
+  events,
+  pullRequest,
+}: {
+  events: ProjectEvent[];
+  pullRequest?: TranscriptPullRequest;
+}) {
   const [query, setQuery] = useState("");
   const timeline = useRef<HTMLDivElement>(null);
   const records = events.filter((event) => event.type === "agent");
@@ -77,7 +82,12 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
         )}
         {groupActivity(visible).map((group) =>
           group.length === 1 ? (
-            <TranscriptItem key={group[0].id} item={group[0]} query={query} />
+            <TranscriptItem
+              key={group[0].id}
+              item={group[0]}
+              query={query}
+              pullRequest={pullRequest}
+            />
           ) : (
             <details className="transcript-group" key={group[0].id} open={!!query}>
               <summary>
@@ -96,7 +106,12 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
               </summary>
               <div className="transcript-group-items">
                 {group.map((item) => (
-                  <TranscriptItem key={item.id} item={item} query={query} />
+                  <TranscriptItem
+                    key={item.id}
+                    item={item}
+                    query={query}
+                    pullRequest={pullRequest}
+                  />
                 ))}
               </div>
             </details>
@@ -110,9 +125,11 @@ export function AgentTranscript({ events }: { events: ProjectEvent[] }) {
 function TranscriptItem({
   item,
   query,
+  pullRequest,
 }: {
   item: ReturnType<typeof agentActivity>[number];
   query: string;
+  pullRequest?: TranscriptPullRequest;
 }) {
   return (
     <article key={item.id} className={`transcript-item transcript-${item.type}`}>
@@ -120,9 +137,7 @@ function TranscriptItem({
         <>
           <span className="transcript-label">{labels[item.type]}</span>
           <div className="pr-description transcript-message">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml>
-              {activityText(item)}
-            </Markdown>
+            <TranscriptMarkdown pullRequest={pullRequest}>{activityText(item)}</TranscriptMarkdown>
           </div>
         </>
       ) : (
@@ -157,9 +172,9 @@ function TranscriptItem({
           </summary>
           {item.type === "reasoning" ? (
             <div className="pr-description transcript-message">
-              <Markdown remarkPlugins={[remarkGfm]} skipHtml>
+              <TranscriptMarkdown pullRequest={pullRequest}>
                 {activityText(item)}
-              </Markdown>
+              </TranscriptMarkdown>
             </div>
           ) : (
             <pre>{activityText(item)}</pre>

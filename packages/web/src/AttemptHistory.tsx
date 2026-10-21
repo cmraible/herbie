@@ -222,6 +222,7 @@ export function AttemptHistory({
                   </details>
                 )}
                 <AgentTranscript
+                  pullRequest={group.pullRequests[0]}
                   events={group.events.filter((event) => event.agentSessionId === session.id)}
                 />
                 <ol>
@@ -241,7 +242,10 @@ export function AttemptHistory({
                 </ol>
               </details>
             ))}
-          <AgentTranscript events={group.events.filter((event) => !event.agentSessionId)} />
+          <AgentTranscript
+            pullRequest={group.pullRequests[0]}
+            events={group.events.filter((event) => !event.agentSessionId)}
+          />
           <section className="activity">
             <h3>Run activity</h3>
             {group.events
