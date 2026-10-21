@@ -40,3 +40,15 @@ docker compose down                  # Stop; retain database
 ```
 
 See [service operations](service.md) for recovery and deployment details.
+
+### Elasticsearch MCP in Codex
+
+Set `ES_URL` and `ES_API_KEY`, then start Codex from the repo root. You'll need
+Node.js 24+, Git, and npm. The first launch builds Elastic's pinned v0.3.1 server;
+later launches use the cached build. No Docker needed.
+
+The launcher uses the environment's proxy and CA settings. TLS verification stays
+on, telemetry defaults to off, and `NO_PROXY` exclusions aren't supported.
+
+To upgrade, update the commit in `scripts/elasticsearch-mcp.mjs`. Bump
+`adapterVersion` if you change the proxy adapter.
