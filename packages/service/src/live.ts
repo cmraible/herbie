@@ -121,6 +121,7 @@ export function createLiveAdapters(
               access.repository,
               pr.number,
               execution.project.ownerId,
+              execution.project.reviewers,
             );
           },
           async readinessState(execution: Execution): Promise<"ready" | "draft" | "closed"> {

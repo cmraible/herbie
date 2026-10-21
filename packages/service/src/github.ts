@@ -741,7 +741,13 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         .parse(await request(`/repos/${repository}/pulls/${number}`, token));
       return !pr.draft ? "ready" : pr.state === "closed" ? "closed" : "draft";
     },
-    async requestReview(token: string, repository: string, number: number, ownerId: string) {
+    async requestReview(
+      token: string,
+      repository: string,
+      number: number,
+      ownerId: string,
+      reviewerLogins?: string[] | null,
+    ) {
       const user = z.object({ id: z.number().int(), login: z.string() });
       const path = `/repos/${repository}/pulls/${number}`;
       const pr = z
@@ -754,28 +760,45 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         .parse(await request(path, token));
       if (pr.state !== "open") return;
       if (pr.draft) throw new Error("Cannot request review while PR is draft");
-      // Retrying a lost response must not notify someone who already reviewed.
-      if (
-        String(pr.user.id) === ownerId ||
-        pr.requested_reviewers.some((u) => String(u.id) === ownerId)
-      )
-        return;
+      const reviewers = reviewerLogins?.length
+        ? [...new Set(reviewerLogins.map((login) => login.toLowerCase()))].map((login) => ({
+            login,
+          }))
+        : [{ id: ownerId }];
+      const reviews: { user: z.infer<typeof user> | null; state: string }[] = [];
       for (let page = 1; ; page++) {
-        const reviews = z
+        const batch = z
           .array(z.object({ user: user.nullable(), state: z.string() }))
           .parse(await request(`${path}/reviews?per_page=100&page=${page}`, token));
-        if (
-          reviews.some(
-            (review) => String(review.user?.id) === ownerId && review.state !== "PENDING",
-          )
-        )
-          return;
-        if (reviews.length < 100) break;
+        reviews.push(...batch);
+        if (batch.length < 100) break;
       }
-      const reviewer = user.parse(await request(`/user/${encodeURIComponent(ownerId)}`, token));
-      if (String(reviewer.id) !== ownerId)
-        throw new Error("GitHub reviewer did not match project owner");
-      await request(`${path}/requested_reviewers`, token, { reviewers: [reviewer.login] });
+      const pending: string[] = [];
+      for (const target of reviewers) {
+        const matches = (candidate: z.infer<typeof user> | null) =>
+          "login" in target
+            ? candidate?.login.toLowerCase() === target.login
+            : String(candidate?.id) === target.id;
+        // A retry must only notify reviewers who have not already been requested or reviewed.
+        if (
+          matches(pr.user) ||
+          pr.requested_reviewers.some(matches) ||
+          reviews.some((review) => matches(review.user) && review.state !== "PENDING")
+        )
+          continue;
+        const reviewer = user.parse(
+          await request(
+            "login" in target
+              ? `/users/${encodeURIComponent(target.login)}`
+              : `/user/${encodeURIComponent(target.id)}`,
+            token,
+          ),
+        );
+        if (!matches(reviewer)) throw new Error("GitHub reviewer did not match requested user");
+        pending.push(reviewer.login);
+      }
+      if (pending.length)
+        await request(`${path}/requested_reviewers`, token, { reviewers: pending });
     },
     async markReady(
       token: string,
