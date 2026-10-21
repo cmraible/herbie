@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       markdown-only: ${{ steps.diff.outputs.markdown-only }}
+      ios-changed: ${{ steps.diff.outputs.ios-changed }}
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -32,6 +33,11 @@ jobs:
           markdown_only=false
           if [[ -z "$changes" ]]; then markdown_only=true; fi
           echo "markdown-only=$markdown_only" >> "$GITHUB_OUTPUT"
+          ios_changed=false
+          if [[ -n "$(git diff --name-only --no-renames "$BASE...$HEAD" -- apps/ios .github/workflows/ci-deploy.yml)" ]]; then
+            ios_changed=true
+          fi
+          echo "ios-changed=$ios_changed" >> "$GITHUB_OUTPUT"
 
   verify:
     name: Verify
@@ -175,6 +181,29 @@ jobs:
     with:
       publish: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.HERBIE_IMAGE_PUBLISH_ENABLED == 'true' }}
 
+  ios-verification:
+    name: Native iOS verification
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.ios-changed == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    concurrency:
+      group: herbie-ios-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Test native API and state logic
+        run: swift test --package-path apps/ios
+      - name: Build native iOS app
+        run: >-
+          xcodebuild -project apps/ios/Herbie.xcodeproj -scheme Herbie
+          -configuration Release -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/herbie-ios-build"
+          CODE_SIGNING_ALLOWED=NO build
+
   all-tests-passed:
     name: All tests passed
     needs:
@@ -183,6 +212,7 @@ jobs:
       - unit-verification
       - browser-verification
       - container-verification
+      - ios-verification
     if: ${{ always() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -195,12 +225,17 @@ jobs:
           UNIT_RESULT: ${{ needs.unit-verification.result }}
           BROWSER_RESULT: ${{ needs.browser-verification.result }}
           CONTAINER_RESULT: ${{ needs.container-verification.result }}
+          IOS_RESULT: ${{ needs.ios-verification.result }}
+          IOS_CHANGED: ${{ needs.changes.outputs.ios-changed }}
         run: |
           failed=0
-          for check in CHANGES BUILD UNIT BROWSER CONTAINER; do
+          for check in CHANGES BUILD UNIT BROWSER CONTAINER IOS; do
             result_var="${check}_RESULT"
             result="${!result_var}"
             if [[ "$MARKDOWN_ONLY" == true && "$result" == skipped && "$check" =~ ^(BUILD|UNIT|BROWSER)$ ]]; then
+              continue
+            fi
+            if [[ "$check" == IOS && "$IOS_CHANGED" == false && "$result" == skipped ]]; then
               continue
             fi
             if [[ "$result" != success ]]; then

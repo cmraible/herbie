@@ -28,7 +28,9 @@ import SwiftUI
   var service = UserDefaults.standard.string(forKey: "serviceURL") ?? ""
 
   func connect() async {
-    guard !isPreview else { return }
+    guard !isPreview, !service.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return
+    }
     loading = true
     defer { loading = false }
     do {

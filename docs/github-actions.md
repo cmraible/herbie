@@ -4,7 +4,10 @@
 On pull requests, it verifies builds and strict typechecking, unit and PostgreSQL
 integration coverage, the compiled CLI, Chromium browser scenarios, and the portable Node
 container. **All tests passed** requires every verification job to succeed;
-require this status in branch protection. The container job calls the reusable
+require this status in branch protection. Changes to `apps/ios` or this workflow
+also run **Native iOS verification** on macOS: Swift core tests and a Release iOS
+Simulator build, without signing. This job contributes to **All tests passed**
+and is skipped for unrelated changes. The container job calls the reusable
 `portable-smoke.yml` workflow, which builds and smoke-tests the image once.
 For same-repository PRs, it also uploads that exact image to GHCR before the
 container check passes. Fork PRs verify without uploading.

@@ -58,6 +58,9 @@ xcodebuild -project apps/ios/Herbie.xcodeproj -scheme Herbie \
   -derivedDataPath /tmp/herbie-ios-build CODE_SIGNING_ALLOWED=NO build
 ```
 
+The path-gated **Native iOS verification** job runs these checks for changes to
+`apps/ios` or the CI workflow and contributes to **All tests passed**.
+
 Run these from the repository root on macOS with Xcode installed. The Swift
 package exercises API headers and preparation/idempotency, payload validation,
 focus queue rules, and transcript assembly without contacting a service.
