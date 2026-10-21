@@ -1,11 +1,11 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
 import type { AgentAttemptChanges } from "./agent-attempt.js";
 import { MAX_PATCH_BYTES } from "./artifact-limits.js";
+import {
+  createAndPushGitPublication,
+  GitPublicationHeadChangedError,
+  GitPublicationTransportError,
+} from "./git-publication.js";
 
 type CreatePullRequest = (request: {
   repository: string;
@@ -104,61 +104,29 @@ export async function publishPatch(
     throw new Error("PR updates require matching head and successful local checks");
   if (!patch.length) throw new Error("Cannot publish an empty patch");
 
-  const directory = await mkdtemp(join(tmpdir(), "herbie-publish-"));
   const state: PublicationState = { repository, branch, stage: "preparing" };
   const failures: unknown[] = [];
   let result: { url: string; branch: string; commit: string } | undefined;
   try {
-    const bare = join(directory, "repo.git");
-    const git = async (...args: string[]) =>
-      (
-        await promisify(execFile)("git", ["--git-dir", bare, ...args], {
-          cwd: directory,
-          timeout: 30_000,
-          killSignal: "SIGKILL",
-          env: {
-            ...process.env,
-            ...request.gitEnvironment,
-            GIT_INDEX_FILE: join(directory, "index"),
-            GIT_TERMINAL_PROMPT: "0",
-          },
-        })
-      ).stdout.trim();
-    await git("init", "--bare", "--template=", bare);
-    const headRef = `refs/heads/${branch}`;
-    await git("check-ref-format", headRef);
-    await git("check-ref-format", `refs/heads/${baseBranch}`);
-    await request.onPhase?.("preparing");
-    await git("remote", "add", "origin", remoteUrl);
     const update = request.updatePullRequest;
-    const remoteHead = (await git("ls-remote", "--heads", "origin", headRef)).split("\t")[0];
-    if (update && remoteHead !== update.head) throw new PatchHeadChangedError("PR head changed");
-    if (!update && remoteHead) throw new Error("Publication branch already exists");
-    await git("fetch", "--no-tags", "origin", update ? headRef : `refs/heads/${baseBranch}`);
-    // Keep the exact captured tree and parent even when other work advances main.
-    await git("merge-base", "--is-ancestor", baseCommit, "FETCH_HEAD");
-    await git("read-tree", baseCommit);
-    const patchFile = join(directory, "changes.patch");
-    await writeFile(patchFile, patch);
-    await git("apply", "--cached", "--binary", patchFile);
-    const tree = await git("write-tree");
-    if (tree === (await git("rev-parse", `${baseCommit}^{tree}`)))
-      throw new Error("Patch has no repository changes");
-    const commit = await git("commit-tree", tree, "-p", baseCommit, "-m", title);
-    state.commit = commit;
-    await request.beforeWrite?.();
-    state.stage = "pushing";
-    await request.onPhase?.("pushing");
-    // An empty expected value makes branch creation atomic: never replace an existing ref.
-    const pushed = await git(
-      "push",
-      "--porcelain",
-      `--force-with-lease=${headRef}:${update?.head ?? ""}`,
-      "origin",
-      `${commit}:${headRef}`,
-    );
-    if (!pushed.split("\n").some((line) => line.startsWith(update ? " \t" : "*\t")))
-      throw new Error("Push did not create a new branch");
+    const { commit } = await createAndPushGitPublication({
+      repository,
+      branch,
+      baseBranch,
+      baseCommit,
+      title,
+      patch,
+      expectedHead: update?.head,
+      gitEnvironment: request.gitEnvironment,
+      beforeWrite: request.beforeWrite,
+      onCommit: (commit) => {
+        state.commit = commit;
+      },
+      onPhase: async (phase) => {
+        state.stage = phase;
+        await request.onPhase?.(phase);
+      },
+    });
     await request.beforeWrite?.();
     state.stage = "opening-pr";
     await request.onPhase?.("opening-pr");
@@ -176,23 +144,29 @@ export async function publishPatch(
     state.stage = "published";
     result = { url, branch, commit };
   } catch (error) {
+    const transportErrors =
+      error instanceof GitPublicationTransportError ? [...error.errors] : [error];
     // Only a definitive Git lease rejection is a discard; transport failures remain uncertain.
     const rejected =
       request.updatePullRequest &&
       state.stage === "pushing" &&
-      error instanceof Error &&
-      "stdout" in error &&
-      typeof error.stdout === "string" &&
-      error.stdout
-        .split("\n")
-        .some((line) => line.startsWith("!\t") && line.endsWith("[rejected] (stale info)"));
-    failures.push(rejected ? new PatchHeadChangedError("PR head changed during push") : error);
-  } finally {
-    try {
-      await rm(directory, { recursive: true, force: true });
-    } catch (error) {
-      failures.push(error);
-    }
+      transportErrors.some(
+        (cause) =>
+          cause instanceof Error &&
+          "stdout" in cause &&
+          typeof cause.stdout === "string" &&
+          cause.stdout
+            .split("\n")
+            .some((line) => line.startsWith("!\t") && line.endsWith("[rejected] (stale info)")),
+      );
+    failures.push(
+      ...transportErrors.map((cause) =>
+        cause instanceof GitPublicationHeadChangedError ||
+        (rejected && cause instanceof Error && "stdout" in cause)
+          ? new PatchHeadChangedError("PR head changed")
+          : cause,
+      ),
+    );
   }
   if (!failures.length && result) return result;
   throw new PatchPublicationError(failures, state);
