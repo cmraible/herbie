@@ -14,24 +14,15 @@ import {
   StaleRepairError,
   PublicationBlockedError,
   type Adapters,
+  type DaytonaEnvironmentConfig,
   type Execution,
   type PublicationPhase,
 } from "./adapters.js";
 import type { Auth } from "./auth.js";
 import type { Github } from "./github.js";
 
-export interface LiveConfig {
-  provider?: "daytona";
-  apiKey: string;
-  apiUrl?: string;
-  target?: string;
-  openaiSecretName: string;
-  snapshot?: string;
-  domainAllowList?: string;
-  outboundProxyUrl?: string;
-}
 export function createLiveAdapters(
-  config: LiveConfig | (E2BConfig & { provider: "e2b" }) | undefined,
+  config: DaytonaEnvironmentConfig | (E2BConfig & { provider: "e2b" }) | undefined,
   github: Github,
   auth: Pick<Auth, "userToken">,
 ): Adapters {
