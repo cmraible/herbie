@@ -11,6 +11,17 @@ export interface RepositoryAccess {
   defaultBranch: string;
   installationId: number;
 }
+/** Runtime-neutral configuration needed to prepare a Daytona environment. */
+export interface DaytonaEnvironmentConfig {
+  provider?: "daytona";
+  apiKey: string;
+  apiUrl?: string;
+  target?: string;
+  openaiSecretName: string;
+  snapshot?: string;
+  domainAllowList?: string;
+  outboundProxyUrl?: string;
+}
 export interface Execution {
   agentSessionId?: string;
   durable?: DurableAttempt;

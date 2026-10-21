@@ -46,7 +46,7 @@ execution owner. Shipping a release to both targets does not transfer ownership.
 
 ## Commit sequence
 
-### 1. `refactor: separate portable service contracts from Node adapters`
+### 1. `refactor: separate portable service contracts from Node adapters` — complete
 
 Extract shared configuration types, execution contracts, artifact validation, and
 publication contracts from modules importing filesystem, subprocess, or HTTP
