@@ -63,3 +63,14 @@ test("environment sizing defaults to inherited and requires positive whole numbe
     assert.equal(projectInput.safeParse({ ...input, resources }).success, false);
   }
 });
+
+test("single PR workflows accept one slot and legacy inputs remain recurring", () => {
+  const input = { repository: "demo/example", prompt: "Fix arithmetic" };
+  assert.equal(projectInput.parse(input).workflow, "loop");
+  assert.equal(projectInput.parse({ ...input, workflow: "single_pr" }).targetWip, 1);
+  assert.equal(
+    projectInput.safeParse({ ...input, workflow: "single_pr", targetWip: 2 }).success,
+    false,
+  );
+  assert.equal(projectInput.safeParse({ ...input, workflow: "unknown" }).success, false);
+});

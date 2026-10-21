@@ -43,6 +43,7 @@ test("resuming an existing environment does not depend on limits discovery", asy
       resources: null,
       prompt: "Disabled work",
       attemptCount: 0,
+      workflow: "loop",
       targetWip: 1,
       model: "gpt-6-luna",
       reasoningEffort: "low",

@@ -23,12 +23,13 @@ import type { PullRequestFeedback, PublicationPhase, Execution } from "./adapter
 import type { AgentAttemptChanges, AttemptCheckpoint } from "@herbie/loop/agent-attempt";
 
 const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, resources, model, reasoning_effort AS "reasoningEffort",
-  max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
+  workflow, max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id',j.id,'number',j.cycle,'state',j.stage,'createdAt',j.created_at,'pullRequest',j.pull_request,'sessions',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',s.id,'kind',s.kind,'state',s.state,'model',s.model,'reasoningEffort',s.reasoning_effort,'startedAt',s.started_at,'finishedAt',s.finished_at,'environment',s.environment,'cleanup',s.cleanup,'threadId',s.thread_id,'usage',s.usage) ORDER BY s.started_at,s.id) FROM agent_sessions s WHERE s.job_id=j.id),'[]'::jsonb),'ciRepair',(SELECT jsonb_build_object('id',r.id,'state',r.state,'canRetry',r.state='failed' AND r.retryable AND NOT r.publication_started) FROM ci_repairs r WHERE r.job_id=j.id AND r.state <> 'superseded' ORDER BY r.created_at DESC LIMIT 1)) ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id),'[]'::jsonb) AS attempts,
   cleanup_status AS "cleanupStatus", error, created_at AS "createdAt", updated_at AS "updatedAt"`;
-const databaseProject = projectSchema.extend({
+const databaseProject = z.object({
+  ...projectSchema.shape,
   createdAt: z.date().transform((d) => d.toISOString()),
   updatedAt: z.date().transform((d) => d.toISOString()),
 });
@@ -110,7 +111,16 @@ export class StoreError extends Error {
 }
 const conflict = (message: string) => new StoreError(409, message);
 function requestFingerprint(
-  { repository, prompt, name, targetWip, model, reasoningEffort, resources }: ProjectInput,
+  {
+    repository,
+    prompt,
+    name,
+    targetWip,
+    model,
+    reasoningEffort,
+    resources,
+    workflow,
+  }: ProjectInput,
   mode: Project["mode"],
   legacyLimit?: number,
 ): string {
@@ -121,6 +131,7 @@ function requestFingerprint(
         prompt,
         ...(legacyLimit === undefined ? {} : { maxAttempts: legacyLimit }),
         mode,
+        ...(workflow === "single_pr" ? { workflow } : {}),
         ...(resources == null ? {} : { resources }),
         ...(name === undefined ? {} : { name }),
         ...(model === undefined || model === "gpt-6-luna" ? {} : { model }),
@@ -244,6 +255,7 @@ async function advanceProject(
   const cycle = rows.at(-1)?.cycle ?? 0;
   if (
     replenish &&
+    project.workflow === "loop" &&
     !pending.some((job) => job.stage === "queued") &&
     pending.length + reviewing < project.targetWip
   ) {
@@ -252,15 +264,17 @@ async function advanceProject(
   }
   const active = pending.some((job) => ["running", "publishing"].includes(job.stage));
   const state =
-    project.state === "paused" || (project.stopRequested === "pause" && !active)
-      ? "paused"
-      : active
-        ? "running"
-        : pending.length
-          ? "queued"
-          : "awaiting_review";
+    project.workflow === "single_pr" && !pending.length && !reviewing
+      ? "completed"
+      : project.state === "paused" || (project.stopRequested === "pause" && !active)
+        ? "paused"
+        : active
+          ? "running"
+          : pending.length
+            ? "queued"
+            : "awaiting_review";
   await client.query(
-    "UPDATE projects SET state=$2,error=NULL,stop_requested=CASE WHEN $2='paused' THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1",
+    "UPDATE projects SET state=$2,error=NULL,stop_requested=CASE WHEN $2 IN ('paused','completed') THEN NULL ELSE stop_requested END,updated_at=clock_timestamp() WHERE id=$1",
     [project.id, state],
   );
 }
@@ -392,7 +406,7 @@ export class Store {
       const id = randomUUID();
       if (name === undefined) throw new Error("Missing project name");
       await client.query(
-        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'queued')",
+        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,workflow,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'queued')",
         [
           id,
           ownerId,
@@ -404,6 +418,7 @@ export class Store {
           request.model,
           request.reasoningEffort,
           request.resources,
+          request.workflow,
         ],
       );
       await client.query(
@@ -443,6 +458,12 @@ export class Store {
       if (!project || project.ownerId !== ownerId) throw new StoreError(404, "Project not found");
       if (project.state === "cancelled")
         throw new StoreError(409, "Cancelled projects cannot be edited");
+      if (
+        project.workflow === "single_pr" &&
+        parsed.targetWip !== undefined &&
+        parsed.targetWip !== 1
+      )
+        throw conflict("Single PR workflows require targetWip of 1");
       // Normalize legacy request hashes before their fallback loses the original prompt.
       await client.query(
         `UPDATE project_requests SET fingerprint=$2 WHERE project_id=$1
@@ -526,6 +547,8 @@ export class Store {
         project.stopRequested === "cancel"
       )
         throw conflict("Only failed or interrupted projects can be retried");
+      if (project.workflow === "single_pr" && project.pullRequests.length)
+        throw conflict("This workflow already produced its single pull request");
       const { rows } = await client.query<{ stage: string }>(
         "SELECT stage FROM jobs WHERE project_id=$1 FOR UPDATE",
         [id],
@@ -552,6 +575,16 @@ export class Store {
         "UPDATE jobs SET lease_owner=NULL,lease_expires_at=NULL WHERE project_id=$1 AND stage='ready'",
         [id],
       );
+      if (
+        project.workflow === "single_pr" &&
+        !rows.some((row) => ["queued", "ready"].includes(row.stage))
+      ) {
+        const latest = await client.query<{ cycle: number }>(
+          "SELECT max(cycle) AS cycle FROM jobs WHERE project_id=$1",
+          [id],
+        );
+        await insertJob(client, id, latest.rows[0]!.cycle + 1);
+      }
       await advanceProject(client, {
         ...project,
         state: "queued",
@@ -713,7 +746,7 @@ export class Store {
       // Refill existing projects too, including runs started before this coordinator booted.
       const vacancies = await client.query<{ id: string }>(
         `SELECT g.id FROM projects g WHERE g.state IN ('queued','running','awaiting_review')
-        AND g.stop_requested IS NULL AND ($1::text IS NULL OR g.mode=$1)
+        AND g.workflow='loop' AND g.stop_requested IS NULL AND ($1::text IS NULL OR g.mode=$1)
         AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=g.id AND j.stage='queued')
         AND (SELECT count(*) FROM jobs j WHERE j.project_id=g.id AND j.stage IN ('running','ready','publishing','awaiting_review')) < g.max_wip
         FOR UPDATE OF g SKIP LOCKED`,
@@ -1947,6 +1980,20 @@ export class Store {
       "UPDATE projects SET pull_request=CASE WHEN pull_request->>'branch'=$2 THEN $3::jsonb ELSE pull_request END WHERE id=$1",
       [project.id, row.branch, updatedPr],
     );
+    if (project.workflow === "single_pr") {
+      await advanceProject(client, project, false);
+      const updated = (await projectFrom(client, project.id))!;
+      await addEvent(
+        client,
+        project.id,
+        closed ? "pull_request_closed" : "pull_request_merged",
+        closed
+          ? "Pull request closed; single PR workflow finished"
+          : "Pull request merged; single PR workflow finished",
+        jobId,
+      );
+      return updated;
+    }
     if (closed) await advanceProject(client, project, false);
     const currentProject = closed ? (await projectFrom(client, project.id))! : project;
     if (closed && !["cancelled", "failed", "needs_attention"].includes(currentProject.state)) {

@@ -46,6 +46,7 @@ The optional CLI client requires Node.js 24+ and pnpm 10:
 pnpm install
 pnpm cli login --url https://herbie-dev.example.com
 pnpm cli repositories
+pnpm cli pr --repo YOUR-OWNER/YOUR-TEST-REPO --prompt "Fix addition and test the change"
 pnpm cli start --repo YOUR-OWNER/YOUR-TEST-REPO --name "Fix addition" --prompt "Fix addition and test the change" --target-wip 1
 pnpm cli status
 pnpm cli status PROJECT_ID
@@ -57,7 +58,19 @@ pnpm cli resume PROJECT_ID
 pnpm cli cancel PROJECT_ID
 ```
 
-`targetWip` defaults to 1 and sets the desired amount of outstanding work: open PRs
+For an ad-hoc ticket or task, use `herbie pr --repo OWNER/REPO --prompt "Describe the ticket"`
+(or `pnpm cli pr ...` from this checkout). In the web UI, choose **New project →
+Workflow → Single PR**. Both create a durable one-shot workflow using the existing
+loop execution and publication machinery. It produces one PR, keeps supporting CI
+repairs and review feedback on that PR, and finishes when the PR is merged or
+closed. It never replenishes work. Failed runs can be explicitly retried before
+a PR is published; publication recovery reuses the same saved work and branch.
+Use the existing status, logs, pause, resume, and cancel commands with the returned
+project ID. `--request-id` also safely retries a `pr` submission. Single PR workflows
+have a fixed WIP of 1 and cannot be converted to recurring projects.
+
+`herbie start` and the web UI's **Recurring project** workflow retain their existing
+behavior. `targetWip` defaults to 1 and sets the desired amount of outstanding work: open PRs
 plus queued or active runs. The coordinator polls for missing work and starts runs
 to restore the target, including after a PR merges. For example, `--target-wip 2` maintains two open PRs or active runs until the
 project is paused, cancelled, or stopped by a failure or an unmerged close.

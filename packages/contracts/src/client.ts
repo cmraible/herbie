@@ -160,12 +160,13 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       requestId: string,
       onProgress?: (phase: "preparing" | "saving") => void,
     ) => {
-      const { model, reasoningEffort, resources, ...project } = projectInput.parse(input);
+      const { model, reasoningEffort, resources, workflow, ...project } = projectInput.parse(input);
       return saveProject(
         "/api/projects",
         {
           ...project,
           ...(resources === null ? {} : { resources }),
+          ...(workflow === "loop" ? {} : { workflow }),
           ...(model === "gpt-6-luna" ? {} : { model }),
           ...(reasoningEffort === "low" ? {} : { reasoningEffort }),
         },

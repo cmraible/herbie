@@ -2,6 +2,7 @@ import { z } from "zod";
 import { projectInput, reasoningEffort, environmentResources } from "@herbie/contracts";
 // Preserve legacy names so retries keep the original idempotency payload.
 export const draftSchema = z.object({
+  workflow: z.enum(["loop", "single_pr"]).default("loop"),
   repository: z.string(),
   name: z.string().optional(),
   prompt: z.string(),
@@ -14,6 +15,7 @@ export const draftSchema = z.object({
 export type Draft = z.infer<typeof draftSchema>;
 export function newDraft(repository = ""): Draft {
   return {
+    workflow: "loop",
     repository,
     prompt: "",
     model: "gpt-6-luna",
@@ -25,6 +27,7 @@ export function newDraft(repository = ""): Draft {
 }
 export function parseDraft(draft: Draft) {
   const input = projectInput.safeParse({
+    workflow: draft.workflow,
     repository: draft.repository,
     ...(draft.name?.trim() ? { name: draft.name } : {}),
     prompt: draft.prompt,

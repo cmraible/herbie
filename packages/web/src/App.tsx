@@ -147,6 +147,7 @@ export function App() {
           : {
               ...newDraft(project.repository),
               id: project.id,
+              workflow: project.workflow,
               name: project.name,
               prompt: project.prompt,
               targetWip: String(project.targetWip),
@@ -982,8 +983,11 @@ export function App() {
 
                     <p className="project-meta">
                       {project.attemptCount} {project.attemptCount === 1 ? "run" : "runs"}{" "}
-                      <span>·</span> Target WIP {project.targetWip} <span>·</span> Created{" "}
-                      {time(project.createdAt)}
+                      <span>·</span>{" "}
+                      {project.workflow === "single_pr"
+                        ? "Single PR"
+                        : `Target WIP ${project.targetWip}`}{" "}
+                      <span>·</span> Created {time(project.createdAt)}
                     </p>
                     {project.error && (
                       <div className="status-message" role="alert">
@@ -1150,6 +1154,29 @@ export function App() {
                       />
                     </label>
                   )}
+                  {!editing && (
+                    <label>
+                      Workflow
+                      <select
+                        disabled={busy}
+                        value={formDraft.workflow}
+                        onChange={(event) =>
+                          editForm({
+                            workflow: event.target.value as Draft["workflow"],
+                            targetWip: "1",
+                          })
+                        }
+                      >
+                        <option value="loop">Recurring project</option>
+                        <option value="single_pr">Single PR</option>
+                      </select>
+                      <span>
+                        {formDraft.workflow === "single_pr"
+                          ? "Turn this prompt into one pull request. Finishes when the PR is merged or closed."
+                          : "Keep creating pull requests from this prompt."}
+                      </span>
+                    </label>
+                  )}
                   <label>
                     What should Herbie work on?
                     <textarea
@@ -1173,22 +1200,24 @@ export function App() {
                     value={formDraft.reasoningEffort}
                     onChange={(reasoningEffort) => editForm({ reasoningEffort })}
                   />
-                  <label>
-                    Target WIP
-                    <input
-                      disabled={busy}
-                      type="number"
-                      min="1"
-                      max="2147483647"
-                      required
-                      value={formDraft.targetWip}
-                      onChange={(event) => editForm({ targetWip: event.target.value })}
-                    />
-                    <span>
-                      Open pull requests plus active runs. Herbie starts new runs to maintain this
-                      target.
-                    </span>
-                  </label>
+                  {formDraft.workflow === "loop" && (
+                    <label>
+                      Target WIP
+                      <input
+                        disabled={busy}
+                        type="number"
+                        min="1"
+                        max="2147483647"
+                        required
+                        value={formDraft.targetWip}
+                        onChange={(event) => editForm({ targetWip: event.target.value })}
+                      />
+                      <span>
+                        Open pull requests plus active runs. Herbie starts new runs to maintain this
+                        target.
+                      </span>
+                    </label>
+                  )}
                   {editing && (
                     <p className="subtle-note">
                       Instructions, environment, model, and reasoning changes apply to future runs.
@@ -1249,7 +1278,9 @@ export function App() {
                             : "Starting…"
                         : editing
                           ? "Save changes"
-                          : "Start project"}
+                          : formDraft.workflow === "single_pr"
+                            ? "Create PR"
+                            : "Start project"}
                     </button>
                   </div>
                 </form>

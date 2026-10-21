@@ -63,9 +63,14 @@ export const projectInput = z
     model: projectModel.default("gpt-6-luna"),
     reasoningEffort: reasoningEffort.default("low"),
     resources: environmentResources.nullable().default(null),
+    workflow: z.enum(["loop", "single_pr"]).default("loop"),
     targetWip: z.number().int().min(1).max(2147483647).default(1),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.workflow !== "single_pr" || input.targetWip === 1, {
+    message: "Single PR workflows require targetWip of 1",
+    path: ["targetWip"],
+  });
 export const projectUpdate = z
   .object({
     resources: environmentResources.nullable().optional(),
@@ -147,7 +152,7 @@ export const attemptSchema = z.object({
   pullRequest: pullRequestSchema.nullable(),
 });
 export type Attempt = z.infer<typeof attemptSchema>;
-export const projectSchema = projectInput.extend({
+export const projectSchema = projectInput.safeExtend({
   name: projectName,
   id: z.string().uuid(),
   ownerId: z.string(),

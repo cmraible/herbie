@@ -9,7 +9,7 @@ import { projectInput, actionSchema } from "@herbie/contracts";
 import { createClient, ApiError } from "@herbie/contracts/client";
 
 const savedSession = z.object({ baseUrl: z.string().url(), token: z.string().min(1) }).strict();
-const help = `Herbie — coding projects\n\nCommands:\n  login --url URL\n  logout\n  repositories\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--model MODEL] [--target-wip 1] [--request-id UUID]\n  rename PROJECT_ID --name TEXT\n  edit PROJECT_ID [--prompt TEXT] [--model MODEL]\n  status [PROJECT_ID]\n  logs PROJECT_ID [--after EVENT_ID]\n  pause|resume|cancel PROJECT_ID\n  retry-publication PROJECT_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nRuns continue after this CLI exits. Reuse --request-id to safely retry a start.\n`;
+const help = `Herbie — coding projects\n\nCommands:\n  login --url URL\n  logout\n  repositories\n  pr --repo OWNER/REPO --prompt TEXT [--name TEXT] [--model MODEL] [--request-id UUID]\n  start --repo OWNER/REPO --prompt TEXT [--name TEXT] [--model MODEL] [--target-wip 1] [--request-id UUID]\n  rename PROJECT_ID --name TEXT\n  edit PROJECT_ID [--prompt TEXT] [--model MODEL]\n  status [PROJECT_ID]\n  logs PROJECT_ID [--after EVENT_ID]\n  pause|resume|cancel PROJECT_ID\n  retry-publication PROJECT_ID\n\nResults are JSON. Login instructions and request IDs go to stderr.\nSession file: HERBIE_CONFIG or ~/.config/herbie/session.json (mode 0600).\nretry-publication reuses saved work only when the server confirms safe recovery.\nRuns continue after this CLI exits. Reuse --request-id to safely retry a start or pr request.\npr creates a single PR; start maintains a recurring project.\n`;
 
 export type CliIO = {
   configPath?: string;
@@ -141,9 +141,10 @@ export async function runCli(args: string[], io: CliIO): Promise<number> {
       print(id ? await client.project(id) : await client.projects());
       return 0;
     }
-    if (command === "start") {
-      if (id) throw new Error("start accepts options, not a project ID");
+    if (command === "start" || command === "pr") {
+      if (id) throw new Error(`${command} accepts options, not a project ID`);
       const input = projectInput.parse({
+        workflow: command === "pr" ? "single_pr" : "loop",
         repository: values.repo,
         name: values.name,
         prompt: values.prompt,
