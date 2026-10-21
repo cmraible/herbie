@@ -1,0 +1,15 @@
+[mcp_servers.elasticsearch]
+command = "docker"
+args = [
+  "run",
+  "--rm",
+  "-i",
+  "-e",
+  "ES_URL",
+  "-e",
+  "ES_API_KEY",
+  "docker.elastic.co/mcp/elasticsearch",
+  "stdio",
+]
+env_vars = ["ES_URL", "ES_API_KEY"]
+startup_timeout_sec = 60
