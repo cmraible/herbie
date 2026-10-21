@@ -1189,17 +1189,19 @@ export function App() {
                       onChange={(event) => editForm({ prompt: event.target.value })}
                     />
                   </label>
-                  <ModelSelect
-                    disabled={busy}
-                    value={formDraft.model}
-                    onChange={(model) => editForm({ model })}
-                  />
-                  <ReasoningSelect
-                    model={formDraft.model}
-                    disabled={busy}
-                    value={formDraft.reasoningEffort}
-                    onChange={(reasoningEffort) => editForm({ reasoningEffort })}
-                  />
+                  <div className="project-model-settings">
+                    <ModelSelect
+                      disabled={busy}
+                      value={formDraft.model}
+                      onChange={(model) => editForm({ model })}
+                    />
+                    <ReasoningSelect
+                      model={formDraft.model}
+                      disabled={busy}
+                      value={formDraft.reasoningEffort}
+                      onChange={(reasoningEffort) => editForm({ reasoningEffort })}
+                    />
+                  </div>
                   {formDraft.workflow === "loop" && (
                     <label>
                       Target WIP

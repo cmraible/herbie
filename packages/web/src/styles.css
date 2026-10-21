@@ -1088,6 +1088,15 @@ textarea::placeholder {
   padding-top: 24px;
   border-top: 1px solid #333;
 }
+.project-model-settings {
+  display: grid;
+  gap: 16px;
+}
+@media (min-width: 700px) {
+  .project-model-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .project-environment-section .environment-settings {
   margin-top: 16px;
 }
