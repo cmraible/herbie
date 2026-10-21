@@ -39,7 +39,7 @@ export function EnvironmentSettings({
   }, [custom, retry]);
   return (
     <fieldset className="environment-settings" disabled={disabled}>
-      <legend>Environment resources</legend>
+      <legend>Resources</legend>
       <label>
         Sizing
         <select

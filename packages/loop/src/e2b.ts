@@ -4,15 +4,23 @@ import { Readable } from "node:stream";
 import type { Environment, EnvironmentProvider } from "./environment.js";
 import { configureEnvironmentRuntime } from "./environment-runtime.js";
 import { AttemptCommandError } from "./attempt-diagnostics.js";
+import { createE2BTemplateResolver } from "./e2b-templates.js";
+
+export function createE2BEnvironmentPreparer(config: E2BConfig) {
+  const resolve = createE2BTemplateResolver(config);
+  return async (resources: { cpu: number; memory: number; disk: number } | null) => {
+    await resolve(resources ?? { cpu: 2, memory: 4, disk: 10 });
+  };
+}
 
 export interface E2BConfig {
   apiKey: string;
-  template: string;
+  template?: string;
   openaiSecretName: string;
 }
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 
-type E2BSandbox = Pick<Sandbox, "sandboxId" | "kill"> & {
+type E2BSandbox = Pick<Sandbox, "sandboxId" | "kill" | "getInfo"> & {
   commands: Pick<Sandbox["commands"], "run">;
   files: Pick<Sandbox["files"], "read" | "write">;
 };
@@ -21,8 +29,12 @@ export function createE2BProvider(
   create: (options: SandboxOpts) => Promise<E2BSandbox> = (options) => Sandbox.create(options),
   connect: (id: string) => Promise<E2BSandbox> = (id) =>
     Sandbox.connect(id, { apiKey: config.apiKey }),
+  resolveTemplate = createE2BTemplateResolver(config),
 ): EnvironmentProvider {
-  const wrap = (sandbox: E2BSandbox): Environment => {
+  const wrap = (
+    sandbox: E2BSandbox,
+    resources?: { cpu: number; memory: number; disk: number },
+  ): Environment => {
     const exec = async (command: string, options: { cwd?: string; timeoutMs: number }) => {
       try {
         const result = await sandbox.commands.run(command, {
@@ -53,6 +65,16 @@ export function createE2BProvider(
         });
       },
       async prepare(durable) {
+        if (resources) {
+          const info = await sandbox.getInfo({ requestTimeoutMs: 30_000 });
+          if (info.cpuCount !== resources.cpu || info.memoryMB !== resources.memory * 1024)
+            throw new Error("E2B did not allocate the requested CPU and memory.");
+          const disk = await exec("df -B1 --output=size / | tail -n 1", { timeoutMs: 30_000 });
+          const bytes = Number(disk.result.trim());
+          // E2B grows template disks on a best-effort basis and never shrinks them.
+          if (disk.exitCode !== 0 || !Number.isFinite(bytes) || bytes < resources.disk * 1024 ** 3)
+            throw new Error("E2B did not allocate the requested minimum disk capacity.");
+        }
         if (!durable) return checked(configureEnvironmentRuntime);
         const result = await executeDurably(
           wrap(sandbox),
@@ -109,30 +131,30 @@ export function createE2BProvider(
   };
   return {
     name: "e2b",
-    async find(name) {
+    async find(name, resources) {
       const matches = await Sandbox.list({
         apiKey: config.apiKey,
         query: { metadata: { name } },
       }).nextItems();
       if (matches.length > 1) throw new Error("Ambiguous session environment identity");
-      return matches[0] ? wrap(await connect(matches[0].sandboxId)) : null;
+      return matches[0] ? wrap(await connect(matches[0].sandboxId), resources) : null;
     },
-    connect: async (id) => {
+    connect: async (id, resources) => {
       try {
-        return wrap(await connect(id));
+        return wrap(await connect(id), resources);
       } catch (error) {
         if (error instanceof SandboxNotFoundError) return null;
         throw error;
       }
     },
-    async create({ name, resources, timeoutMs }) {
-      if (resources)
-        throw new Error(
-          "E2B resources are set by the configured template; custom resources are unavailable.",
-        );
+    async create({ name, resources, timeoutMs, signal }) {
+      const sizing = resources ?? { cpu: 2, memory: 4, disk: 10 };
+      const template = await resolveTemplate(sizing, signal);
+      signal?.throwIfAborted();
       const sandbox = await create({
         apiKey: config.apiKey,
-        template: config.template,
+        template,
+        signal,
         timeoutMs,
         requestTimeoutMs: 120_000,
         metadata: { name },
@@ -151,7 +173,7 @@ export function createE2BProvider(
           },
         },
       });
-      return wrap(sandbox);
+      return wrap(sandbox, sizing);
     },
   };
 }

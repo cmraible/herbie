@@ -94,6 +94,7 @@ export function App() {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [savePhase, setSavePhase] = useState<"preparing" | "saving" | null>(null);
   const [projectEdit, setProjectEdit] = useState<(Draft & { id: string }) | null>(null);
   const focusing = screen === "focus";
   const focusHeading = useRef<HTMLHeadingElement>(null);
@@ -500,7 +501,7 @@ export function App() {
     setBusy(true);
     setFormError(null);
     try {
-      const result = await api.start(parseDraft(draft), draft.requestId);
+      const result = await api.start(parseDraft(draft), draft.requestId, setSavePhase);
       setProjects((current) => [result, ...current.filter((item) => item.id !== result.id)]);
       setProjectsLoaded(true);
       if (location.hash === "#new") navigateToScreen(result.id, true);
@@ -508,6 +509,7 @@ export function App() {
     } catch (failure) {
       setFormError(message(failure));
     } finally {
+      setSavePhase(null);
       setBusy(false);
     }
   }
@@ -517,19 +519,24 @@ export function App() {
     setBusy(true);
     setFormError(null);
     try {
-      const result = await api.update(projectEdit.id, {
-        name: projectEdit.name,
-        prompt: projectEdit.prompt,
-        resources: projectEdit.resources,
-        model: projectEdit.model,
-        reasoningEffort: projectEdit.reasoningEffort,
-        targetWip: Number(projectEdit.targetWip),
-      });
+      const result = await api.update(
+        projectEdit.id,
+        {
+          name: projectEdit.name,
+          prompt: projectEdit.prompt,
+          resources: projectEdit.resources,
+          model: projectEdit.model,
+          reasoningEffort: projectEdit.reasoningEffort,
+          targetWip: Number(projectEdit.targetWip),
+        },
+        setSavePhase,
+      );
       setProjects((current) => current.map((item) => (item.id === result.id ? result : item)));
       if (location.hash === `#${projectEdit.id}/edit`) navigateToScreen(result.id, true);
     } catch (failure) {
       setFormError(message(failure));
     } finally {
+      setSavePhase(null);
       setBusy(false);
     }
   }
@@ -1081,6 +1088,7 @@ export function App() {
             {(creating || (editing && project && project.state !== "cancelled")) && formDraft && (
               <section aria-label={editing ? "Edit project" : "New project"}>
                 <form
+                  aria-busy={busy}
                   onSubmit={(event) => {
                     void (editing ? saveProjectEdit(event) : createProject(event));
                   }}
@@ -1159,11 +1167,6 @@ export function App() {
                     value={formDraft.model}
                     onChange={(model) => editForm({ model })}
                   />
-                  <EnvironmentSettings
-                    disabled={busy}
-                    value={formDraft.resources}
-                    onChange={(resources) => editForm({ resources })}
-                  />
                   <ReasoningSelect
                     model={formDraft.model}
                     disabled={busy}
@@ -1192,6 +1195,23 @@ export function App() {
                       Existing work will finish before a lower target takes effect.
                     </p>
                   )}
+                  <section
+                    className="project-environment-section"
+                    aria-labelledby="project-environment-heading"
+                  >
+                    <h2 id="project-environment-heading">Environment</h2>
+                    <EnvironmentSettings
+                      disabled={busy}
+                      value={formDraft.resources}
+                      onChange={(resources) => editForm({ resources })}
+                    />
+                    {savePhase === "preparing" && (
+                      <div className="status-message" role="status">
+                        Preparing your environment. This can take several minutes. Your project will
+                        be saved when it is ready.
+                      </div>
+                    )}
+                  </section>
                   {formError && (
                     <div className="status-message" role="alert">
                       {formError}
@@ -1222,9 +1242,11 @@ export function App() {
                       }
                     >
                       {busy
-                        ? editing
-                          ? "Saving…"
-                          : "Starting…"
+                        ? savePhase === "preparing"
+                          ? "Preparing environment…"
+                          : editing
+                            ? "Saving…"
+                            : "Starting…"
                         : editing
                           ? "Save changes"
                           : "Start project"}

@@ -124,7 +124,7 @@ export const environmentSchema = z
     }
     if (env.HERBIE_EXECUTION_ENABLED === "true")
       for (const name of (env.HERBIE_ENVIRONMENT_PROVIDER === "e2b"
-        ? ["E2B_API_KEY", "HERBIE_E2B_TEMPLATE", "HERBIE_E2B_OPENAI_SECRET"]
+        ? ["E2B_API_KEY", "HERBIE_E2B_OPENAI_SECRET"]
         : ["DAYTONA_API_KEY", "HERBIE_DAYTONA_OPENAI_SECRET"]) as (keyof typeof env)[])
         if (!env[name]) issue(name, "Required when live runs are enabled");
     if (!env.GITHUB_PRIVATE_KEY && !env.GITHUB_PRIVATE_KEY_FILE)
@@ -209,7 +209,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     projectNameModel: env.HERBIE_PROJECT_NAME_MODEL ?? env.HERBIE_GOAL_NAME_MODEL,
     environmentProvider: env.HERBIE_ENVIRONMENT_PROVIDER,
     e2b:
-      env.E2B_API_KEY && env.HERBIE_E2B_TEMPLATE && env.HERBIE_E2B_OPENAI_SECRET
+      env.E2B_API_KEY && env.HERBIE_E2B_OPENAI_SECRET
         ? {
             provider: "e2b" as const,
             apiKey: env.E2B_API_KEY,

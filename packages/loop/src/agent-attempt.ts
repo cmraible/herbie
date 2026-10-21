@@ -214,6 +214,7 @@ export async function runAgentAttempt(
               : await provider.create({
                   name,
                   resources: request.resources,
+                  signal: request.signal,
                   timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
                 })));
     if (!connected && !["collected", "deleted"].includes(checkpoint?.phase ?? "")) {

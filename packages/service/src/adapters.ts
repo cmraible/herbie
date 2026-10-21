@@ -76,6 +76,7 @@ export interface Adapters {
   mode: "demo" | "live";
   durableSessions?: boolean;
   environmentLimits?(): Promise<Record<keyof EnvironmentResources, number | null>>;
+  prepareEnvironment?(resources: EnvironmentResources | null): Promise<void>;
 
   pullRequestDiff?(userId: string, repository: string, number: number): Promise<string>;
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
