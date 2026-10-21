@@ -1,15 +1,17 @@
 [mcp_servers.elasticsearch]
-command = "docker"
-args = [
-  "run",
-  "--rm",
-  "-i",
-  "-e",
+command = "node"
+args = ["scripts/elasticsearch-mcp.mjs"]
+env_vars = [
   "ES_URL",
-  "-e",
   "ES_API_KEY",
-  "docker.elastic.co/mcp/elasticsearch",
-  "stdio",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "CODEX_PROXY_CERT",
+  "XDG_CACHE_HOME",
 ]
-env_vars = ["ES_URL", "ES_API_KEY"]
-startup_timeout_sec = 60
+startup_timeout_sec = 300
