@@ -22,6 +22,14 @@ export class GithubError extends Error {
     readonly status: number,
     message: string,
     readonly code?: "github_permissions_required",
+    readonly githubResponse?: {
+      method: string;
+      url: string;
+      status: number;
+      statusText: string;
+      metadata: Record<string, string>;
+      body: unknown;
+    },
   ) {
     super(message);
   }
@@ -134,9 +142,9 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    const errorBody = response.ok ? undefined : await response.text();
     const secondaryLimit =
-      response.status === 403 &&
-      /secondary rate limit|abuse detection/i.test(await response.clone().text());
+      response.status === 403 && /secondary rate limit|abuse detection/i.test(errorBody ?? "");
     if (
       response.status === 429 ||
       secondaryLimit ||
@@ -158,13 +166,46 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         Number.isFinite(reset) ? reset : 0,
       );
     }
-    if (!response.ok)
+    if (!response.ok) {
+      let details: unknown = errorBody;
+      try {
+        details = JSON.parse(errorBody!);
+      } catch {
+        // GitHub and upstream proxies may return plain text or HTML errors.
+      }
+      const metadata: Record<string, string> = {};
+      for (const header of [
+        "x-github-request-id",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+        "x-ratelimit-resource",
+        "retry-after",
+        "x-accepted-github-permissions",
+        "x-oauth-scopes",
+        "x-accepted-oauth-scopes",
+      ]) {
+        const value = response.headers.get(header);
+        if (value !== null) metadata[header] = value;
+      }
+      // Keep the public message stable; private diagnostics serialize and redact
+      // these response details using the existing size and credential limits.
       throw new GithubError(
         [401, 403, 404].includes(response.status) ? response.status : 502,
         response.status === 401
           ? "GitHub authorization expired or was revoked; log in again"
           : `GitHub request failed (${response.status})`,
+        undefined,
+        {
+          method: body === undefined ? "GET" : "POST",
+          url: `${api}${path}`,
+          status: response.status,
+          statusText: response.statusText,
+          metadata,
+          body: details,
+        },
       );
+    }
     return accept === "application/vnd.github.diff" ? response.text() : response.json();
   }
   function jwt() {
