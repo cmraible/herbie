@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, verify } from "node:crypto";
 import { createServer } from "node:http";
 import { test, type TestContext } from "node:test";
+import { diagnosticRecord } from "../src/diagnostic-log.js";
 import { createGithub, GithubError } from "../src/github.js";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
@@ -13,6 +14,7 @@ import { projectSchema } from "@herbie/contracts";
 export async function githubFixture(t: TestContext) {
   const requests: { path: string; authorization: string; body: unknown }[] = [];
   const fixture = {
+    errorResponse: undefined as { status: number; body: string } | undefined,
     private: false,
     archived: false,
     disabled: false,
@@ -43,6 +45,14 @@ export async function githubFixture(t: TestContext) {
     const path = req.url ?? "";
     requests.push({ path, authorization: req.headers.authorization ?? "", body });
     res.setHeader("content-type", "application/json");
+    if (fixture.errorResponse) {
+      res.statusCode = fixture.errorResponse.status;
+      res.setHeader("x-github-request-id", "fixture-request-id");
+      res.setHeader("x-ratelimit-remaining", "42");
+      res.setHeader("set-cookie", "private-cookie");
+      res.end(fixture.errorResponse.body);
+      return;
+    }
     const repository = {
       id: 42,
       full_name: "alice/project",
@@ -992,4 +1002,68 @@ test("pull request diff returns the complete raw diff using GitHub's diff media 
   fixture.patch =
     "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/image.png b/image.png\nBinary files differ\n";
   assert.equal(await github.pullRequestDiff("token", "alice/project", 8), fixture.patch);
+});
+
+test("GitHub failures retain response details in redacted private diagnostics", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.errorResponse = {
+    status: 403,
+    body: JSON.stringify({
+      message: "Resource not accessible by integration",
+      documentation_url: "https://docs.github.com/rest/branches",
+      errors: [{ resource: "Branch", code: "forbidden" }],
+      echoed: "fixture-user-token",
+      access_token: "private-response-token",
+    }),
+  };
+  await assert.rejects(github.repositories("fixture-user-token"), (error: unknown) => {
+    assert.ok(error instanceof GithubError);
+    assert.equal(error.status, 403);
+    assert.equal(error.message, "GitHub request failed (403)");
+    const record = diagnosticRecord(error, { component: "ci-repair" });
+    const serialized = JSON.stringify(record);
+    assert.match(serialized, /Resource not accessible by integration/);
+    assert.match(serialized, /docs.github.com/);
+    assert.match(serialized, /forbidden/);
+    assert.match(serialized, /fixture-request-id/);
+    assert.match(serialized, /x-ratelimit-remaining/);
+    assert.match(serialized, /GET/);
+    assert.match(serialized, /user\/installations/);
+    for (const secret of ["fixture-user-token", "private-response-token", "private-cookie"])
+      assert.ok(!serialized.includes(secret));
+    return true;
+  });
+});
+
+test("GitHub non-JSON failures preserve the upstream status and body", async (t) => {
+  const { github, fixture } = await githubFixture(t);
+  fixture.errorResponse = { status: 503, body: "Upstream service unavailable" };
+  await assert.rejects(github.repositories("fixture-user-token"), (error: unknown) => {
+    assert.ok(error instanceof GithubError);
+    assert.equal(error.status, 502);
+    assert.equal(error.githubResponse?.status, 503);
+    assert.equal(error.githubResponse?.body, "Upstream service unavailable");
+    return true;
+  });
+});
+
+test("GitHub secondary rate limit bodies still trigger the shared cooldown", async (t) => {
+  const { github, fixture, requests } = await githubFixture(t);
+  fixture.errorResponse = {
+    status: 403,
+    body: JSON.stringify({ message: "You have exceeded a secondary rate limit" }),
+  };
+  await assert.rejects(github.repositories("fixture-user-token"), (error: unknown) => {
+    assert.ok(error instanceof GithubError);
+    assert.equal(error.status, 403);
+    assert.deepEqual(error.githubResponse?.body, {
+      message: "You have exceeded a secondary rate limit",
+    });
+    return true;
+  });
+  await assert.rejects(github.repositories("fixture-user-token"), {
+    status: 429,
+    message: "GitHub rate limit cooldown",
+  });
+  assert.equal(requests.length, 1);
 });
