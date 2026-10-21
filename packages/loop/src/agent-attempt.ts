@@ -1,3 +1,4 @@
+import { parsePublicationDecision, type PublicationDecision } from "./publication-decision.js";
 import { executeDurably, SessionDetached, type DurableAttempt } from "./durable-execution.js";
 export {
   SessionDetached,
@@ -33,6 +34,7 @@ export const AGENT_RUNTIME_FILES = [
   "codex-process.js",
   "agent-runner.js",
   "feedback-decision.js",
+  "publication-decision.js",
   "diagnostic-log.js",
   "repository-checkout.js",
 ] as const;
@@ -40,8 +42,9 @@ export const AGENT_RUNTIME_FILES = [
 export interface AgentAttemptArtifact {
   baseCommit: string;
   patchBase64: string;
-  pullRequestTitle: string;
-  pullRequestBody: string;
+  pullRequestTitle?: string;
+  pullRequestBody?: string;
+  publicationDecision?: PublicationDecision;
   feedbackDecision?: FeedbackDecision;
   localChecksPassed?: true;
 }
@@ -67,10 +70,11 @@ export type AttemptRequest = {
 export interface AgentAttemptChanges {
   baseCommit: string;
   patch: Buffer;
+  publicationDecision?: PublicationDecision;
   feedbackDecision?: FeedbackDecision;
-  // Optional only for artifacts saved before agent-authored descriptions.
+  // Absent for explicit pause decisions and artifacts saved before agent-authored descriptions.
   pullRequestBody?: string;
-  // Optional only for artifacts saved before agent-authored titles.
+  // Absent for explicit pause decisions and artifacts saved before agent-authored titles.
   pullRequestTitle?: string;
   // Issued by the host only after the project and sandbox deletion succeed.
   verification?: {
@@ -492,19 +496,29 @@ export async function runAgentAttempt(
     if (patch.length > MAX_PATCH_BYTES) throw new Error("Repository patch exceeds its byte limit");
     if (patch.toString("base64") !== artifact.patchBase64)
       throw new Error("Invalid repository patch encoding");
+    const publicationDecision =
+      "publicationDecision" in artifact
+        ? parsePublicationDecision(artifact.publicationDecision)
+        : undefined;
+    if (publicationDecision && (patch.length > 0 || request.feedback || request.verifyLocally))
+      throw new Error(
+        "Pause decision requires an unchanged repository in an implementation attempt",
+      );
     if (
-      !("pullRequestBody" in artifact) ||
-      typeof artifact.pullRequestBody !== "string" ||
-      !artifact.pullRequestBody.trim() ||
-      artifact.pullRequestBody.length > 60_000
+      !publicationDecision &&
+      (!("pullRequestBody" in artifact) ||
+        typeof artifact.pullRequestBody !== "string" ||
+        !artifact.pullRequestBody.trim() ||
+        artifact.pullRequestBody.length > 60_000)
     )
       throw new Error("Invalid pull request description");
     if (
-      !("pullRequestTitle" in artifact) ||
-      typeof artifact.pullRequestTitle !== "string" ||
-      !artifact.pullRequestTitle.trim() ||
-      artifact.pullRequestTitle.length > 256 ||
-      /[\r\n]/.test(artifact.pullRequestTitle)
+      !publicationDecision &&
+      (!("pullRequestTitle" in artifact) ||
+        typeof artifact.pullRequestTitle !== "string" ||
+        !artifact.pullRequestTitle.trim() ||
+        artifact.pullRequestTitle.length > 256 ||
+        /[\r\n]/.test(artifact.pullRequestTitle))
     )
       throw new Error("Invalid pull request title");
     const feedbackDecision = request.feedback
@@ -522,10 +536,14 @@ export async function runAgentAttempt(
       throw new Error("Local verification did not pass");
     changes = {
       ...(feedbackDecision ? { feedbackDecision } : {}),
-      pullRequestTitle: artifact.pullRequestTitle.trim(),
+      ...(publicationDecision
+        ? { publicationDecision }
+        : {
+            pullRequestTitle: (artifact as AgentAttemptArtifact).pullRequestTitle!.trim(),
+            pullRequestBody: (artifact as AgentAttemptArtifact).pullRequestBody!,
+          }),
       baseCommit: artifact.baseCommit,
       patch,
-      pullRequestBody: artifact.pullRequestBody,
     };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {

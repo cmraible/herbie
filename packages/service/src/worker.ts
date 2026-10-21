@@ -94,6 +94,10 @@ export async function runWorkerOnce(
   };
   try {
     await requireLease();
+    if (changes?.publicationDecision && !recoveringPublication) {
+      await store.pauseWithoutPublication(job.id, workerId, changes);
+      return true;
+    }
     // A recovered ready artifact must enter publication before authorization can fail;
     // otherwise an auth outage would strand saved work as an attempt failure.
     if (changes && !publishing) {
@@ -183,6 +187,10 @@ export async function runWorkerOnce(
         "implementation",
       );
       await requireLease();
+      if (changes.publicationDecision) {
+        await store.pauseWithoutPublication(job.id, workerId, changes);
+        return true;
+      }
       await store.saveArtifact(job.id, workerId, changes);
     }
     if (leaseLost) throw new Error("Worker lease lost");
