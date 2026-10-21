@@ -314,7 +314,7 @@ test("missing runtime and credential-bearing repo URLs fail before provisioning"
   assert.equal(create.mock.callCount(), 0);
 });
 
-async function localFixture(t: TestContext, edits = "") {
+async function localFixture(t: TestContext, edits = "", prMetadata = true) {
   const { directory, sandbox, run } = await fixture(t);
   const bin = join(directory, "bin");
   await mkdir(bin);
@@ -322,7 +322,7 @@ async function localFixture(t: TestContext, edits = "") {
   const protocolFixture = fileURLToPath(new URL("./fixtures/project-attempt.ts", import.meta.url));
   await writeFile(
     join(bin, "codex"),
-    `#!/usr/bin/env node\n${edits}\n(await import('node:fs')).writeFileSync('../pr-title.txt', ${JSON.stringify(pullRequestTitle)});\n(await import('node:fs')).writeFileSync('../pr-description.md', ${JSON.stringify(pullRequestBody)});\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
+    `#!/usr/bin/env node\n${edits}\n${prMetadata ? `(await import("node:fs")).writeFileSync("../pr-title.txt", ${JSON.stringify(pullRequestTitle)}); (await import("node:fs")).writeFileSync("../pr-description.md", ${JSON.stringify(pullRequestBody)});` : ""}\nprocess.argv = [process.execPath, ${JSON.stringify(protocolFixture)}, 'success', ${JSON.stringify(record)}];\nawait import(${JSON.stringify(pathToFileURL(protocolFixture).href)});\n`,
     { mode: 0o700 },
   );
   sandbox.fs.createFolder.mock.mockImplementation(async (path) => {
@@ -1122,4 +1122,59 @@ test("environment identity persistence failure cleans up before executing the ag
   );
   assert.equal(sandbox.delete.mock.callCount(), 1);
   assert.equal(sandbox.process.executeCommand.mock.callCount(), 0);
+});
+
+test("agent can explicitly pause without PR metadata or repository changes", async (t) => {
+  const decision = {
+    action: "pause",
+    reason: "The request only asks for environment information.",
+  };
+  const { run, sandbox } = await localFixture(
+    t,
+    `const fs = await import('node:fs'); fs.writeFileSync('../publication-decision.json', ${JSON.stringify(JSON.stringify(decision))});`,
+    false,
+  );
+  const result = await run();
+  assert.deepEqual(result.publicationDecision, decision);
+  assert.equal(result.patch.length, 0);
+  assert.equal(result.pullRequestTitle, undefined);
+  assert.equal(result.pullRequestBody, undefined);
+  assert.equal(result.verification?.sandboxDeleted, true);
+  assert.equal(sandbox.delete.mock.callCount(), 1);
+});
+
+for (const scenario of ["changes", "invalid", "feedback", "repair"] as const)
+  test(`runner rejects pause decision with ${scenario}`, async (t) => {
+    const decision = { action: "pause", reason: scenario === "invalid" ? "" : "No PR needed" };
+    const { run, sandbox } = await localFixture(
+      t,
+      `const fs = await import('node:fs'); fs.writeFileSync('../publication-decision.json', ${JSON.stringify(JSON.stringify(decision))});` +
+        (scenario === "changes" ? `fs.writeFileSync('add.mjs', 'changed');` : ""),
+      false,
+    );
+    await assert.rejects(
+      run({ feedback: scenario === "feedback", verifyLocally: scenario === "repair" }),
+    );
+    assert.equal(sandbox.delete.mock.callCount(), 1);
+  });
+
+test("host rejects a forged pause artifact containing a patch", async (t) => {
+  const { run, sandbox } = await fixture(t);
+  sandbox.fs.downloadFileStream.mock.mockImplementation(async () =>
+    Readable.from([
+      Buffer.from(
+        JSON.stringify({
+          baseCommit: changes.baseCommit,
+          patchBase64: changes.patch.toString("base64"),
+          publicationDecision: { action: "pause", reason: "No PR" },
+        }),
+      ),
+    ]),
+  );
+  await assert.rejects(run(), (error: unknown) => {
+    assert.ok(error instanceof DaytonaAttemptError);
+    assert.match(String(error.errors[0]?.cause), /Pause decision requires an unchanged repository/);
+    return true;
+  });
+  assert.equal(sandbox.delete.mock.callCount(), 1);
 });

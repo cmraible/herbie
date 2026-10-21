@@ -36,6 +36,9 @@ const databaseProject = z.object({
 const artifactSchema = z.object({
   baseCommit: z.string(),
   patchBase64: z.string(),
+  publicationDecision: z
+    .object({ action: z.literal("pause"), reason: z.string().trim().min(1).max(2000) })
+    .optional(),
   pullRequestTitle: z
     .string()
     .trim()
@@ -227,11 +230,12 @@ async function advanceProject(
     stage: string;
     cycle: number;
     failure_acknowledged: boolean;
+    paused_without_pr: boolean;
     publication_blocked: boolean;
     publication_retry_count: number;
     lease_valid: boolean;
   }>(
-    "SELECT stage,cycle,failure_acknowledged,publication_blocked,publication_retry_count,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE project_id=$1 ORDER BY cycle",
+    "SELECT stage,cycle,failure_acknowledged,publication_blocked,publication_retry_count,(artifact->'publicationDecision'->>'action'='pause') IS TRUE AS paused_without_pr,(lease_expires_at>clock_timestamp()) IS TRUE AS lease_valid FROM jobs WHERE project_id=$1 ORDER BY cycle",
     [project.id],
   );
   const needsAttention = rows.some(
@@ -264,7 +268,10 @@ async function advanceProject(
   }
   const active = pending.some((job) => ["running", "publishing"].includes(job.stage));
   const state =
-    project.workflow === "single_pr" && !pending.length && !reviewing
+    project.workflow === "single_pr" &&
+    !pending.length &&
+    !reviewing &&
+    !(project.state === "paused" && rows.at(-1)?.paused_without_pr)
       ? "completed"
       : project.state === "paused" || (project.stopRequested === "pause" && !active)
         ? "paused"
@@ -661,6 +668,12 @@ export class Store {
           "UPDATE projects SET state='queued',stop_requested=NULL,updated_at=clock_timestamp() WHERE id=$1",
           [id],
         );
+        if (
+          project.workflow === "single_pr" &&
+          job.stage === "completed" &&
+          job.artifact?.publicationDecision
+        )
+          await insertJob(client, id, job.cycle + 1);
         await advanceProject(client, { ...project, state: "queued", stopRequested: null });
       } else if (job.stage === "running") {
         await client.query(
@@ -1055,6 +1068,52 @@ export class Store {
       return decodeJob(await loadJob(client, jobId), updated);
     });
   }
+  async pauseWithoutPublication(
+    jobId: string,
+    workerId: string,
+    changes: AgentAttemptChanges,
+  ): Promise<void> {
+    const artifact = artifactSchema.parse({
+      ...changes,
+      patchBase64: changes.patch.toString("base64"),
+    });
+    if (!artifact.publicationDecision || changes.patch.length)
+      throw conflict(
+        "Pausing without publication requires an explicit decision, no changes, and completed cleanup",
+      );
+    await this.transaction(async (client) => {
+      const { row, project } = await lockJob(client, jobId, workerId);
+      if (
+        !["running", "ready"].includes(row.stage) ||
+        project.state === "cancelled" ||
+        project.stopRequested === "cancel"
+      )
+        throw conflict("Only an unpublished attempt may pause without a pull request");
+      if (!hasValidPublicationEvidence(project.repository, changes))
+        throw conflict("Pause result does not match the project repository");
+      await client.query(
+        "UPDATE jobs SET stage='completed',artifact=$2,lease_owner=NULL,lease_expires_at=NULL WHERE id=$1",
+        [jobId, artifact],
+      );
+      // In-flight work settles under the same pause gate as a user pause.
+      const active = await client.query(
+        "SELECT id FROM jobs WHERE project_id=$1 AND stage IN ('running','publishing')",
+        [project.id],
+      );
+      await client.query(
+        "UPDATE projects SET state=$2,stop_requested=$3,error=NULL,updated_at=clock_timestamp() WHERE id=$1",
+        [project.id, active.rowCount ? "running" : "paused", active.rowCount ? "pause" : null],
+      );
+      await addEvent(
+        client,
+        project.id,
+        "agent_paused",
+        artifact.publicationDecision!.reason,
+        jobId,
+      );
+    });
+  }
+
   async beginPublication(jobId: string, workerId: string): Promise<boolean> {
     return this.transaction(async (client) => {
       const { row, project } = await lockJob(client, jobId);

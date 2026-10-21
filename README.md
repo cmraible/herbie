@@ -334,6 +334,13 @@ seconds for a matching terminal event, then the existing owned-process-group
 cleanup runs; unconfirmed termination remains a failure. There is no model
 fallback or retry.
 
+An implementation agent can explicitly finish without a pull request when no repository
+change is appropriate. It writes a pause decision and an explanation, leaving the
+repository unchanged. After confirmed sandbox cleanup, Herbie saves the result,
+completes the run, and pauses the project. The activity feed shows the explanation;
+Resume starts a new run. An empty patch without that explicit decision still requires
+attention. PR feedback and CI repair keep their existing decision flows.
+
 Creation is bounded at 120 seconds; each upload at 30 seconds; fresh runtime setup at
 240 seconds (snapshot configuration at 30); the turn at 20 minutes; each patch-extraction
 Git command and artifact download at 30 seconds; sandbox project execution at 22 minutes;

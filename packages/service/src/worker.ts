@@ -86,8 +86,18 @@ export async function runWorkerOnce(
   };
   let changes = job.artifact;
   let published: { url: string; number: number; branch: string } | undefined;
+  const requirePatch = (): void => {
+    if (changes?.patch.length === 0)
+      throw new PublicationBlockedError(
+        "The saved result contains no repository changes; there is no patch to publish",
+      );
+  };
   try {
     await requireLease();
+    if (changes?.publicationDecision && !recoveringPublication) {
+      await store.pauseWithoutPublication(job.id, workerId, changes);
+      return true;
+    }
     // A recovered ready artifact must enter publication before authorization can fail;
     // otherwise an auth outage would strand saved work as an attempt failure.
     if (changes && !publishing) {
@@ -108,6 +118,7 @@ export async function runWorkerOnce(
       await reportPublicationPhase("preflight_reconciliation");
       const existing = await adapters.reconcile(execution);
       if (!existing) {
+        requirePatch();
         if (!changes || !hasValidPublicationEvidence(job.project.repository, changes)) {
           await store.blockPublication(
             job.id,
@@ -176,6 +187,10 @@ export async function runWorkerOnce(
         "implementation",
       );
       await requireLease();
+      if (changes.publicationDecision) {
+        await store.pauseWithoutPublication(job.id, workerId, changes);
+        return true;
+      }
       await store.saveArtifact(job.id, workerId, changes);
     }
     if (leaseLost) throw new Error("Worker lease lost");
@@ -192,7 +207,10 @@ export async function runWorkerOnce(
     await reportPublicationPhase("preflight_reconciliation");
     const existing = await adapters.reconcile(execution);
     // Reconciliation can outlive the lease too; do not begin a new write from stale work.
-    if (!existing) await requireLease();
+    if (!existing) {
+      await requireLease();
+      requirePatch();
+    }
     if (existing) await reportPublicationPhase("state_persistence");
     const result =
       existing ??
@@ -233,7 +251,7 @@ export async function runWorkerOnce(
     // Detailed diagnostics stay in the run record and runtime logs, not UI responses.
     try {
       if (publishing && error instanceof PublicationBlockedError) {
-        await store.blockPublication(job.id, workerId, error.message);
+        await store.blockPublication(job.id, workerId, error.message, errorId);
       } else if (publishing) {
         const diagnostic = publicationDiagnostic(error, publicationPhase);
         const reason = publicationDiagnosticMessage(diagnostic);

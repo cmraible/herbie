@@ -692,3 +692,60 @@ test("repository discovery reports permission updates while preserving legacy re
   const legacy = await fetch(setup.base + "/api/repositories", { headers });
   assert.deepEqual(await legacy.json(), repositories);
 });
+
+for (const stage of ["ready", "publishing"] as const)
+  test(`empty saved patch at ${stage} stops automatic publication recovery`, async (t) => {
+    const setup = await fixture(t);
+    if (!setup) return;
+    const { project, jobId, artifact } = await setup.retryableProject();
+    const saved = (await setup.store.pool.query("SELECT artifact FROM jobs WHERE id=$1", [jobId]))
+      .rows[0].artifact;
+    saved.patchBase64 = "";
+    saved.verification.patchSha256 = createHash("sha256").update(Buffer.alloc(0)).digest("hex");
+    await setup.store.pool.query(
+      "UPDATE jobs SET artifact=$2,stage=$3,eligible_at=clock_timestamp() WHERE id=$1",
+      [jobId, saved, stage],
+    );
+    t.mock.method(console, "error", () => {});
+    assert.equal(await runWorkerOnce(setup.store, setup.adapters, "empty-patch-worker"), true);
+    const after = await setup.store.getProject(project.id);
+    assert.equal(after?.state, "needs_attention");
+    assert.match(after!.error!, /no repository changes/);
+    assert.ok(errorReference(after!.error!));
+    const row = (
+      await setup.store.pool.query("SELECT publication_blocked,artifact FROM jobs WHERE id=$1", [
+        jobId,
+      ])
+    ).rows[0];
+    assert.equal(row.publication_blocked, true);
+    assert.deepEqual(row.artifact, saved);
+    assert.equal(row.artifact.baseCommit, artifact.baseCommit);
+    assert.equal(setup.attempts, 0);
+    assert.equal(setup.publishes, 0);
+    assert.equal(setup.checks, 0);
+    assert.equal(await runWorkerOnce(setup.store, setup.adapters, "empty-patch-retry"), false);
+  });
+
+test("empty saved patch still reconciles a previously published PR", async (t) => {
+  const setup = await fixture(t);
+  if (!setup) return;
+  const { project, jobId } = await setup.retryableProject();
+  const saved = (await setup.store.pool.query("SELECT artifact FROM jobs WHERE id=$1", [jobId]))
+    .rows[0].artifact;
+  saved.patchBase64 = "";
+  saved.verification.patchSha256 = createHash("sha256").update(Buffer.alloc(0)).digest("hex");
+  await setup.store.pool.query(
+    "UPDATE jobs SET artifact=$2,eligible_at=clock_timestamp() WHERE id=$1",
+    [jobId, saved],
+  );
+  setup.adapters.reconcile = async (execution) => ({
+    state: "open",
+    url: "https://github.com/fixture-owner/fixture-project/pull/1",
+    number: 1,
+    branch: execution.branch,
+  });
+  await runWorkerOnce(setup.store, setup.adapters, "reconcile-empty-patch");
+  assert.equal((await setup.store.getProject(project.id))?.state, "awaiting_review");
+  assert.equal(setup.publishes, 0);
+  assert.equal(setup.attempts, 0);
+});

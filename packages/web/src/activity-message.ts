@@ -22,6 +22,8 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       return "Instructions updated. New runs will use them";
     case "updated":
       return "Project settings updated. New runs will use them";
+    case "agent_paused":
+      return `Agent paused without a pull request: ${event.message}`;
     case "pause":
       return "Project pause requested";
     case "resume":
@@ -40,7 +42,7 @@ export function activityMessage(project: Project, event: ProjectEvent): string |
       if (event.message.startsWith("Project completed in sandbox "))
         return event.type === "pr_feedback"
           ? "Review feedback considered"
-          : "Preparing pull request";
+          : "Agent finished working";
       return null;
     }
     case "publication_phase":
