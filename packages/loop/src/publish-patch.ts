@@ -92,7 +92,6 @@ export async function publishPatch(
   if (changes.patch.length > MAX_PATCH_BYTES)
     throw new Error("Repository patch exceeds its byte limit");
   const patch = Buffer.from(changes.patch);
-  const remoteUrl = `https://github.com/${repository}.git`;
   const { baseCommit } = changes;
   if (!hasValidPublicationEvidence(repository, changes)) {
     throw new Error("Matching successful project and cleanup evidence is required for this patch");
