@@ -1,7 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { bearer, deviceAuthorization } from "better-auth/plugins";
-import { getMigrations } from "better-auth/db/migration";
 import type { Pool } from "pg";
 import { z } from "zod";
 import { logFailure, registerDiagnosticSecret } from "./diagnostic-log.js";
@@ -307,6 +306,7 @@ export function createBetterAuth(
   return {
     auth,
     async migrate() {
+      const { getMigrations } = await import("better-auth/db/migration");
       const connection = await pool.connect();
       try {
         await connection.query("SELECT pg_advisory_lock(hashtext('herbie-better-auth-v1'))");

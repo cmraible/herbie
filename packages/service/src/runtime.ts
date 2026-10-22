@@ -10,7 +10,11 @@ import { createBetterAuth } from "./better-auth.js";
 import { createAuth } from "./auth.js";
 import { createGithub } from "./github.js";
 import { createLiveAdapters } from "./live.js";
-import { createDatabasePoolConfig, prepareDatabase } from "./database.js";
+import {
+  assertDatabaseSchemaCompatible,
+  createDatabasePoolConfig,
+  prepareDatabase,
+} from "./database.js";
 
 export async function createRuntime(startup?: StartupProgress) {
   startup?.begin("configuration");
@@ -51,7 +55,12 @@ export async function createRuntime(startup?: StartupProgress) {
       config.mode === "live" && config.github && github
         ? createBetterAuth({ ...config, github: config.github }, pool, github)
         : undefined;
-    await prepareDatabase(pool, config.mode, (phase) => startup?.begin(phase), identity?.migrate);
+    if (config.autoMigrate)
+      await prepareDatabase(pool, config.mode, (phase) => startup?.begin(phase), identity?.migrate);
+    else {
+      startup?.begin("schema-verification");
+      await assertDatabaseSchemaCompatible(pool);
+    }
     startup?.begin("auth-setup");
     const auth = identity?.auth ?? createAuth(config, new PgAuthStore(pool), github);
     startup?.begin("adapter-setup");

@@ -73,7 +73,7 @@ into `git-publication.ts`; publication evidence checks, lease/recovery state, an
 GitHub PR creation remain in the orchestration layer. Publication tests and loop
 typechecking pass.
 
-### 3. `refactor: separate database migrations from runtime construction`
+### 3. `refactor: separate database migrations from runtime construction` — complete
 
 Add an explicit migration command and schema compatibility checks. Separate
 Better Auth runtime construction from migration imports. Retain automatic Node
@@ -87,6 +87,11 @@ the Workers transaction-pool connection.
 
 Validation: compatible applications start without DDL; incompatible schema
 versions fail clearly before processing work.
+
+Completed with `pnpm --filter @herbie/service migrate`, `HERBIE_AUTO_MIGRATE=false`,
+and a schema version check before runtime startup. The existing Node startup
+migration path remains the default for rollout compatibility. Better Auth's
+migration module is loaded only by its explicit migration method.
 
 ### 4. `test: establish Workers and Supavisor compatibility`
 

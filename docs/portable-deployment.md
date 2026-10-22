@@ -106,7 +106,7 @@ release check, not a claim that a generic secret scan can prove absence of secre
   while older coordinators drain during rollout.
   Budget bounded writable `/tmp` and ephemeral storage for native Git publication.
   Run as UID/GID 1000 with a read-only root filesystem and no Linux capabilities.
-- Starting the process runs migrations even when `HERBIE_EXECUTION_ENABLED=false`.
+- Starting the process runs migrations by default, even when `HERBIE_EXECUTION_ENABLED=false`. Operators can run `pnpm --filter @herbie/service migrate` as a one-shot step and set `HERBIE_AUTO_MIGRATE=false` on application processes; those processes verify the recorded schema version before serving traffic.
   Smoke and staging tests must use an isolated database. A disabled worker alone
   is not isolation from production state.
 
