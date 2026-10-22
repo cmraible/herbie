@@ -58,7 +58,7 @@ Migration: none. Existing k3s behavior remains unchanged.
 Validation: existing checks pass; portable modules have no transitive imports of
 Node-only runtime adapters.
 
-### 2. `refactor: isolate publication transport and Git operations`
+### 2. `refactor: isolate publication transport and Git operations` — complete
 
 Separate publication policy and recovery from Git object construction/ref updates
 and GitHub PR operations. Keep native Git as the only implementation initially.
@@ -68,6 +68,10 @@ publication checkpoints.
 Migration: none.
 
 Validation: existing publication and recovery scenarios retain their behavior.
+Completed by extracting native Git object construction and conditional ref updates
+into `git-publication.ts`; publication evidence checks, lease/recovery state, and
+GitHub PR creation remain in the orchestration layer. Publication tests and loop
+typechecking pass.
 
 ### 3. `refactor: separate database migrations from runtime construction`
 
