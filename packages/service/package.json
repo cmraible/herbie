@@ -9,6 +9,7 @@
     "test": "tsx --test --test-concurrency=2 test/*.test.ts",
     "start": "tsx src/index.ts",
     "worker": "tsx src/worker-main.ts",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
     "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
@@ -22,7 +23,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.7",
     "@types/pg": "^8.15.6",
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "vitest": "^4.1.12"
   }
 }
