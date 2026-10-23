@@ -8,7 +8,8 @@
     "typecheck": "tsc --project tsconfig.test.json",
     "test": "tsx --test --test-concurrency=2 test/*.test.ts",
     "start": "tsx src/index.ts",
-    "worker": "tsx src/worker-main.ts"
+    "worker": "tsx src/worker-main.ts",
+    "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
     "@daytona/sdk": "0.220.0",

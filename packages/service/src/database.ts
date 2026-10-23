@@ -167,3 +167,22 @@ export async function prepareDatabase(
     await protectPrivateSchema(pool);
   }
 }
+
+export async function assertDatabaseSchemaCompatible(pool: Pool): Promise<void> {
+  let result;
+  try {
+    result = await pool.query<{ version: number }>(
+      "SELECT version FROM herbie_schema_version WHERE singleton=true",
+    );
+  } catch (cause) {
+    throw new Error(
+      "Database schema is not initialized; run `pnpm --filter @herbie/service migrate`",
+      { cause },
+    );
+  }
+  const version = result.rows[0]?.version;
+  if (version !== 1)
+    throw new Error(
+      `Incompatible database schema version ${version ?? "(missing)"}; this application requires version 1. Run the migration command before starting it.`,
+    );
+}

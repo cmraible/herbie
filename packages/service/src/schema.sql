@@ -256,3 +256,12 @@ ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS observer text;
 ALTER TABLE project_events ADD COLUMN IF NOT EXISTS transcript_offset bigint;
 CREATE UNIQUE INDEX IF NOT EXISTS project_events_transcript_offset ON project_events(agent_session_id,transcript_offset) WHERE transcript_offset IS NOT NULL;
 ALTER TABLE pr_feedback ADD COLUMN IF NOT EXISTS publication_started boolean NOT NULL DEFAULT false;
+
+-- Applications refuse to process work against an older or newer schema. The
+-- one-shot migration command advances this marker only after all DDL succeeds.
+CREATE TABLE IF NOT EXISTS herbie_schema_version (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  version integer NOT NULL
+);
+INSERT INTO herbie_schema_version(singleton,version) VALUES (true,1)
+ON CONFLICT (singleton) DO UPDATE SET version=EXCLUDED.version;

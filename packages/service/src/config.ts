@@ -26,6 +26,7 @@ export const environmentSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     HERBIE_MODE: z.literal("live").default("live"),
     HERBIE_EXECUTION_ENABLED: z.enum(["true", "false"]).optional(),
+    HERBIE_AUTO_MIGRATE: z.enum(["true", "false"]).default("true"),
     HERBIE_HOST: text.default("127.0.0.1"),
     HERBIE_PORT: z.coerce.number().int().min(1).max(65535).default(8787),
     HERBIE_PUBLIC_URL: httpUrl.optional(),
@@ -200,6 +201,7 @@ export async function readConfig(environment: NodeJS.ProcessEnv = process.env) {
           }
         : undefined,
     executionEnabled: env.HERBIE_EXECUTION_ENABLED === "true",
+    autoMigrate: env.HERBIE_AUTO_MIGRATE === "true",
     allowedGithubUserId: mode === "live" ? env.HERBIE_ALLOWED_GITHUB_USER_ID : undefined,
     deploymentId: env.HERBIE_DEPLOYMENT_ID,
     imageRevision: env.HERBIE_IMAGE_REVISION,
