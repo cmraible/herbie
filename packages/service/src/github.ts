@@ -922,6 +922,23 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
         latest.head.sha !== head
       )
         return false;
+      // GitHub defaults to a merge commit, which many repositories disable.
+      // Prefer squash, matching Herbie's ship workflow, but honor repository settings.
+      const methods = z
+        .object({
+          allow_squash_merge: z.boolean(),
+          allow_merge_commit: z.boolean(),
+          allow_rebase_merge: z.boolean(),
+        })
+        .parse(await request(`/repos/${repository}`, token));
+      const mergeMethod = methods.allow_squash_merge
+        ? "squash"
+        : methods.allow_merge_commit
+          ? "merge"
+          : methods.allow_rebase_merge
+            ? "rebase"
+            : null;
+      if (!mergeMethod) return false;
       try {
         const result = z
           .object({ merged: z.boolean() })
@@ -929,7 +946,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
             await request(
               `${path}/merge`,
               token,
-              { sha: head },
+              { sha: head, merge_method: mergeMethod },
               "application/vnd.github+json",
               "PUT",
             ),

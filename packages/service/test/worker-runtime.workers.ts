@@ -14,14 +14,30 @@ it("runs request handling and Web Crypto inside the Workers runtime", async () =
   });
 });
 
+it("supports credential encryption and RSA signing primitives in the Workers runtime", async () => {
+  const response = await SELF.fetch("https://workers.test/crypto", {
+    method: "POST",
+  });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    credentialRoundTrip: true,
+    signatureValid: true,
+  });
+});
+
 it("rejects unsupported request methods in the Workers runtime", async () => {
   const response = await SELF.fetch("https://workers.test/", { method: "PUT" });
   expect(response.status).toBe(405);
 });
 
-it("loads the configured PostgreSQL driver in the Workers runtime", async () => {
+it("loads the database, auth, and Daytona SDK entrypoints in the Workers runtime", async () => {
   const response = await SELF.fetch("https://workers.test/", { method: "GET" });
 
   expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({ postgresPoolAvailable: true });
+  await expect(response.json()).resolves.toEqual({
+    postgresPoolAvailable: true,
+    betterAuthAvailable: true,
+    daytonaAvailable: true,
+  });
 });

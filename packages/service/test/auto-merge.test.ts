@@ -12,6 +12,9 @@ const oldHead = "b".repeat(40);
 
 for (const scenario of [
   "approved",
+  "merge_only",
+  "rebase_only",
+  "no_merge_method",
   "unapproved",
   "outdated",
   "changes_requested",
@@ -20,6 +23,9 @@ for (const scenario of [
 ] as const) {
   test(`merge approved owner PR: ${scenario}`, async (t) => {
     let merges = 0;
+    const expectedMethod =
+      scenario === "merge_only" ? "merge" : scenario === "rebase_only" ? "rebase" : "squash";
+    const shouldMerge = ["approved", "merge_only", "rebase_only"].includes(scenario);
     const server = createServer(async (req, res) => {
       let result: unknown;
       const path = req.url;
@@ -27,9 +33,15 @@ for (const scenario of [
         assert.equal(req.method, "PUT");
         let body = "";
         for await (const chunk of req) body += chunk;
-        assert.deepEqual(JSON.parse(body), { sha: head });
+        assert.deepEqual(JSON.parse(body), { sha: head, merge_method: expectedMethod });
         merges++;
         result = { merged: true };
+      } else if (path === "/repos/org/repo") {
+        result = {
+          allow_squash_merge: !["merge_only", "rebase_only", "no_merge_method"].includes(scenario),
+          allow_merge_commit: scenario === "merge_only",
+          allow_rebase_merge: scenario === "rebase_only",
+        };
       } else if (path === "/repos/org/repo/pulls/1") {
         result = {
           number: 1,
@@ -100,8 +112,8 @@ for (const scenario of [
       { api, oauth: api },
     );
     const merged = await github.mergeApproved("fixture", "org/repo", 1, "herbie/run", head, "7");
-    assert.equal(merged, scenario === "approved");
-    assert.equal(merges, scenario === "approved" ? 1 : 0);
+    assert.equal(merged, shouldMerge);
+    assert.equal(merges, shouldMerge ? 1 : 0);
   });
 }
 
