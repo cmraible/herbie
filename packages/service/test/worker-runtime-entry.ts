@@ -14,6 +14,14 @@ export default {
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, message);
       const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, encrypted);
+      const tampered = new Uint8Array(encrypted);
+      tampered[tampered.length - 1] ^= 1;
+      let tamperedCiphertextRejected = false;
+      try {
+        await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, tampered);
+      } catch {
+        tamperedCiphertextRejected = true;
+      }
 
       const signingKey = await crypto.subtle.generateKey(
         {
@@ -40,6 +48,7 @@ export default {
       return Response.json({
         credentialRoundTrip:
           new TextDecoder().decode(decrypted) === new TextDecoder().decode(message),
+        tamperedCiphertextRejected,
         signatureValid,
       });
     }

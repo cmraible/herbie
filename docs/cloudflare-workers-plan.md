@@ -121,10 +121,11 @@ it is not an acceptance requirement or mandatory dependency.
 Migration: test resources only, using an isolated database and repository.
 
 The local harness runs request handling, Web Crypto AES-GCM credential encryption
-and RSA signing round trips, and imports the `pg`, Better Auth, and Daytona SDK
-entrypoints in `workerd` via `pnpm --filter @herbie/service test:workers`. This
-establishes runtime primitive support and that these package entrypoints load; it
-does not exercise the service's encryption or signing code, prove that `pg` can
+and RSA signing round trips, rejects a modified AES-GCM ciphertext, and imports
+the `pg`, Better Auth, and Daytona SDK entrypoints in `workerd` via
+`pnpm --filter @herbie/service test:workers`. This establishes runtime primitive
+support and that these package entrypoints load; it does not exercise the service's
+encryption or signing code, prove that `pg` can
 open a TLS connection to Supavisor, or validate service queries. Supavisor
 transactions, auth/provider flows, Daytona operations, Git publication, and
 performance measurements remain outstanding and require isolated test resources.
