@@ -22,6 +22,7 @@ it("supports credential encryption and RSA signing primitives in the Workers run
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual({
     credentialRoundTrip: true,
+    tamperedCiphertextRejected: true,
     signatureValid: true,
   });
 });
