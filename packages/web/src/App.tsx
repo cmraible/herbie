@@ -153,6 +153,7 @@ export function App() {
               reviewer: project.reviewers?.join(", ") ?? "",
               targetWip: String(project.targetWip),
               resources: project.resources,
+              setupScript: project.setupScript,
               model: project.model,
               reasoningEffort: project.reasoningEffort,
             },
@@ -530,6 +531,7 @@ export function App() {
             ? projectEdit.reviewer.split(",").map((login) => login.trim())
             : null,
           resources: projectEdit.resources,
+          setupScript: projectEdit.setupScript,
           model: projectEdit.model,
           reasoningEffort: projectEdit.reasoningEffort,
           targetWip: Number(projectEdit.targetWip),
@@ -1253,6 +1255,27 @@ export function App() {
                       value={formDraft.resources}
                       onChange={(resources) => editForm({ resources })}
                     />
+                    <label>
+                      Setup script (optional)
+                      <textarea
+                        disabled={busy}
+                        rows={8}
+                        maxLength={32000}
+                        spellCheck={false}
+                        aria-describedby="environment-setup-help"
+                        placeholder={"apt-get update\napt-get install -y python3 python3-pip"}
+                        value={formDraft.setupScript}
+                        onChange={(event) => editForm({ setupScript: event.target.value })}
+                      />
+                    </label>
+                    <p id="environment-setup-help" className="subtle-note">
+                      For E2B environments. Runs as root with Bash on Ubuntu 24.04 while building
+                      the environment. Docker, Compose, and Buildx are available. Installed tools
+                      are cached for future runs. Install shared tools in /usr/local or /opt so the
+                      agent can use them. The repository is checked out afterward. Setup has a
+                      10-minute limit. Keep credentials out of this script and the cached
+                      environment.
+                    </p>
                     {savePhase === "preparing" && (
                       <div className="status-message" role="status">
                         Preparing your environment. This can take several minutes. Your project will

@@ -23,7 +23,7 @@ import {
   type AttemptDiagnostic,
 } from "./attempt-diagnostics.js";
 
-import { environmentPath } from "./environment-runtime.js";
+import { agentNodePath, environmentPath } from "./environment-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 
@@ -54,6 +54,7 @@ export type AttemptRequest = {
   onEnvironment?: (environment: { provider: string; id: string }) => Promise<void>;
   signal?: AbortSignal;
   resources?: { cpu: number; memory: number; disk: number };
+  setupScript?: string;
   repoUrl: string;
   // Resolve only during checkout, never persist in a checkpoint or agent input.
   checkoutToken?: () => Promise<string>;
@@ -218,6 +219,7 @@ export async function runAgentAttempt(
               : await provider.create({
                   name,
                   resources: request.resources,
+                  setupScript: request.setupScript,
                   signal: request.signal,
                   timeoutMs: (request.verifyLocally ? 45 : 35) * 60_000,
                 })));
@@ -350,7 +352,7 @@ export async function runAgentAttempt(
           ),
           `${authDirectory}/input.json`,
         );
-        const command = `node ${directory}/repository-checkout.js ${authDirectory}/input.json`;
+        const command = `${agentNodePath} ${directory}/repository-checkout.js ${authDirectory}/input.json`;
         const cloned = checkpoint
           ? await executeDurably(
               sandbox,
@@ -383,7 +385,7 @@ export async function runAgentAttempt(
       await emit(`Running project in sandbox ${sandbox.id}`);
       // Only the generated UUID path enters the shell. The project and repo URL never do.
       request.signal?.throwIfAborted();
-      const commandText = `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} node ${directory}/agent-runner.js`;
+      const commandText = `chown -R compat:compat ${directory} && runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} ${agentNodePath} ${directory}/agent-runner.js`;
       await save({ phase: "running" });
       const observer = new AbortController();
       const observerSignal = request.signal

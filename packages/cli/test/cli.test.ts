@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, readFile, stat, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/cli.js";
@@ -103,6 +103,44 @@ const project = {
   pullRequest: null,
   error: null,
 };
+
+test("start and edit read setup scripts from files, including an empty file to clear setup", async () => {
+  const scripts: string[] = [];
+  const app = await fixture((request, response) => {
+    let raw = "";
+    request.on("data", (chunk) => {
+      raw += chunk;
+    });
+    request.on("end", () => {
+      const input = JSON.parse(raw);
+      scripts.push(input.setupScript);
+      json(response, { ...project, setupScript: input.setupScript });
+    });
+  });
+  try {
+    await app.invoke(["login", "--url", app.baseUrl]);
+    const scriptFile = join(app.configPath, "..", "setup.sh");
+    const script = "apt-get update\napt-get install -y python3\n";
+    await writeFile(scriptFile, script);
+    assert.equal(
+      await app.invoke([
+        "start",
+        "--repo",
+        "octocat/demo",
+        "--prompt",
+        "Work",
+        "--setup-script",
+        scriptFile,
+      ]),
+      0,
+    );
+    await writeFile(scriptFile, "");
+    assert.equal(await app.invoke(["edit", projectId, "--setup-script", scriptFile]), 0);
+    assert.deepEqual(scripts, [script, ""]);
+  } finally {
+    await app.close();
+  }
+});
 
 test("start sends a custom name and preserves the request ID on retry", async () => {
   const requests: { key: string | string[] | undefined; body: unknown }[] = [];

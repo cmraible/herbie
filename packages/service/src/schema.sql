@@ -209,6 +209,7 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS model text NOT NULL DEFAULT 'gpt-6
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasoning_effort text NOT NULL DEFAULT 'low';
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS setup_script text NOT NULL DEFAULT '' CHECK (length(setup_script) <= 32000);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS resources jsonb CHECK (resources IS NULL OR (
   jsonb_typeof(resources)='object' AND resources ?& ARRAY['cpu','memory','disk']
   AND (resources->>'cpu')::numeric > 0 AND (resources->>'memory')::numeric > 0 AND (resources->>'disk')::numeric > 0
@@ -263,5 +264,5 @@ CREATE TABLE IF NOT EXISTS herbie_schema_version (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   version integer NOT NULL
 );
-INSERT INTO herbie_schema_version(singleton,version) VALUES (true,1)
+INSERT INTO herbie_schema_version(singleton,version) VALUES (true,2)
 ON CONFLICT (singleton) DO UPDATE SET version=EXCLUDED.version;

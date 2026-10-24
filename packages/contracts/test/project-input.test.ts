@@ -99,3 +99,14 @@ test("reviewer accepts GitHub usernames and can be cleared on edit", async () =>
     assert.equal(projectUpdate.safeParse({ reviewers: [reviewer] }).success, false);
   }
 });
+
+test("setup scripts default for old projects, preserve Bash contents, and allow clearing", async () => {
+  const { projectUpdate } = await import("../src/index.js");
+  const input = { repository: "demo/example", prompt: "Work" };
+  const setupScript = "#!/bin/bash\n  echo 'quoted'\n";
+  assert.equal(projectInput.parse(input).setupScript, "");
+  assert.equal(projectInput.parse({ ...input, setupScript }).setupScript, setupScript);
+  assert.deepEqual(projectUpdate.parse({ setupScript: "" }), { setupScript: "" });
+  for (const script of ["x".repeat(32_001), "echo\0bad"])
+    assert.equal(projectInput.safeParse({ ...input, setupScript: script }).success, false);
+});

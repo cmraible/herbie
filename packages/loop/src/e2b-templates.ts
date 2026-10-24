@@ -7,7 +7,8 @@ import {
   type BuildInfo,
   type TemplateBuildStatus,
 } from "e2b";
-import { installEnvironmentRuntime } from "./environment-runtime.js";
+import { environmentBaseImage, installEnvironmentRuntime } from "./environment-runtime.js";
+import { setupScriptCommand } from "./setup-script.js";
 
 type Resources = { cpu: number; memory: number; disk: number };
 type Build = Pick<BuildInfo, "templateId" | "buildId"> & { status: TemplateBuildStatus };
@@ -18,6 +19,7 @@ export interface E2BTemplateApi {
     name: string,
     resources: Resources,
     signal: AbortSignal,
+    setupScript?: string,
   ): Promise<Pick<Build, "templateId" | "buildId">>;
   status(
     build: Pick<Build, "templateId" | "buildId">,
@@ -25,13 +27,18 @@ export interface E2BTemplateApi {
   ): Promise<TemplateBuildStatus>;
 }
 
-export function e2bTemplateName(config: Pick<Config, "template">, resources: Resources) {
+export function e2bTemplateName(
+  config: Pick<Config, "template">,
+  resources: Resources,
+  setupScript = "",
+) {
   const version = createHash("sha256")
     .update(
       JSON.stringify([
-        1,
-        config.template ?? "ubuntu:22.04",
+        2,
+        config.template ?? environmentBaseImage,
         installEnvironmentRuntime,
+        setupScriptCommand(setupScript),
         resources.cpu,
         resources.memory,
         resources.disk,
@@ -68,20 +75,22 @@ export function createE2BTemplateApi(
       )[0];
       return latest ? { templateId, buildId: latest.buildID, status: latest.status } : null;
     },
-    build: (name, resources, signal) =>
-      Template.buildInBackground(
-        config.template
-          ? Template().fromTemplate(config.template).setUser("root")
-          : Template().fromImage("ubuntu:22.04").setUser("root").runCmd(installEnvironmentRuntime),
-        name,
-        {
-          ...options,
-          signal,
-          cpuCount: resources.cpu,
-          memoryMB: resources.memory * 1024,
-          minFreeDiskMb: resources.disk * 1024,
-        },
-      ),
+    build: (name, resources, signal, setupScript = "") => {
+      let template = config.template
+        ? Template().fromTemplate(config.template).setUser("root")
+        : Template()
+            .fromImage(environmentBaseImage)
+            .setUser("root")
+            .runCmd(installEnvironmentRuntime);
+      if (setupScript) template = template.runCmd(setupScriptCommand(setupScript));
+      return Template.buildInBackground(template, name, {
+        ...options,
+        signal,
+        cpuCount: resources.cpu,
+        memoryMB: resources.memory * 1024,
+        minFreeDiskMb: resources.disk * 1024,
+      });
+    },
     status: async (build, signal) =>
       (await Template.getBuildStatus(build, { ...options, signal })).status,
   };
@@ -106,12 +115,12 @@ export function createE2BTemplateResolver(
   pause: (signal: AbortSignal) => Promise<void> = (signal) => delay(2000, undefined, { signal }),
   waitTimeoutMs = 15 * 60_000,
 ) {
-  return async (resources: Resources, signal?: AbortSignal): Promise<string> => {
+  return async (resources: Resources, signal?: AbortSignal, setupScript = ""): Promise<string> => {
     signal?.throwIfAborted();
     for (const value of Object.values(resources))
       if (!Number.isSafeInteger(value) || value <= 0 || !Number.isSafeInteger(value * 1024))
         throw new Error("E2B resources must be positive whole numbers in cores and GiB.");
-    const name = e2bTemplateName(config, resources);
+    const name = e2bTemplateName(config, resources, setupScript);
     const key = createHash("sha256").update(config.apiKey).update(name).digest("hex");
     let work = pending.get(key);
     if (!work) {
@@ -121,7 +130,10 @@ export function createE2BTemplateResolver(
         let build = await api.lookup(name, buildSignal);
         if (!build || build.status === "error") {
           try {
-            build = { ...(await api.build(name, resources, buildSignal)), status: "building" };
+            build = {
+              ...(await api.build(name, resources, buildSignal, setupScript)),
+              status: "building",
+            };
           } catch (error) {
             // Another coordinator may have registered the same template name.
             build = await api.lookup(name, buildSignal);

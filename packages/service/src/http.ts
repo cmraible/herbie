@@ -64,20 +64,20 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   });
   response.end(JSON.stringify(value));
 }
-async function body(request: IncomingMessage): Promise<Buffer> {
+async function body(request: IncomingMessage, maxBytes = 65_536): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
     const data: unknown = chunk;
     if (!Buffer.isBuffer(data)) throw new HttpError(400, "Invalid request body");
     length += data.length;
-    if (length > 65_536) throw new HttpError(413, "Request body too large");
+    if (length > maxBytes) throw new HttpError(413, "Request body too large");
     chunks.push(data);
   }
   return Buffer.concat(chunks);
 }
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  const raw = await body(request);
+async function readJson(request: IncomingMessage, maxBytes?: number): Promise<unknown> {
+  const raw = await body(request, maxBytes);
   if (!raw.length) return {};
   if (!request.headers["content-type"]?.startsWith("application/json"))
     throw new HttpError(415, "Use application/json");
@@ -409,10 +409,18 @@ export function createApiServer(options: ApiOptions) {
       function requirePreparedEnvironment(
         repository: string,
         resources: import("@herbie/contracts").EnvironmentResources | null,
+        setupScript: string,
       ) {
-        if (!adapters.prepareEnvironment) return;
+        if (!adapters.prepareEnvironment) {
+          if (setupScript && adapters.mode === "live")
+            throw new HttpError(400, "Cached setup scripts require the E2B environment provider.");
+          return;
+        }
         const id = request.headers["x-herbie-environment-preparation"];
-        if (typeof id !== "string" || !preparations.ready(id, userId, repository, resources))
+        if (
+          typeof id !== "string" ||
+          !preparations.ready(id, userId, repository, resources, setupScript)
+        )
           throw new HttpError(
             409,
             "Prepare the environment before saving the project.",
@@ -421,17 +429,24 @@ export function createApiServer(options: ApiOptions) {
       }
       if (method === "POST" && url.pathname === "/api/project-environments") {
         requireExecution();
-        const input = environmentPreparationInput.parse(await readJson(request));
+        const input = environmentPreparationInput.parse(await readJson(request, 262_144));
         let repository: string;
+        let resources = input.resources ?? null;
+        let setupScript = input.setupScript ?? "";
         if ("projectId" in input) {
           const project = await store.getProject(input.projectId, userId);
           if (!project) throw new HttpError(404, "Project not found");
           if (project.state === "cancelled") throw new HttpError(409, "Project is cancelled");
           repository = project.repository;
+          resources = input.resources === undefined ? project.resources : input.resources;
+          setupScript =
+            input.setupScript === undefined ? (project.setupScript ?? "") : input.setupScript;
         } else repository = input.repository;
-        await validateResources(input.resources);
+        await validateResources(resources);
         await adapters.authorize(userId, repository);
-        const preparation = preparations.start(userId, repository, input.resources);
+        if (setupScript && !adapters.prepareEnvironment && adapters.mode === "live")
+          throw new HttpError(400, "Cached setup scripts require the E2B environment provider.");
+        const preparation = preparations.start(userId, repository, resources, setupScript);
         json(response, 202, { id: preparation.id, state: preparation.state });
         return;
       }
@@ -472,11 +487,11 @@ export function createApiServer(options: ApiOptions) {
       }
       if (method === "POST" && url.pathname === "/api/projects") {
         requireExecution();
-        const input = projectInput.parse(await readJson(request));
+        const input = projectInput.parse(await readJson(request, 262_144));
         await validateResources(input.resources);
         const key = z.string().uuid().parse(request.headers["idempotency-key"]);
         await adapters.authorize(userId, input.repository);
-        requirePreparedEnvironment(input.repository, input.resources);
+        requirePreparedEnvironment(input.repository, input.resources, input.setupScript);
         const result = await store.createProject(userId, input, adapters.mode, key);
         projectJson(result.created ? 201 : 200, result.project);
         return;
@@ -503,18 +518,30 @@ export function createApiServer(options: ApiOptions) {
         const project = await store.getProject(id, userId);
         if (!project) throw new HttpError(404, "Project not found");
         if (method === "POST" && !projectPath[2]) {
-          const input = projectUpdate.parse(await readJson(request));
+          const input = projectUpdate.parse(await readJson(request, 262_144));
           await validateResources(input.resources);
+          const resources = input.resources === undefined ? project.resources : input.resources;
+          const setupScript =
+            input.setupScript === undefined ? (project.setupScript ?? "") : input.setupScript;
           if (
-            adapters.prepareEnvironment &&
-            input.resources !== undefined &&
-            !sameEnvironment(input.resources, project.resources)
+            (adapters.prepareEnvironment && !sameEnvironment(resources, project.resources)) ||
+            setupScript !== (project.setupScript ?? "")
           ) {
             requireExecution();
             await adapters.authorize(userId, project.repository);
-            requirePreparedEnvironment(project.repository, input.resources);
+            requirePreparedEnvironment(project.repository, resources, setupScript);
           }
-          projectJson(200, await store.updateProject(id, userId, input));
+          projectJson(
+            200,
+            await store.updateProject(
+              id,
+              userId,
+              input,
+              input.resources !== undefined || input.setupScript !== undefined
+                ? { resources: project.resources, setupScript: project.setupScript }
+                : undefined,
+            ),
+          );
           return;
         }
         if (method === "GET" && !projectPath[2]) {

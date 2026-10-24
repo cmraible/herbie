@@ -23,10 +23,17 @@ test("template identities track resource sizes and runtime base without embeddin
   for (const key of ["cpu", "memory", "disk"] as const)
     assert.notEqual(name, e2bTemplateName({}, { ...resources, [key]: resources[key] + 1 }));
   assert.notEqual(name, e2bTemplateName({ template: "custom-base" }, resources));
+  assert.notEqual(name, e2bTemplateName({}, resources, "apt-get install -y python3"));
+  assert.notEqual(
+    e2bTemplateName({}, resources, "echo first"),
+    e2bTemplateName({}, resources, "echo second"),
+  );
 });
 
 test("template builds use E2B's SDK and GiB conversions for both generated and existing bases", async (t) => {
   let calls = 0;
+  const script = "echo setup-ready\n";
+  const encoded = Buffer.from(script).toString("base64");
   t.mock.method(
     Template,
     "buildInBackground",
@@ -40,11 +47,17 @@ test("template builds use E2B's SDK and GiB conversions for both generated and e
       assert.equal(options?.requestTimeoutMs, 30_000);
       assert.ok(options?.signal);
       const recipe = await Template.toJSON(template, false);
-      if (calls === 1) {
-        assert.ok(recipe.includes("ubuntu:22.04"));
+      if (calls % 2 === 1) {
+        assert.ok(recipe.includes("ubuntu:24.04"));
         assert.ok(recipe.includes("codex"));
       } else {
         assert.ok(recipe.includes("custom-base"));
+      }
+      if (calls > 2) {
+        assert.ok(recipe.includes(encoded));
+        assert.ok(recipe.includes("600s bash -euo pipefail"));
+        assert.ok(recipe.includes("docker compose version"));
+        if (calls === 3) assert.ok(recipe.indexOf("docker-ce=") < recipe.indexOf(encoded));
       }
       return { ...ids, name: "herbie-sized", alias: "herbie-sized", tags: [] };
     },
@@ -56,7 +69,14 @@ test("template builds use E2B's SDK and GiB conversions for both generated and e
     resources,
     signal,
   );
-  assert.equal(calls, 2);
+  for (const template of [undefined, "custom-base"])
+    await createE2BTemplateApi({ apiKey: "test-key", template }).build(
+      "herbie-sized",
+      resources,
+      signal,
+      script,
+    );
+  assert.equal(calls, 4);
 });
 
 test("E2B template lookup distinguishes absence, API failures, and unfinished builds", async () => {
@@ -271,4 +291,34 @@ test("accounts do not share builds and invalid or cancelled requests make no API
   await assert.rejects(resolve({ ...resources, cpu: 0 }), /positive whole/);
   await assert.rejects(resolve({ ...resources, memory: 1.5 }), /positive whole/);
   await assert.rejects(resolve(resources, AbortSignal.abort(new Error("Stopped"))), /Stopped/);
+});
+
+test("different setup scripts build separately while identical scripts share and reuse a template", async () => {
+  const ready = new Set<string>();
+  const scripts: string[] = [];
+  const resolve = createE2BTemplateResolver(
+    { apiKey: "script-cache" },
+    {
+      lookup: async (name) => (ready.has(name) ? { ...ids, status: "ready" } : null),
+      build: async (name, _resources, _signal, script) => {
+        scripts.push(script!);
+        ready.add(name);
+        return ids;
+      },
+      status: async () => "ready",
+    },
+    pause,
+  );
+  const first = "apt-get install -y python3";
+  const second = "apt-get install -y ruby";
+  const names = await Promise.all([
+    resolve(resources, undefined, first),
+    resolve(resources, undefined, first),
+    resolve(resources, undefined, second),
+  ]);
+  assert.equal(names[0], names[1]);
+  assert.notEqual(names[0], names[2]);
+  assert.deepEqual(scripts.sort(), [first, second].sort());
+  assert.equal(await resolve(resources, undefined, first), names[0]);
+  assert.equal(scripts.length, 2);
 });

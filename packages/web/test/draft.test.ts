@@ -12,6 +12,7 @@ test("a new project needs only a repository and prompt", () => {
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
+    setupScript: "",
   });
 });
 
@@ -36,6 +37,7 @@ test("legacy named drafts preserve the original request for idempotent retries",
     model: "gpt-6-luna",
     reasoningEffort: "low",
     resources: null,
+    setupScript: "",
   });
 });
 
@@ -94,4 +96,11 @@ test("reviewer survives saved drafts and blank usernames use the owner", () => {
   assert.equal(parseDraft({ ...draft, reviewer: " " }).reviewers, undefined);
   const { reviewer: _reviewer, ...legacy } = draft;
   assert.equal(draftSchema.parse(legacy).reviewer, "");
+});
+
+test("setup scripts survive draft restoration and old drafts default to no setup", () => {
+  const draft = { ...newDraft("demo/example"), prompt: "Work", setupScript: "echo ready\n" };
+  assert.equal(parseDraft(draftSchema.parse(draft)).setupScript, draft.setupScript);
+  const { setupScript: _script, ...oldDraft } = draft;
+  assert.equal(draftSchema.parse(oldDraft).setupScript, "");
 });

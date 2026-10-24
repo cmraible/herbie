@@ -181,8 +181,8 @@ export async function assertDatabaseSchemaCompatible(pool: Pool): Promise<void> 
     );
   }
   const version = result.rows[0]?.version;
-  if (version !== 1)
+  if (version !== 2)
     throw new Error(
-      `Incompatible database schema version ${version ?? "(missing)"}; this application requires version 1. Run the migration command before starting it.`,
+      `Incompatible database schema version ${version ?? "(missing)"}; this application requires version 2. Run the migration command before starting it.`,
     );
 }

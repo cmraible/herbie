@@ -28,7 +28,7 @@ test("creates a bounded minimum-size sandbox, executes the probe, and waits for 
   assert.match(params.name ?? "", /^herbie-smoke-[0-9a-f-]+$/);
   assert.deepEqual(params, {
     name: params.name,
-    image: "ubuntu:22.04",
+    image: "ubuntu:24.04",
     resources: { cpu: 1, memory: 1, disk: 1 },
     networkBlockAll: true,
     ttlMinutes: 5,

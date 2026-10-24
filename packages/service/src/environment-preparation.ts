@@ -7,6 +7,7 @@ interface Preparation {
   owner: string;
   repository: string;
   resources: EnvironmentResources | null;
+  setupScript: string;
   state: State;
   expires: number;
 }
@@ -19,7 +20,9 @@ export function sameEnvironment(a: EnvironmentResources | null, b: EnvironmentRe
 // Projects are persisted only after preparation. E2B retains the actual build
 // state, so retrying after a service restart can reconnect to an existing build.
 export function createEnvironmentPreparations(
-  prepare: ((resources: EnvironmentResources | null) => Promise<void>) | undefined,
+  prepare:
+    | ((resources: EnvironmentResources | null, setupScript?: string) => Promise<void>)
+    | undefined,
   reportFailure: (error: unknown) => void,
 ) {
   const items = new Map<string, Preparation>();
@@ -29,7 +32,12 @@ export function createEnvironmentPreparations(
   };
   return {
     get,
-    start(owner: string, repository: string, resources: EnvironmentResources | null) {
+    start(
+      owner: string,
+      repository: string,
+      resources: EnvironmentResources | null,
+      setupScript = "",
+    ) {
       for (const [id, item] of items) if (item.expires <= Date.now()) items.delete(id);
       // Repeated requests from the same owner share preparation while it runs.
       const existing = [...items.values()].find(
@@ -37,6 +45,7 @@ export function createEnvironmentPreparations(
           item.owner === owner &&
           item.repository === repository &&
           sameEnvironment(item.resources, resources) &&
+          item.setupScript === setupScript &&
           item.state !== "failed",
       );
       if (existing) return existing;
@@ -45,13 +54,14 @@ export function createEnvironmentPreparations(
         owner,
         repository,
         resources,
+        setupScript,
         state: prepare ? "building" : "ready",
         expires: Date.now() + 20 * 60_000,
       };
       items.set(item.id, item);
       if (prepare)
         void Promise.resolve()
-          .then(() => prepare(resources))
+          .then(() => prepare(resources, setupScript))
           .then(
             () => {
               item.state = "ready";
@@ -63,11 +73,18 @@ export function createEnvironmentPreparations(
           );
       return item;
     },
-    ready(id: string, owner: string, repository: string, resources: EnvironmentResources | null) {
+    ready(
+      id: string,
+      owner: string,
+      repository: string,
+      resources: EnvironmentResources | null,
+      setupScript = "",
+    ) {
       const item = get(id, owner);
       return (
         item?.state === "ready" &&
         item.repository === repository &&
+        item.setupScript === setupScript &&
         sameEnvironment(item.resources, resources)
       );
     },

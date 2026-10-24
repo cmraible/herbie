@@ -6,13 +6,21 @@ import { createDemoAdapters } from "../src/demo.js";
 import type { Store } from "../src/store.js";
 import { testAuth, testSessionToken } from "./test-auth.js";
 
-test("project creation and resource edits require a matching completed environment build", async (t) => {
+test("project creation, script edits, and resource edits require a matching completed environment build", async (t) => {
   const origin = "http://localhost:8787";
   const id = randomUUID();
   const resources = { cpu: 4, memory: 8, disk: 10 };
+  const setupScript = "apt-get install -y python3\n";
   let project:
-    | { id: string; repository: string; resources: typeof resources | null; state: string }
+    | {
+        id: string;
+        repository: string;
+        resources: typeof resources | null;
+        setupScript: string;
+        state: string;
+      }
     | undefined;
+  let expectedScript = setupScript;
   let writes = 0;
   let builds = 0;
   let fail = false;
@@ -24,16 +32,22 @@ test("project creation and resource edits require a matching completed environme
     getProject: async () => project,
     createProject: async (
       _owner: string,
-      input: typeof resources & { repository: string; resources: typeof resources | null },
+      input: { repository: string; resources: typeof resources | null; setupScript: string },
     ) => {
       writes++;
-      project = { id, repository: input.repository, resources: input.resources, state: "queued" };
+      project = {
+        id,
+        repository: input.repository,
+        resources: input.resources,
+        setupScript: input.setupScript,
+        state: "queued",
+      };
       return { created: true, project };
     },
     updateProject: async (
       _id: string,
       _owner: string,
-      input: { resources?: typeof resources | null },
+      input: { resources?: typeof resources | null; setupScript?: string },
     ) => {
       writes++;
       project = { ...project!, ...input };
@@ -53,7 +67,8 @@ test("project creation and resource edits require a matching completed environme
     adapters: {
       ...createDemoAdapters(),
       environmentLimits: async () => ({ cpu: 8, memory: 16, disk: 30 }),
-      prepareEnvironment: async () => {
+      prepareEnvironment: async (_resources, script) => {
+        assert.equal(script, expectedScript);
         builds++;
         await gate;
         if (fail) throw new Error("private upstream build diagnostics");
@@ -85,7 +100,7 @@ test("project creation and resource edits require a matching completed environme
       },
       body: JSON.stringify(input),
     });
-  const input = { repository: "demo/example", prompt: "Work", resources };
+  const input = { repository: "demo/example", prompt: "Work", resources, setupScript };
   const blocked = await send("/api/projects", input);
   assert.equal(blocked.status, 409);
   assert.equal((await blocked.json()).code, "environment_preparation_required");
@@ -97,6 +112,7 @@ test("project creation and resource edits require a matching completed environme
   const started = await send("/api/project-environments", {
     repository: input.repository,
     resources,
+    setupScript,
   });
   assert.equal(started.status, 202);
   const preparation = await started.json();
@@ -104,7 +120,11 @@ test("project creation and resource edits require a matching completed environme
   assert.equal(builds, 1);
   assert.equal(project, undefined);
   const repeated = await (
-    await send("/api/project-environments", { repository: input.repository, resources })
+    await send("/api/project-environments", {
+      repository: input.repository,
+      resources,
+      setupScript,
+    })
   ).json();
   assert.equal(repeated.id, preparation.id);
   assert.equal(builds, 1);
@@ -132,8 +152,17 @@ test("project creation and resource edits require a matching completed environme
     409,
   );
   assert.equal(writes, 0);
+  assert.equal(
+    (await send("/api/projects", { ...input, setupScript: "echo changed" }, preparation.id)).status,
+    409,
+  );
   assert.equal((await send("/api/projects", input, preparation.id)).status, 201);
   assert.equal(writes, 1);
+  assert.equal(
+    (await send(`/api/projects/${id}`, { setupScript: "echo changed" }, preparation.id)).status,
+    409,
+  );
+  assert.equal(project!.setupScript, setupScript);
   const larger = { ...resources, memory: 16 };
   assert.equal((await send(`/api/projects/${id}`, { resources: larger })).status, 409);
   assert.deepEqual(project!.resources, resources);
@@ -156,6 +185,15 @@ test("project creation and resource edits require a matching completed environme
   assert.notEqual(retry.id, failed.id);
   assert.equal((await (await poll(retry.id)).json()).state, "ready");
   assert.equal((await send(`/api/projects/${id}`, { resources: larger }, retry.id)).status, 200);
+  assert.deepEqual(project!.resources, larger);
+  expectedScript = "";
+  assert.equal((await send(`/api/projects/${id}`, { setupScript: "" })).status, 409);
+  const cleared = await (
+    await send("/api/project-environments", { projectId: id, setupScript: "" })
+  ).json();
+  assert.equal((await (await poll(cleared.id)).json()).state, "ready");
+  assert.equal((await send(`/api/projects/${id}`, { setupScript: "" }, cleared.id)).status, 200);
+  assert.equal(project!.setupScript, "");
   assert.deepEqual(project!.resources, larger);
 });
 

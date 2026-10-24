@@ -8,7 +8,11 @@ import { Pool } from "pg";
 import { test, type TestContext } from "node:test";
 import { Store } from "../src/store.js";
 import { migrateAuth, PgAuthStore } from "../src/auth-store.js";
-import { createDatabasePoolConfig, prepareDatabase } from "../src/database.js";
+import {
+  assertDatabaseSchemaCompatible,
+  createDatabasePoolConfig,
+  prepareDatabase,
+} from "../src/database.js";
 
 test("remote database configuration requires verified TLS and a private bounded session pool", async () => {
   const config = await createDatabasePoolConfig({
@@ -184,6 +188,32 @@ test("private schema denies Data API roles, repairs old grants, and remains usab
     "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='herbie' AND c.relkind='r' AND NOT c.relrowsecurity",
   );
   assert.deepEqual(tables.rows, []);
+});
+
+test("setup-script migration rejects the previous schema until its required column is installed", async (t) => {
+  const database = await privateDatabase(t);
+  if (!database) return;
+  await database.pool.query("CREATE SCHEMA herbie");
+  const store = new Store(database.pool);
+  await store.migrate();
+  await assertDatabaseSchemaCompatible(database.pool);
+  await database.pool.query("ALTER TABLE projects DROP COLUMN setup_script");
+  await database.pool.query("UPDATE herbie_schema_version SET version=1");
+  await assert.rejects(assertDatabaseSchemaCompatible(database.pool), /requires version 2/);
+  await store.migrate();
+  await assertDatabaseSchemaCompatible(database.pool);
+  const { project } = await store.createProject(
+    "owner",
+    {
+      repository: "example/migrated",
+      name: "Migrated",
+      prompt: "Work",
+      setupScript: "echo ready",
+    },
+    "demo",
+    randomUUID(),
+  );
+  assert.equal(project.setupScript, "echo ready");
 });
 
 test("database CA certificates work as PEM text or files without weakening verification", async (t) => {

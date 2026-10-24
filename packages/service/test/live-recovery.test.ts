@@ -41,6 +41,7 @@ test("resuming an existing environment does not depend on limits discovery", asy
       repository: "demo/example",
       name: "Disabled work",
       resources: null,
+      setupScript: "",
       prompt: "Disabled work",
       attemptCount: 0,
       workflow: "loop",

@@ -14,12 +14,14 @@ for (const operation of ["create", "edit"] as const)
     });
     let saves = 0;
     const keys: (string | undefined)[] = [];
-    await page.route("**/api/project-environments", (route) =>
-      route.fulfill({
+    const setupScript = "apt-get update\napt-get install -y python3\n";
+    await page.route("**/api/project-environments", (route) => {
+      expect(route.request().postDataJSON().setupScript).toBe(setupScript);
+      return route.fulfill({
         status: 202,
         json: { id: preparationId, state: "building" },
-      }),
-    );
+      });
+    });
     await page.route(`**/api/project-environments/${preparationId}`, async (route) => {
       await gate;
       await route.fulfill({ json: { id: preparationId, state: fail ? "failed" : "ready" } });
@@ -28,6 +30,7 @@ for (const operation of ["create", "edit"] as const)
       operation === "create" ? "**/api/projects" : `**/api/projects/${projectId}`,
       async (route) => {
         if (route.request().method() !== "POST") return route.continue();
+        expect(route.request().postDataJSON().setupScript).toBe(setupScript);
         keys.push(route.request().headers()["idempotency-key"]);
         if (!route.request().headers()["x-herbie-environment-preparation"])
           return route.fulfill({
@@ -43,6 +46,9 @@ for (const operation of ["create", "edit"] as const)
     const prompt = page.getByRole("textbox", { name: "What should Herbie work on?" });
     const brief = `Prepare the environment before ${operation}`;
     await prompt.fill(brief);
+    const setup = page.getByRole("textbox", { name: "Setup script (optional)", exact: true });
+    await expect(setup).toHaveAccessibleDescription(/The repository is checked out afterward/);
+    await setup.fill(setupScript);
     if (operation === "edit") {
       await page.getByRole("combobox", { name: "Sizing", exact: true }).selectOption("custom");
       await page.getByRole("spinbutton", { name: /^Memory/ }).fill("12");
@@ -64,6 +70,7 @@ for (const operation of ["create", "edit"] as const)
       page.getByRole("alert").filter({ hasText: "environment could not be built" }),
     ).toBeVisible();
     await expect(prompt).toHaveValue(brief);
+    await expect(setup).toHaveValue(setupScript);
     await expect(save).toBeEnabled();
     expect(saves).toBe(0);
     fail = false;

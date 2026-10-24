@@ -93,8 +93,8 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     path: string,
     input: unknown,
     environment:
-      | { repository: string; resources: EnvironmentResources | null }
-      | { projectId: string; resources: EnvironmentResources | null },
+      | { repository: string; resources: EnvironmentResources | null; setupScript: string }
+      | { projectId: string; resources?: EnvironmentResources | null; setupScript?: string },
     requestId?: string,
     onProgress?: (phase: "preparing" | "saving") => void,
   ) {
@@ -160,17 +160,19 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       requestId: string,
       onProgress?: (phase: "preparing" | "saving") => void,
     ) => {
-      const { model, reasoningEffort, resources, workflow, ...project } = projectInput.parse(input);
+      const { model, reasoningEffort, resources, workflow, setupScript, ...project } =
+        projectInput.parse(input);
       return saveProject(
         "/api/projects",
         {
           ...project,
           ...(resources === null ? {} : { resources }),
           ...(workflow === "loop" ? {} : { workflow }),
+          ...(setupScript === "" ? {} : { setupScript }),
           ...(model === "gpt-6-luna" ? {} : { model }),
           ...(reasoningEffort === "low" ? {} : { reasoningEffort }),
         },
-        { repository: project.repository, resources },
+        { repository: project.repository, resources, setupScript },
         requestId,
         onProgress,
       );
@@ -185,7 +187,7 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
       saveProject(
         projectPath(id),
         projectUpdate.parse(input),
-        { projectId: id, resources: input.resources ?? null },
+        { projectId: id, resources: input.resources, setupScript: input.setupScript },
         undefined,
         onProgress,
       ),

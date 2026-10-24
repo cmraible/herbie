@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { projectInput, reasoningEffort, environmentResources } from "@herbie/contracts";
+import {
+  projectInput,
+  reasoningEffort,
+  environmentResources,
+  environmentSetupScript,
+} from "@herbie/contracts";
 // Preserve legacy names so retries keep the original idempotency payload.
 export const draftSchema = z.object({
   workflow: z.enum(["loop", "single_pr"]).default("loop"),
@@ -10,6 +15,7 @@ export const draftSchema = z.object({
   model: z.string().default("gpt-6-luna"),
   reasoningEffort: reasoningEffort.default("low"),
   resources: environmentResources.nullable().default(null),
+  setupScript: environmentSetupScript.default(""),
   targetWip: z.string().default("1"),
   requestId: z.string().uuid(),
 });
@@ -24,6 +30,7 @@ export function newDraft(repository = ""): Draft {
     reasoningEffort: "low",
     targetWip: "1",
     resources: null,
+    setupScript: "",
     requestId: crypto.randomUUID(),
   };
 }
@@ -37,6 +44,7 @@ export function parseDraft(draft: Draft) {
       ? { reviewers: draft.reviewer.split(",").map((login) => login.trim()) }
       : {}),
     ...(draft.resources === null ? {} : { resources: draft.resources }),
+    setupScript: draft.setupScript,
     model: draft.model,
     reasoningEffort: draft.reasoningEffort,
     targetWip: Number(draft.targetWip),
