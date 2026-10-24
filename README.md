@@ -292,12 +292,12 @@ const changes = await runDaytonaAttempt(
 ```
 
 Without a snapshot, the adapter creates Ubuntu 24.04 with 2 CPUs, 4 GiB RAM, and
-10 GiB disk, then installs Git, Docker Engine/Compose/Buildx, Herbie’s internal Node 24.19.0, and Codex 0.159.2
+10 GiB disk, then installs Git, Docker Engine/Compose/Buildx, Herbie’s internal Node 24.22.1, and Codex 0.159.2
 inside that disposable sandbox. Node and Codex archive digests are verified before
 extraction, and Docker packages come from Docker's signed apt repository. Daytona
 does not build a reusable project template or install repository dependencies.
 An optional snapshot must provide Herbie's internal Node at
-`/opt/herbie-tools/node-v24.19.0-linux-x64/bin/node`, its bundled npm/Corepack,
+`/opt/herbie-tools/node-v24.22.1-linux-x64/bin/node`, its bundled npm/Corepack,
 Docker Engine/Compose/Buildx, Git, jq, Codex, and `runuser`.
 The adapter runs Codex as the non-root `compat` user. Project tools must be
 accessible in `/usr/local/bin`, `/usr/bin`, `/bin`, or `/home/compat/.local/bin`.

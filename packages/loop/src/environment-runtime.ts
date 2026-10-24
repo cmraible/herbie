@@ -1,6 +1,6 @@
 export const environmentPath = "/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin";
 export const environmentBaseImage = "ubuntu:24.04";
-export const agentNodePath = "/opt/herbie-tools/node-v24.19.0-linux-x64/bin/node";
+export const agentNodePath = "/opt/herbie-tools/node-v24.22.1-linux-x64/bin/node";
 
 const runtimeFailureTrap = String.raw`trap 'runtime_status=$?; if [ "$runtime_status" -ne 0 ]; then printf "herbie-runtime-failure step=%s exit=%s\n" "$runtime_step" "$runtime_status"; fi' EXIT`;
 
@@ -19,21 +19,21 @@ chmod a+r /etc/apt/keyrings/docker.asc
 . /etc/os-release
 printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' "$(dpkg --print-architecture)" "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
 apt-get -qq update
-apt-get -qq install -y --no-install-recommends docker-ce=5:28.3.3-1~ubuntu.24.04~noble docker-ce-cli=5:28.3.3-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+apt-get -qq install -y --no-install-recommends docker-ce=5:29.9.2-1~ubuntu.24.04~noble docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
 mkdir -p /opt/herbie-tools
 cd /opt/herbie-tools
 runtime_step=node_installation
-curl --fail --silent --show-error --max-time 50 -o node.tar.xz https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz
-printf '%s\n' '14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647  node.tar.xz' | sha256sum -c -
+curl --fail --silent --show-error --max-time 50 -o node.tar.xz https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz
+printf '%s\n' '6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6  node.tar.xz' | sha256sum -c -
 tar -xJf node.tar.xz
 runtime_step=codex_installation
 curl --fail --silent --show-error --max-time 50 -o codex.tgz https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-x64.tgz
-/opt/herbie-tools/node-v24.19.0-linux-x64/bin/node -e "const f=require('fs'),c=require('crypto');if(c.createHash('sha512').update(f.readFileSync('codex.tgz')).digest('base64')!=='RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q==')process.exit(1)"
+/opt/herbie-tools/node-v24.22.1-linux-x64/bin/node -e "const f=require('fs'),c=require('crypto');if(c.createHash('sha512').update(f.readFileSync('codex.tgz')).digest('base64')!=='RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q==')process.exit(1)"
 tar -xzf codex.tgz
 runtime_step=toolchain_links
-ln -sf /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node /usr/local/bin/node
+ln -sf /opt/herbie-tools/node-v24.22.1-linux-x64/bin/node /usr/local/bin/node
 for tool in npm npx corepack; do
-  ln -sf /opt/herbie-tools/node-v24.19.0-linux-x64/bin/$tool /usr/local/bin/$tool
+  ln -sf /opt/herbie-tools/node-v24.22.1-linux-x64/bin/$tool /usr/local/bin/$tool
 done
 corepack enable --install-directory /usr/local/bin
 ln -sf /opt/herbie-tools/package/vendor/x86_64-unknown-linux-musl/bin/codex /usr/local/bin/codex
@@ -91,6 +91,6 @@ runtime_step=toolchain_preflight
 runuser -u compat -- env HOME=/home/compat PATH=${environmentPath} codex --version
 ${agentNodePath} -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)'
 env PATH=${environmentPath} git --version
-runuser -u compat -- ${agentNodePath} /opt/herbie-tools/node-v24.19.0-linux-x64/bin/npm --version
-runuser -u compat -- ${agentNodePath} /opt/herbie-tools/node-v24.19.0-linux-x64/bin/corepack --version
+runuser -u compat -- ${agentNodePath} /opt/herbie-tools/node-v24.22.1-linux-x64/bin/npm --version
+runuser -u compat -- ${agentNodePath} /opt/herbie-tools/node-v24.22.1-linux-x64/bin/corepack --version
 `;
