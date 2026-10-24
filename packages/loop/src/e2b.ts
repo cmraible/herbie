@@ -8,8 +8,11 @@ import { createE2BTemplateResolver } from "./e2b-templates.js";
 
 export function createE2BEnvironmentPreparer(config: E2BConfig) {
   const resolve = createE2BTemplateResolver(config);
-  return async (resources: { cpu: number; memory: number; disk: number } | null) => {
-    await resolve(resources ?? { cpu: 2, memory: 4, disk: 10 });
+  return async (
+    resources: { cpu: number; memory: number; disk: number } | null,
+    setupScript = "",
+  ) => {
+    await resolve(resources ?? { cpu: 2, memory: 4, disk: 10 }, undefined, setupScript);
   };
 }
 
@@ -147,9 +150,9 @@ export function createE2BProvider(
         throw error;
       }
     },
-    async create({ name, resources, timeoutMs, signal }) {
+    async create({ name, resources, setupScript, timeoutMs, signal }) {
       const sizing = resources ?? { cpu: 2, memory: 4, disk: 10 };
-      const template = await resolveTemplate(sizing, signal);
+      const template = await resolveTemplate(sizing, signal, setupScript);
       signal?.throwIfAborted();
       const sandbox = await create({
         apiKey: config.apiKey,

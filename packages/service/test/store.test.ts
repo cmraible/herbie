@@ -34,6 +34,46 @@ const integration = (name: string, fn: () => Promise<void>) =>
 const input = () => ({ repository: `example/repo-${randomUUID()}`, prompt: "Fix arithmetic" });
 
 integration(
+  "setup scripts persist, participate in idempotency, and can be edited or cleared",
+  async () => {
+    const key = randomUUID();
+    const request = { ...input(), setupScript: "apt-get install -y python3\n" };
+    const { project } = await store.createProject("owner", request, "demo", key);
+    assert.equal(project.setupScript, request.setupScript);
+    assert.equal((await store.getProject(project.id, "owner"))?.setupScript, request.setupScript);
+    await assert.rejects(
+      store.createProject("owner", { ...request, setupScript: "echo different" }, "demo", key),
+      /different/i,
+    );
+    assert.equal(
+      (await store.updateProject(project.id, "owner", { name: "Renamed" })).setupScript,
+      request.setupScript,
+    );
+    assert.equal(
+      (await store.updateProject(project.id, "owner", { setupScript: "echo ready" })).setupScript,
+      "echo ready",
+    );
+    await assert.rejects(
+      store.updateProject(
+        project.id,
+        "owner",
+        { resources: null },
+        {
+          resources: project.resources,
+          setupScript: request.setupScript,
+        },
+      ),
+      /Environment settings changed/,
+    );
+    assert.equal(
+      (await store.updateProject(project.id, "owner", { setupScript: "" })).setupScript,
+      "",
+    );
+    assert.equal((await store.createProject("owner", request, "demo", key)).created, false);
+  },
+);
+
+integration(
   "migration removes old limits and preserves projects, artifacts, and request replays",
   async () => {
     await store.pool.query("ALTER TABLE projects DROP COLUMN name");

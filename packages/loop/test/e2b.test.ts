@@ -22,13 +22,17 @@ test("E2B automatically prepares a default template without operator configurati
     async () => {
       throw new Error("Unexpected connection");
     },
-    async (resources) => {
+    async (resources, _signal, setupScript) => {
       assert.deepEqual(resources, { cpu: 2, memory: 4, disk: 10 });
+      assert.equal(setupScript, "echo configured");
       resolved = true;
       return "generated-default";
     },
   );
-  assert.equal((await provider.create({ name: "test", timeoutMs: 1000 })).id, "generated");
+  assert.equal(
+    (await provider.create({ name: "test", timeoutMs: 1000, setupScript: "echo configured" })).id,
+    "generated",
+  );
 });
 
 test("failed template preparation and cancelled attempts never create a sandbox", async () => {

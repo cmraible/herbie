@@ -242,7 +242,7 @@ No host environment or secrets are passed into the sandbox; no OpenAI key is nee
 This does not clone a repository or run Codex.
 
 The pinned `@daytona/sdk` 0.220.0 supports the options used here. We request
-`ubuntu:22.04` with the documented minimum 1 vCPU, 1 GiB RAM, and 1 GiB disk,
+`ubuntu:24.04` with the documented minimum 1 vCPU, 1 GiB RAM, and 1 GiB disk,
 block sandbox network access, and set a five-minute server-side TTL. Explicit
 resource sizing uses image-based creation; Daytona may build/cache an image snapshot.
 This smoke deletes its sandbox, not provider-managed image caches. Capacity, image
@@ -277,7 +277,7 @@ import { runDaytonaAttempt } from "./packages/loop/dist/daytona-attempt.js";
 const changes = await runDaytonaAttempt(
   (params, options) => daytona.create(params, options),
   {
-    // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 22.04
+    // snapshot: 'approved-ubuntu-runtime', // optional; otherwise prepares Ubuntu 24.04
     repoUrl: "https://github.com/your-org/test-repo.git",
     // commit: 'full commit SHA', // optional; otherwise clones the default branch
     project: "Fix the failing addition test",
@@ -291,24 +291,23 @@ const changes = await runDaytonaAttempt(
 // Persist this returned artifact in the caller for PR publication.
 ```
 
-Without a snapshot, the adapter creates Ubuntu 22.04 with 1 CPU, 1 GiB RAM, and
-3 GiB disk, then installs Git, Node 24.19.0, Python 3.15.0 with pip, and Codex 0.159.2
-inside that disposable sandbox. Archive digests are verified before extraction. This reuses
-the runtime pins from the successful compatibility probe; it does not build a custom
-reusable snapshot or install repository dependencies. An optional snapshot must be
-a root-accessible Ubuntu-compatible runtime with Node 24+, Python 3 with pip, Git,
-Codex and `runuser`. Use standalone Python that permits user installs; externally managed system Python
-is rejected during preflight. Snapshot tools must be exposed in `/usr/local/bin`,
-`/usr/bin`, or `/bin`. Custom image `PATH` and `VIRTUAL_ENV` settings are not
-inherited by the agent; virtual-environment snapshots are not supported.
-The adapter runs Codex as the unprivileged `compat` user. Its user tool directory
-(`~/.local/bin`) follows system directories on `PATH`, so the agent can install optional tools with
-`python3 -m pip install --user lizard`. Lizard is not preinstalled.
+Without a snapshot, the adapter creates Ubuntu 24.04 with 2 CPUs, 4 GiB RAM, and
+10 GiB disk, then installs Git, Docker Engine/Compose/Buildx, Herbie’s internal Node 24.19.0, and Codex 0.159.2
+inside that disposable sandbox. Node and Codex archive digests are verified before
+extraction, and Docker packages come from Docker's signed apt repository. Daytona
+does not build a reusable project template or install repository dependencies.
+An optional snapshot must provide Herbie's internal Node at
+`/opt/herbie-tools/node-v24.19.0-linux-x64/bin/node`, its bundled npm/Corepack,
+Docker Engine/Compose/Buildx, Git, jq, Codex, and `runuser`.
+The adapter runs Codex as the non-root `compat` user. Project tools must be
+accessible in `/usr/local/bin`, `/usr/bin`, `/bin`, or `/home/compat/.local/bin`.
+Python and other project languages are optional and can be installed through
+E2B's cached setup script. Custom image `PATH` and `VIRTUAL_ENV` settings are not
+inherited by the agent.
 
 It inherits Daytona's organization network policy by default. `domainAllowList` is
 optional and should only be supplied if the organization's policy permits it. Setup
-needs the Ubuntu package repositories, nodejs.org, registry.npmjs.org, and GitHub
-release downloads (`github.com` and `release-assets.githubusercontent.com`);
+needs the Ubuntu package repositories, download.docker.com, nodejs.org, and registry.npmjs.org;
 Python package installation needs pypi.org and files.pythonhosted.org. The project
 needs the Git repository and api.openai.com. The live service supports public and private
 GitHub repositories using a repository-scoped read token for sandbox checkout; it removes
@@ -487,3 +486,7 @@ to operational logs.
 Choose a project’s model from the searchable dropdown in the create/edit form (or enter a custom model ID), with `herbie start --model MODEL`, or with `herbie edit PROJECT_ID --model MODEL`. The default is `gpt-6-luna`. Changes apply to future runs, including feedback and CI repairs.
 
 Model suggestions come from OpenAI using the service’s `OPENAI_API_KEY` and are cached for five minutes. The picker filters known specialized variants and retired models; the API does not expose full coding-tool compatibility metadata. If discovery is unavailable, the saved model and custom entry remain usable.
+
+Project setup scripts can install additional languages and tools during cached E2B
+template preparation. See [project setup scripts](docs/environments.md#project-setup-script)
+for web/CLI configuration, build behavior, and installation locations.

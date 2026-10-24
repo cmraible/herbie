@@ -21,9 +21,9 @@ The live service checks out public and private GitHub repositories with a short-
 
 ### Automatic E2B templates
 
-Herbie creates templates through E2B's API as part of saving a project. No manually built templates or resource-size mappings are required. Without an existing base, Herbie builds Ubuntu 22.04 with the same pinned Node, Codex, Python, and Docker toolchain used by Daytona. The API key must permit template lookup/builds as well as sandbox lifecycle operations.
+Herbie creates templates through E2B's API as part of saving a project. No manually built templates or resource-size mappings are required. Without an existing base, Herbie builds Ubuntu 24.04 with Docker Engine, Compose, Buildx, Git, basic utilities, and Herbie’s internal Node/Codex tools. The API key must permit template lookup/builds as well as sandbox lifecycle operations.
 
-Projects use the same numeric CPU, memory GiB, and disk GiB settings as Daytona. When creating a project or changing its resource settings, Herbie starts a background template build if needed and waits for it to finish before saving the project. The form shows “Preparing environment…” and keeps its inputs intact if preparation fails. No project or queued run is created until preparation succeeds. Default sizing is 2 CPU cores, 4 GiB memory, and at least 10 GiB disk. Template names are derived from the runtime recipe, base, and size, so later projects and runs reuse the built template. Builds for the same size share work within a service process; after a restart, Herbie looks up E2B's persisted build state and resumes waiting for an existing build. A failed build prevents sandbox creation and can be retried by a later attempt.
+Projects use the same numeric CPU, memory GiB, and disk GiB settings as Daytona. When creating a project or changing its resources or setup script, Herbie starts a background template build if needed and waits for it to finish before saving the project. The form shows “Preparing environment…” and keeps its inputs intact if preparation fails. No project or queued run is created until preparation succeeds. Default sizing is 2 CPU cores, 4 GiB memory, and at least 10 GiB disk. Template names are derived from the runtime recipe, base, size, and setup script, so later projects and runs reuse the built template. Builds for the same environment configuration share work within a service process; after a restart, Herbie looks up E2B's persisted build state and resumes waiting for an existing build. A failed build prevents sandbox creation and can be retried by a later attempt.
 
 Saving a project with a new size can take several minutes and incurs E2B template-build usage. Template preparation has a 15-minute wait budget, with bounded API requests. Leaving the save form does not cancel a shared remote template build. A failed or interrupted save can be retried; E2B retains builds so they can be reused. Runtime cancellation also stops waiting before a sandbox is created. Templates are retained for future runs and are not deleted with disposable session sandboxes.
 
@@ -53,8 +53,47 @@ E2B SDK references: [Sandbox](https://e2b.dev/docs/sdk-reference/js-sdk/v2.6.2/s
 
 For E2B, creating a project or changing its resources without a matching completed preparation returns HTTP 409 with `code: "environment_preparation_required"`. The shared web/CLI client handles preparation automatically using short requests:
 
-1. `POST /api/project-environments` with `{ repository, resources }` for a new project or `{ projectId, resources }` for an edit. Repository authorization and resource validation run before any build starts.
+1. `POST /api/project-environments` with `{ repository, resources, setupScript }` for a new project or `{ projectId, resources?, setupScript? }` for an edit. Repository authorization and resource validation run before any build starts.
 2. Poll `GET /api/project-environments/:id` for `building`, `ready`, or `failed`.
 3. Once ready, repeat the original save with `x-herbie-environment-preparation: <id>`. Creation retains the original idempotency key.
 
-The server binds preparation to the authenticated owner, repository, and exact resource settings. A failed or mismatched preparation cannot create or update the project. Unchanged-resource edits need no new preparation. Preparation receipts expire after 20 minutes and are lost on service restart; retrying a save checks E2B's persisted build state. Run startup still checks for a ready template for older projects and runtime changes. Session sandboxes are created only when runs start, using the prepared template.
+The server binds preparation to the authenticated owner, repository, and exact resource settings and setup script. A failed or mismatched preparation cannot create or update the project. Edits that leave resources and setup unchanged need no new preparation. Preparation receipts expire after 20 minutes and are lost on service restart; retrying a save checks E2B's persisted build state. Run startup still checks for a ready template for older projects and runtime changes. Session sandboxes are created only when runs start, using the prepared template.
+
+### Project setup script
+
+An optional `setupScript` Bash script runs as root during E2B template preparation,
+before any repository checkout or agent execution. Its filesystem changes are
+cached in the template. The script is included in the template identity; editing
+or removing it prepares a different environment before the project is saved.
+Identical configurations reuse the completed template, including across restarts.
+Failed builds cannot save the project or start a sandbox and can be retried.
+Cached setup scripts require the E2B provider; Daytona rejects nonempty scripts.
+
+Setup runs in `/home/compat` with `HOME=/root`, `DEBIAN_FRONTEND=noninteractive`,
+and Bash `-euo pipefail`. Docker is started and checked as the non-root `compat`
+agent user before setup. Scripts have a 10-minute execution limit inside the
+15-minute template preparation budget. Install tools in shared locations such as
+`/usr/local/bin` or `/opt` with links in `/usr/local/bin`; root-only installations
+and transient shell exports will not be available to the agent. Herbie invokes
+its internal Node by absolute path so projects can select their own Node version.
+Python and other project languages can be installed by setup.
+
+For example:
+
+```bash
+apt-get update
+apt-get install -y --no-install-recommends python3 python3-pip python3-venv
+```
+
+The repository is not present during setup, and runtime credentials are not
+supplied to template builds. Do not put secrets in scripts or cached files.
+Docker containers started during setup should not be treated as persistent
+services; start required services again during the session. Docker Engine 28.3.3,
+Compose, and Buildx are installed from Docker's signed Ubuntu apt repository.
+Every session checks daemon access, Compose, and Buildx before the agent starts.
+A configured custom base template must provide the same internal tooling and
+Docker contract; changing the default Ubuntu base does not replace custom bases.
+
+The web project form supports creation and editing. The CLI accepts
+`start ... --setup-script FILE` and `edit PROJECT_ID --setup-script FILE`.
+Use an empty file to clear setup; omitted fields preserve existing configuration.

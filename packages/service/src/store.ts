@@ -1,4 +1,5 @@
 import { publicationBackoffMs } from "./publication-backoff.js";
+import { sameEnvironment } from "./environment-preparation.js";
 import { demoProjectName } from "./demo.js";
 import { logFailure } from "./diagnostic-log.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -22,7 +23,7 @@ import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
 import type { PullRequestFeedback, PublicationPhase, Execution } from "./adapters.js";
 import type { AgentAttemptChanges, AttemptCheckpoint } from "@herbie/loop/agent-attempt";
 
-const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, reviewers, resources, model, reasoning_effort AS "reasoningEffort",
+const projectColumns = `id, owner_id AS "ownerId", repository, name, prompt, reviewers, resources, setup_script AS "setupScript", model, reasoning_effort AS "reasoningEffort",
   workflow, max_wip AS "targetWip", attempt_count AS "attemptCount", mode, state, stop_requested AS "stopRequested",
   pull_request AS "pullRequest",
   COALESCE((SELECT jsonb_agg(j.pull_request ORDER BY j.cycle) FROM jobs j WHERE j.project_id=projects.id AND j.pull_request IS NOT NULL),'[]'::jsonb) AS "pullRequests",
@@ -124,6 +125,7 @@ function requestFingerprint(
     resources,
     workflow,
     reviewers,
+    setupScript,
   }: ProjectInput,
   mode: Project["mode"],
   legacyLimit?: number,
@@ -142,6 +144,7 @@ function requestFingerprint(
           : reviewers.length === 1
             ? { reviewer: reviewers[0] }
             : { reviewers }),
+        ...(!setupScript ? {} : { setupScript }),
         ...(name === undefined ? {} : { name }),
         ...(model === undefined || model === "gpt-6-luna" ? {} : { model }),
         ...(reasoningEffort === undefined || reasoningEffort === "low" ? {} : { reasoningEffort }),
@@ -419,7 +422,7 @@ export class Store {
       const id = randomUUID();
       if (name === undefined) throw new Error("Missing project name");
       await client.query(
-        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,workflow,reviewers,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'queued')",
+        "INSERT INTO projects(id,owner_id,repository,prompt,mode,name,max_wip,model,reasoning_effort,resources,workflow,reviewers,setup_script,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'queued')",
         [
           id,
           ownerId,
@@ -433,6 +436,7 @@ export class Store {
           request.resources,
           request.workflow,
           request.reviewers ?? null,
+          request.setupScript,
         ],
       );
       await client.query(
@@ -465,7 +469,12 @@ export class Store {
   async editProjectPrompt(id: string, ownerId: string, prompt: string): Promise<Project> {
     return this.updateProject(id, ownerId, { prompt });
   }
-  async updateProject(id: string, ownerId: string, input: ProjectUpdate): Promise<Project> {
+  async updateProject(
+    id: string,
+    ownerId: string,
+    input: ProjectUpdate,
+    expectedEnvironment?: Pick<Project, "resources" | "setupScript">,
+  ): Promise<Project> {
     const parsed = projectUpdate.parse(input);
     return this.transaction(async (client) => {
       const project = await projectFrom(client, id, true);
@@ -478,6 +487,13 @@ export class Store {
         parsed.targetWip !== 1
       )
         throw conflict("Single PR workflows require targetWip of 1");
+        expectedEnvironment &&
+        (!sameEnvironment(project.resources, expectedEnvironment.resources) ||
+          project.setupScript !== expectedEnvironment.setupScript)
+      )
+        throw conflict(
+          "Environment settings changed while saving. Retry with the current project settings.",
+        );
       // Normalize legacy request hashes before their fallback loses the original prompt.
       await client.query(
         `UPDATE project_requests SET fingerprint=$2 WHERE project_id=$1
@@ -485,7 +501,7 @@ export class Store {
         [id, requestFingerprint({ ...project, name: undefined }, project.mode)],
       );
       const result = await client.query<Record<string, unknown>>(
-        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,reviewers=CASE WHEN $9 THEN $10::text[] ELSE reviewers END,test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
+        `UPDATE projects SET name=COALESCE($2,name),prompt=COALESCE($3,prompt),max_wip=COALESCE($4,max_wip),model=COALESCE($5,model),reasoning_effort=COALESCE($6,reasoning_effort),resources=CASE WHEN $7 THEN $8::jsonb ELSE resources END,reviewers=CASE WHEN $9 THEN $10::text[] ELSE reviewers END,setup_script=COALESCE($11,setup_script),test_command=NULL,updated_at=clock_timestamp() WHERE id=$1 RETURNING ${projectColumns}`,
         [
           id,
           parsed.name,
@@ -497,6 +513,7 @@ export class Store {
           parsed.resources,
           parsed.reviewers !== undefined,
           parsed.reviewers,
+          parsed.setupScript,
         ],
       );
       const updated = databaseProject.parse(result.rows[0]);

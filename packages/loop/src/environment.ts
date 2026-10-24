@@ -32,6 +32,7 @@ export interface EnvironmentProvider {
   ): Promise<Environment | null>;
   create(options: {
     name: string;
+    setupScript?: string;
     resources?: { cpu: number; memory: number; disk: number };
     timeoutMs: number;
     signal?: AbortSignal;

@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import test, { type TestContext } from "node:test";
 import { runAgentAttempt, SessionDetached, type AttemptCheckpoint } from "../src/agent-attempt.js";
 import type { Environment } from "../src/environment.js";
+import { agentNodePath } from "../src/environment-runtime.js";
 
 const exec = promisify(execFile);
 const token = "ghs_checkout-fixture";
@@ -178,6 +179,7 @@ for (const mode of ["legacy", "durable", "reconnected"]) {
           );
         }
         // Run durable launches synchronously to avoid polling delays in this fixture.
+        command = command.replaceAll(agentNodePath, process.execPath);
         const executable = command.includes("nohup")
           ? command.replace("nohup ", "").replace(/ &$/, "")
           : command;

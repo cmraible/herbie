@@ -9,7 +9,11 @@ import type {
 import type { Readable } from "node:stream";
 import type { Environment, EnvironmentProvider } from "./environment.js";
 import { runAgentAttempt, type AttemptRequest } from "./agent-attempt.js";
-import { installEnvironmentRuntime, configureEnvironmentRuntime } from "./environment-runtime.js";
+import {
+  environmentBaseImage,
+  installEnvironmentRuntime,
+  configureEnvironmentRuntime,
+} from "./environment-runtime.js";
 import { AttemptCommandError } from "./attempt-diagnostics.js";
 export {
   AGENT_RUNTIME_FILES as DAYTONA_RUNTIME_FILES,
@@ -171,7 +175,9 @@ export function createDaytonaProvider(
   return {
     name: "daytona",
     ...(connect ? { find: reconnect, connect: reconnect } : {}),
-    async create({ name, resources, timeoutMs }) {
+    async create({ name, resources, setupScript, timeoutMs }) {
+      if (setupScript)
+        throw new Error("Cached setup scripts require the E2B environment provider.");
       if (config.snapshot && resources)
         throw new Error(
           "Custom resources require an image-based environment; snapshot resizing is unavailable.",
@@ -186,7 +192,10 @@ export function createDaytonaProvider(
           name,
           ...(config.snapshot
             ? { snapshot: config.snapshot }
-            : { image: "ubuntu:22.04", resources: resources ?? { cpu: 2, memory: 4, disk: 10 } }),
+            : {
+                image: environmentBaseImage,
+                resources: resources ?? { cpu: 2, memory: 4, disk: 10 },
+              }),
           ...(config.domainAllowList ? { domainAllowList: config.domainAllowList } : {}),
           secrets: config.secrets,
           outboundProxyUrl: config.outboundProxyUrl,

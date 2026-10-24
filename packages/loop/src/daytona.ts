@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { environmentBaseImage } from "./environment-runtime.js";
 import type { CreateSandboxFromImageParams } from "@daytona/sdk";
 
 interface SmokeSandbox {
@@ -39,7 +40,7 @@ export async function runDaytonaSmoke(
     sandbox = await create(
       {
         name,
-        image: "ubuntu:22.04",
+        image: environmentBaseImage,
         resources: { cpu: 1, memory: 1, disk: 1 },
         networkBlockAll: true,
         ttlMinutes: 5,

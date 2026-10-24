@@ -32,6 +32,10 @@ export const environmentResources = z
   })
   .strict();
 export type EnvironmentResources = z.infer<typeof environmentResources>;
+export const environmentSetupScript = z
+  .string()
+  .max(32_000)
+  .refine((value) => !value.includes("\0"), "Setup script cannot contain null bytes");
 export const environmentPreparation = z.object({
   id: z.string().uuid(),
   state: z.enum(["building", "ready", "failed"]),
@@ -41,9 +45,16 @@ export const environmentPreparationInput = z.union([
     .object({
       repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
       resources: environmentResources.nullable(),
+      setupScript: environmentSetupScript.default(""),
     })
     .strict(),
-  z.object({ projectId: z.string().uuid(), resources: environmentResources.nullable() }).strict(),
+  z
+    .object({
+      projectId: z.string().uuid(),
+      resources: environmentResources.nullable().optional(),
+      setupScript: environmentSetupScript.optional(),
+    })
+    .strict(),
 ]);
 export const environmentLimits = z.object({
   cpu: z.number().positive().nullable(),
@@ -69,6 +80,7 @@ export const projectInput = z
     reasoningEffort: reasoningEffort.default("low"),
     resources: environmentResources.nullable().default(null),
     workflow: z.enum(["loop", "single_pr"]).default("loop"),
+    setupScript: environmentSetupScript.default(""),
     targetWip: z.number().int().min(1).max(2147483647).default(1),
   })
   .strict()
@@ -79,6 +91,7 @@ export const projectInput = z
 export const projectUpdate = z
   .object({
     resources: environmentResources.nullable().optional(),
+    setupScript: environmentSetupScript.optional(),
     name: projectName.optional(),
     prompt: projectPrompt.optional(),
     reviewers: z.array(githubReviewer).max(15).nullable().optional(),

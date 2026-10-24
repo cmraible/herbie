@@ -39,7 +39,7 @@ for (const operation of ["create", "update"] as const)
             assert.deepEqual(
               JSON.parse(raw),
               operation === "create"
-                ? { repository: "demo/example", resources }
+                ? { repository: "demo/example", resources, setupScript: "" }
                 : { projectId: savedProject.id, resources },
             );
             result = { id: preparationId, state: "building" };
@@ -109,6 +109,43 @@ test("a failed environment build never retries the project write", async () => {
     },
   );
   assert.equal(writes, 1);
+});
+
+test("script-only edits preserve omitted resources during preparation", async () => {
+  const setupScript = "echo configured\n";
+  await withServer(
+    (request, response) => {
+      let raw = "";
+      request.on("data", (chunk) => {
+        raw += chunk;
+      });
+      request.on("end", () => {
+        if (request.url === "/api/project-environments") {
+          assert.deepEqual(JSON.parse(raw), { projectId: savedProject.id, setupScript });
+          response.end(JSON.stringify({ id: savedProject.id, state: "ready" }));
+        } else if (!request.headers["x-herbie-environment-preparation"]) {
+          response.statusCode = 409;
+          response.end(
+            JSON.stringify({ error: "Prepare first", code: "environment_preparation_required" }),
+          );
+        } else {
+          assert.deepEqual(JSON.parse(raw), { setupScript });
+          response.end(
+            JSON.stringify({
+              ...savedProject,
+              setupScript,
+              resources: { cpu: 4, memory: 8, disk: 10 },
+            }),
+          );
+        }
+      });
+    },
+    async (client) => {
+      const project = await client.update(savedProject.id, { setupScript });
+      assert.equal(project.setupScript, setupScript);
+      assert.deepEqual(project.resources, { cpu: 4, memory: 8, disk: 10 });
+    },
+  );
 });
 
 async function withServer(

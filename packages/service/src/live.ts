@@ -265,6 +265,7 @@ Inspect these branches before choosing your change. Make one small, independentl
           feedback: !!execution.feedback,
           verifyLocally: !!(execution.feedback ?? execution.ciRepair),
           resources: execution.project.resources ?? undefined,
+          setupScript: execution.project.setupScript,
         },
         report,
       );
