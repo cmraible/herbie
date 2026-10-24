@@ -128,4 +128,5 @@ export interface Adapters {
     changes: AgentAttemptChanges,
   ): Promise<PublicationRetryCheck>;
   reconcile(execution: Execution): Promise<PullRequest | null>;
+  mergeApproved?(execution: Execution, head: string): Promise<boolean>;
 }

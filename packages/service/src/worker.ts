@@ -318,9 +318,21 @@ export async function reconcileReviews(store: Store, adapters: Adapters): Promis
   for (const job of await store.reviewJobs(adapters.mode)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
-      if (current?.state === "open" && current.headSha)
-        await store.reconcilePullRequestHead(job.id, current);
-      else if (current && current.state !== "open")
+      if (current?.state === "open" && current.headSha) {
+        const paused = await store.reconcilePullRequestHead(job.id, current);
+        if (
+          !paused &&
+          current.draft === false &&
+          current.checksPassed === true &&
+          job.stage === "awaiting_review" &&
+          current.headSha ===
+            job.project.pullRequests.find((pr) => pr.branch === job.branch)?.headSha &&
+          ["queued", "running", "awaiting_review"].includes(job.project.state) &&
+          !job.project.stopRequested &&
+          (await adapters.mergeApproved?.(await executionFor(adapters, job, true), current.headSha))
+        )
+          await store.reconcile(job.id, "merged", current);
+      } else if (current && current.state !== "open")
         await store.reconcile(job.id, current.state, current);
     } catch (error) {
       logFailure(error, {
