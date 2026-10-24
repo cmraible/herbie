@@ -1,6 +1,7 @@
 import pg from "pg";
 import { betterAuth } from "better-auth";
 import { Daytona } from "@daytona/sdk";
+import { createE2BProvider } from "../../loop/src/e2b.js";
 
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -58,6 +59,7 @@ export default {
         postgresPoolAvailable: typeof pg.Pool === "function",
         betterAuthAvailable: typeof betterAuth === "function",
         daytonaAvailable: typeof Daytona === "function",
+        e2bProviderAvailable: typeof createE2BProvider === "function",
       });
     }
     if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
