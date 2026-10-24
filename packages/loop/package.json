@@ -19,7 +19,8 @@
     "test": "tsx --test --test-concurrency=2 test/*.test.ts",
     "test:e2e": "tsx test/e2e.ts",
     "test:daytona": "tsx test/daytona.ts",
-    "build:e2b-template": "tsx src/e2b-template.ts"
+    "build:e2b-template": "tsx src/e2b-template.ts",
+    "regenerate:e2b": "tsx src/e2b-regenerate.ts"
   },
   "dependencies": {
     "@daytona/sdk": "0.220.0",

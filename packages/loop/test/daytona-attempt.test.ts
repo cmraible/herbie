@@ -156,7 +156,7 @@ test("prepares runtime and repo, invokes the attempt, and waits for deletion usi
     reasoningEffort: request.reasoningEffort,
   });
   assert.deepEqual(sandbox.process.executeCommand.mock.calls[1].arguments, [
-    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node ${root}/agent-runner.js`,
+    `chown -R compat:compat ${root} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin /opt/herbie-tools/node-v24.22.1-linux-x64/bin/node ${root}/agent-runner.js`,
     root,
     undefined,
     22 * 60,
@@ -343,7 +343,7 @@ async function localFixture(t: TestContext, edits = "", prMetadata = true) {
   sandbox.process.executeCommand.mock.mockImplementation(async (command, cwd) => {
     if (!cwd) return { exitCode: 0, result: "fixture preflight" };
     // Execute the uploaded coding runner with a local fake Codex.
-    const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin /opt/herbie-tools/node-v24.19.0-linux-x64/bin/node `;
+    const prefix = `chown -R compat:compat ${cwd} && runuser -u compat -- env HOME=/home/compat PATH=/usr/local/bin:/usr/bin:/bin:/home/compat/.local/bin /opt/herbie-tools/node-v24.22.1-linux-x64/bin/node `;
     const runner = command.slice(prefix.length);
     assert.equal(command, `${prefix}${cwd}/agent-runner.js`);
     const { stdout } = await promisify(execFile)(process.execPath, [runner], {
@@ -559,8 +559,8 @@ test("provisions a bounded Ubuntu runtime with default networking when no snapsh
   assert.equal(timeout, 300);
   assert.match(setup, /apt-get .* install .* git jq/);
   assert.match(setup, /corepack enable --install-directory \/usr\/local\/bin/);
-  assert.match(setup, /docker-ce=5:28\.3\.3-1~ubuntu\.24\.04~noble/);
-  assert.match(setup, /node-v24\.19\.0-linux-x64/);
+  assert.match(setup, /docker-ce=5:29\.9\.2-1~ubuntu\.24\.04~noble/);
+  assert.match(setup, /node-v24\.22\.1-linux-x64/);
   assert.match(setup, /codex-0\.159\.2-linux-x64/);
   assert.match(setup, /sha256sum -c/);
   assert.match(setup, /createHash\('sha512'\)/);

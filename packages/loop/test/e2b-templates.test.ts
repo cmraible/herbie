@@ -46,7 +46,13 @@ test("template builds use E2B's SDK and GiB conversions for both generated and e
       assert.equal(options?.minFreeDiskMb, 10240);
       assert.equal(options?.requestTimeoutMs, 30_000);
       assert.ok(options?.signal);
+      assert.equal(options?.skipCache, true);
       const recipe = await Template.toJSON(template, false);
+      assert.ok(recipe.includes("dist-upgrade"));
+      assert.ok(recipe.includes("20260816ubuntu0.24.04.1"));
+      assert.ok(recipe.includes("node-v24.22.1"));
+      assert.ok(recipe.includes("docker-ce=5:29.9.2"));
+      assert.ok(recipe.indexOf("dist-upgrade") < recipe.indexOf("node-v24.22.1"));
       if (calls % 2 === 1) {
         assert.ok(recipe.includes("ubuntu:24.04"));
         assert.ok(recipe.includes("codex"));

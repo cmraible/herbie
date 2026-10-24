@@ -9,6 +9,7 @@ import {
 } from "e2b";
 import { environmentBaseImage, installEnvironmentRuntime } from "./environment-runtime.js";
 import { setupScriptCommand } from "./setup-script.js";
+import { e2bOsRevision, refreshE2BOs } from "./e2b-os.js";
 
 type Resources = { cpu: number; memory: number; disk: number };
 type Build = Pick<BuildInfo, "templateId" | "buildId"> & { status: TemplateBuildStatus };
@@ -36,6 +37,8 @@ export function e2bTemplateName(
     .update(
       JSON.stringify([
         2,
+        e2bOsRevision,
+        refreshE2BOs,
         config.template ?? environmentBaseImage,
         installEnvironmentRuntime,
         setupScriptCommand(setupScript),
@@ -76,15 +79,18 @@ export function createE2BTemplateApi(
       return latest ? { templateId, buildId: latest.buildID, status: latest.status } : null;
     },
     build: (name, resources, signal, setupScript = "") => {
-      let template = config.template
-        ? Template().fromTemplate(config.template).setUser("root")
-        : Template()
-            .fromImage(environmentBaseImage)
-            .setUser("root")
-            .runCmd(installEnvironmentRuntime);
+      let template = (
+        config.template
+          ? Template().fromTemplate(config.template)
+          : Template().fromImage(environmentBaseImage)
+      )
+        .setUser("root")
+        .runCmd(refreshE2BOs)
+        .runCmd(installEnvironmentRuntime);
       if (setupScript) template = template.runCmd(setupScriptCommand(setupScript));
       return Template.buildInBackground(template, name, {
         ...options,
+        skipCache: true,
         signal,
         cpuCount: resources.cpu,
         memoryMB: resources.memory * 1024,
