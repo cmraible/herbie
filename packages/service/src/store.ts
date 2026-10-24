@@ -487,6 +487,7 @@ export class Store {
         parsed.targetWip !== 1
       )
         throw conflict("Single PR workflows require targetWip of 1");
+      if (
         expectedEnvironment &&
         (!sameEnvironment(project.resources, expectedEnvironment.resources) ||
           project.setupScript !== expectedEnvironment.setupScript)
