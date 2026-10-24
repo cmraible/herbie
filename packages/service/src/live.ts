@@ -405,6 +405,27 @@ Inspect these branches before choosing your change. Make one small, independentl
       }
       return pr;
     },
+    async mergeApproved(execution, head) {
+      if (!config) return false;
+      const pr = execution.project.pullRequests.find(
+        (item) => item.branch === execution.branch && item.state === "open",
+      );
+      if (!pr) return false;
+      const token = await github.installationToken(
+        execution.repository.installationId,
+        execution.repository.repository,
+        "write",
+        true,
+      );
+      return github.mergeApproved(
+        token,
+        execution.repository.repository,
+        pr.number,
+        execution.branch,
+        head,
+        execution.project.ownerId,
+      );
+    },
     async checkUnpublished(execution) {
       // The owner-authenticated API already obtained this repository with the
       // App's read-only reconciliation access. Archival must not block safe

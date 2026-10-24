@@ -127,11 +127,12 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     token: string,
     body?: unknown,
     accept = "application/vnd.github+json",
+    method: "POST" | "PUT" = "POST",
   ): Promise<unknown> {
     registerDiagnosticSecret(token);
     if (Date.now() < retryAt) throw new GithubError(429, "GitHub rate limit cooldown");
     const response = await fetch(`${api}${path}`, {
-      method: body === undefined ? "GET" : "POST",
+      method: body === undefined ? "GET" : method,
       redirect: "error",
       signal: AbortSignal.timeout(30_000),
       headers: {
@@ -197,7 +198,7 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
           : `GitHub request failed (${response.status})`,
         undefined,
         {
-          method: body === undefined ? "GET" : "POST",
+          method: body === undefined ? "GET" : method,
           url: `${api}${path}`,
           status: response.status,
           statusText: response.statusText,
@@ -826,6 +827,67 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
       }
       if (pending.length)
         await request(`${path}/requested_reviewers`, token, { reviewers: pending });
+    },
+    async mergeApproved(
+      token: string,
+      repository: string,
+      number: number,
+      branch: string,
+      head: string,
+      ownerId: string,
+    ): Promise<boolean> {
+      const path = `/repos/${repository}/pulls/${number}`;
+      const pr = pullSchema.parse(await request(path, token));
+      if (pr.state !== "open" || pr.draft || pr.head.ref !== branch || pr.head.sha !== head)
+        return false;
+      let approval: string | null = null;
+      for (let page = 1; ; page++) {
+        if (page > 10) throw new Error("PR reviews exceed supported listing limit");
+        const reviews = z
+          .array(
+            z.object({
+              user: z.object({ id: z.number().int() }).nullable(),
+              state: z.string(),
+              commit_id: z.string().nullable().optional(),
+            }),
+          )
+          .parse(await request(`${path}/reviews?per_page=100&page=${page}`, token));
+        for (const review of reviews) {
+          if (String(review.user?.id) !== ownerId) continue;
+          if (review.state === "APPROVED") approval = review.commit_id ?? null;
+          if (review.state === "CHANGES_REQUESTED" || review.state === "DISMISSED") approval = null;
+        }
+        if (reviews.length < 100) break;
+      }
+      if (approval !== head) return false;
+      const status = await ciStatus(token, repository, number, branch);
+      if (status?.state !== "passed" || status.draft || status.head !== head) return false;
+      const latest = pullSchema.parse(await request(path, token));
+      if (
+        latest.state !== "open" ||
+        latest.draft ||
+        latest.head.ref !== branch ||
+        latest.head.sha !== head
+      )
+        return false;
+      try {
+        const result = z
+          .object({ merged: z.boolean() })
+          .parse(
+            await request(
+              `${path}/merge`,
+              token,
+              { sha: head },
+              "application/vnd.github+json",
+              "PUT",
+            ),
+          );
+        return result.merged;
+      } catch (error) {
+        // GitHub can reject a merge while branch protection is still settling.
+        if (error instanceof GithubError && error.githubResponse?.status === 405) return false;
+        throw error;
+      }
     },
     async markReady(
       token: string,
