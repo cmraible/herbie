@@ -1227,3 +1227,18 @@ textarea::placeholder {
 .pr-description .language-diff .hljs-meta {
   color: #a8b1aa;
 }
+
+.pr-actions {
+  margin-block: 1rem;
+}
+.pr-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.pr-merge-confirmation {
+  margin-block: 0.75rem;
+}
+.pr-merge-confirmation .pr-action-buttons {
+  margin-top: 0.75rem;
+}

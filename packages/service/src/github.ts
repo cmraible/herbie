@@ -744,6 +744,58 @@ export function createGithub(config: GithubConfig, testEndpoints?: { api: string
     repositories,
     authorize,
     findPullRequest,
+    async pullRequestAction(
+      token: string,
+      repository: string,
+      number: number,
+      action: "approve" | "merge",
+      headSha: string,
+      mergeMethod: "merge" | "squash" | "rebase",
+    ) {
+      const path = `/repos/${repository}/pulls/${number}`;
+      const pr = pullSchema.parse(await request(path, token));
+      if (pr.state !== "open" || pr.draft)
+        throw new GithubError(409, "This pull request must be open and ready for review.");
+      if (pr.head.sha !== headSha)
+        throw new GithubError(
+          409,
+          "This pull request has changed. Refresh and review the latest changes.",
+        );
+      try {
+        if (action === "approve") {
+          await request(`${path}/reviews`, token, { event: "APPROVE", commit_id: headSha });
+        } else {
+          const result = z
+            .object({ merged: z.boolean() })
+            .parse(
+              await request(
+                `${path}/merge`,
+                token,
+                { sha: headSha, merge_method: mergeMethod },
+                "application/vnd.github+json",
+                "PUT",
+              ),
+            );
+          if (!result.merged)
+            throw new GithubError(
+              409,
+              "GitHub could not merge this pull request. Check required reviews and checks.",
+            );
+        }
+      } catch (error) {
+        if (
+          error instanceof GithubError &&
+          [403, 405, 409, 422].includes(error.githubResponse?.status ?? 0)
+        )
+          throw new GithubError(
+            409,
+            action === "approve"
+              ? "GitHub could not approve this pull request. You cannot approve your own PR, and review permission is required."
+              : "GitHub could not merge this pull request. Check permissions, required reviews, checks, conflicts, and the selected merge method.",
+          );
+        throw error;
+      }
+    },
     async pullRequestDiff(token: string, repository: string, number: number): Promise<string> {
       return z
         .string()

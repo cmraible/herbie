@@ -496,6 +496,35 @@ export function createApiServer(options: ApiOptions) {
         projectJson(result.created ? 201 : 200, result.project);
         return;
       }
+      const prActionPath = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/pull-requests\/(\d+)\/(approve|merge)$/,
+      );
+      if (method === "POST" && prActionPath) {
+        const project = await store.getProject(z.string().uuid().parse(prActionPath[1]), userId);
+        if (!project) throw new HttpError(404, "Project not found");
+        const number = z.coerce.number().int().positive().safe().parse(prActionPath[2]);
+        const pr = project.pullRequests.find((item) => item.number === number);
+        if (!pr) throw new HttpError(404, "Pull request not found");
+        if (pr.state !== "open") throw new HttpError(409, "Pull request is no longer open");
+        const input = z
+          .object({
+            headSha: z.string().regex(/^[a-f0-9]{40}$/),
+            mergeMethod: z.enum(["merge", "squash", "rebase"]).default("squash"),
+          })
+          .parse(await readJson(request, 4096));
+        if (!adapters.pullRequestAction)
+          throw new HttpError(503, "Pull request actions are unavailable");
+        await adapters.pullRequestAction(
+          userId,
+          project.repository,
+          number,
+          prActionPath[3] as "approve" | "merge",
+          input.headSha,
+          input.mergeMethod,
+        );
+        json(response, 200, { ok: true });
+        return;
+      }
       const diffPath = url.pathname.match(/^\/api\/projects\/([^/]+)\/pull-requests\/(\d+)\/diff$/);
       if (method === "GET" && diffPath) {
         const project = await store.getProject(z.string().uuid().parse(diffPath[1]), userId);
