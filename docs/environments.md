@@ -61,6 +61,10 @@ The server binds preparation to the authenticated owner, repository, and exact r
 
 ### Project setup script
 
+Setup scripts require database schema version 2. Deployments using
+`HERBIE_AUTO_MIGRATE=false` must run `pnpm --filter @herbie/service migrate`
+before starting this version; startup rejects the previous schema.
+
 An optional `setupScript` Bash script runs as root during E2B template preparation,
 before any repository checkout or agent execution. Its filesystem changes are
 cached in the template. The script is included in the template identity; editing

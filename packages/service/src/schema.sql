@@ -264,5 +264,5 @@ CREATE TABLE IF NOT EXISTS herbie_schema_version (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   version integer NOT NULL
 );
-INSERT INTO herbie_schema_version(singleton,version) VALUES (true,1)
+INSERT INTO herbie_schema_version(singleton,version) VALUES (true,2)
 ON CONFLICT (singleton) DO UPDATE SET version=EXCLUDED.version;
