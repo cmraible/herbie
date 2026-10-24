@@ -9,6 +9,7 @@ for (const enabled of [true, false]) {
   test(`feedback webhooks require signatures and PR context (execution=${enabled})`, async (t) => {
     const repositories: string[] = [];
     const store = {
+      reviewJobs: async () => [],
       requestFeedbackReview: async (repository: string) => {
         repositories.push(repository);
       },

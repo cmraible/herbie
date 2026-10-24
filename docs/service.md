@@ -38,7 +38,7 @@ Daytona sandboxes; GitHub write credentials stay on the Herbie host.
   in flight may finish; existing branches and PRs remain.
 - Failed attempts stop for attention. CI repairs update the same PR, with at most
   three repair sessions per PR. Failed repairs stop further automatic repair.
-- Passing CI can mark a draft PR ready for review and request review from the project owner; Herbie does not merge it. Review requests retry after failures without re-requesting users who are already requested or have reviewed.
+- Passing CI can mark a draft PR ready for review and request review from the project owner; Herbie merges after the project owner approves the current head and CI passes. Review requests retry after failures without re-requesting users who are already requested or have reviewed.
   Missing checks or unsupported ruleset-required workflows leave it as a draft.
 
 Human PR comments, inline comments, and submitted reviews trigger a feedback attempt
@@ -67,7 +67,13 @@ Issues permission to subscribe to [Issue comment events](https://docs.github.com
 existing installations must accept that permission update. Conversation-comment reactions
 use Issues write; inline-comment reactions use the existing Pull requests write permission.
 
-Signed webhooks trigger PR/CI/feedback reconciliation; a ten-minute server poll covers missed events.
+Signed pull request review and CI webhooks immediately trigger repository-scoped merge
+reconciliation without waiting for the next poll. Webhooks are acknowledged without waiting
+for GitHub API calls; approval, current head, and checks are re-read before merging.
+Concurrent events for a repository are coalesced, retaining a follow-up read for events
+received during reconciliation. The 30-second PR poll recovers missed events or restarts;
+a separate ten-minute poll covers CI repair and feedback. Ensure the App subscribes to
+Pull request review, Check run, Check suite, and Status events listed above.
 The browser receives project, PR, and run-event updates over `/api/stream` WebSockets
 without polling. Reverse proxies must forward WebSocket upgrades. Each API process
 uses one PostgreSQL LISTEN connection from its pool, requiring a direct or session-pooled
