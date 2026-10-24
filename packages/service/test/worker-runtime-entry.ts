@@ -1,9 +1,15 @@
 import pg from "pg";
+import { betterAuth } from "better-auth";
+import { Daytona } from "@daytona/sdk";
 
 export default {
   async fetch(request: Request): Promise<Response> {
     if (request.method === "GET") {
-      return Response.json({ postgresPoolAvailable: typeof pg.Pool === "function" });
+      return Response.json({
+        postgresPoolAvailable: typeof pg.Pool === "function",
+        betterAuthAvailable: typeof betterAuth === "function",
+        daytonaAvailable: typeof Daytona === "function",
+      });
     }
     if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
 
