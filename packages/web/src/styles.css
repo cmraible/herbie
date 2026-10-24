@@ -1203,3 +1203,27 @@ textarea::placeholder {
 .diff-file .diff-deletion {
   background: #3b2020;
 }
+.pr-description .language-diff .hljs-keyword,
+.pr-description .language-diff .hljs-selector-tag,
+.pr-description .language-diff .hljs-literal {
+  color: #c9a7f5;
+}
+.pr-description .language-diff .hljs-string,
+.pr-description .language-diff .hljs-attr,
+.pr-description .language-diff .hljs-template-variable {
+  color: #e8be85;
+}
+.pr-description .language-diff .hljs-number,
+.pr-description .language-diff .hljs-built_in,
+.pr-description .language-diff .hljs-type {
+  color: #9ed1ef;
+}
+.pr-description .language-diff .hljs-title,
+.pr-description .language-diff .hljs-function,
+.pr-description .language-diff .hljs-selector-class {
+  color: #a9d5aa;
+}
+.pr-description .language-diff .hljs-comment,
+.pr-description .language-diff .hljs-meta {
+  color: #a8b1aa;
+}
