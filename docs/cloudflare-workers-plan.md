@@ -93,7 +93,7 @@ and a schema version check before runtime startup. The existing Node startup
 migration path remains the default for rollout compatibility. Better Auth's
 migration module is loaded only by its explicit migration method.
 
-### 4. `test: establish Workers and Supavisor compatibility`
+### 4. `test: establish Workers and Supavisor compatibility` — in progress
 
 Create a small Workers test harness before selecting replacement libraries.
 Validate the actual Workers runtime, not just Node-based mocks:
@@ -119,6 +119,13 @@ representative request cost. Record whether Hyperdrive has a demonstrated benefi
 it is not an acceptance requirement or mandatory dependency.
 
 Migration: test resources only, using an isolated database and repository.
+
+The initial local harness runs request handling and Web Crypto in `workerd` via
+`pnpm --filter @herbie/service test:workers`. It establishes the runtime test
+seam; it does not yet validate the service modules or external integrations.
+Supavisor, auth/provider, Daytona, Git publication, and performance measurements
+remain outstanding and require isolated test resources. The current service
+entrypoint also imports Node APIs and must not be treated as Workers compatible.
 
 ### 5. `feat: add versioned portable change artifacts`
 
