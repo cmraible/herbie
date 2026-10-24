@@ -19,9 +19,13 @@ it("rejects unsupported request methods in the Workers runtime", async () => {
   expect(response.status).toBe(405);
 });
 
-it("loads the configured PostgreSQL driver in the Workers runtime", async () => {
+it("loads the database, auth, and Daytona SDK entrypoints in the Workers runtime", async () => {
   const response = await SELF.fetch("https://workers.test/", { method: "GET" });
 
   expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({ postgresPoolAvailable: true });
+  await expect(response.json()).resolves.toEqual({
+    postgresPoolAvailable: true,
+    betterAuthAvailable: true,
+    daytonaAvailable: true,
+  });
 });
