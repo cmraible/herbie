@@ -501,6 +501,7 @@ test("signed CI webhooks enqueue repository reviews without executing agents", a
   const queued: string[] = [];
   const server = createApiServer({
     store: {
+      reviewJobs: async () => [],
       requestCiReview: async (repo: string) => {
         queued.push(repo);
       },

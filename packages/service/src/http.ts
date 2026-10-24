@@ -96,6 +96,30 @@ export function createApiServer(options: ApiOptions) {
   const version = runningVersion(options.deploymentId, options.imageRevision);
   const legacy = "start" in auth ? (auth as ReturnType<typeof createAuth>) : undefined;
   const executionEnabled = options.executionEnabled ?? true;
+  const pendingReviews = new Set<string>();
+  const activeReviews = new Set<string>();
+  function requestReviewReconciliation(repository: string) {
+    pendingReviews.add(repository);
+    if (activeReviews.has(repository)) return;
+    activeReviews.add(repository);
+    // Acknowledge delivery without waiting for GitHub API calls. Coalesce bursts,
+    // but retain a wake-up arriving during a read so approvals aren't missed.
+    // The worker's 30-second reconciliation recovers process exits or API failures.
+    void (async () => {
+      try {
+        while (pendingReviews.delete(repository)) {
+          try {
+            await reconcileReviews(store, adapters, repository);
+          } catch (error) {
+            logFailure(error, { component: "webhook-review-reconciliation" });
+          }
+        }
+      } finally {
+        activeReviews.delete(repository);
+      }
+    })();
+  }
+
   function requireExecution() {
     if (!executionEnabled) throw new HttpError(503, "Live runs aren't configured yet");
   }
@@ -341,6 +365,18 @@ export function createApiServer(options: ApiOptions) {
           (request.headers["x-github-event"] !== "issue_comment" || event.data.issue?.pull_request)
         )
           await store.requestFeedbackReview(event.data.repository.full_name);
+      }
+      if (
+        executionEnabled &&
+        adapters.mode === "live" &&
+        ["pull_request_review", "check_run", "check_suite", "status"].includes(
+          String(request.headers["x-github-event"]),
+        )
+      ) {
+        const event = z
+          .object({ repository: z.object({ full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }) })
+          .safeParse(JSON.parse(payload.toString("utf8")));
+        if (event.success) requestReviewReconciliation(event.data.repository.full_name);
       }
       json(response, 200, { ok: true });
       return;
