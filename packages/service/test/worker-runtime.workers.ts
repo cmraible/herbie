@@ -15,6 +15,13 @@ it("runs request handling and Web Crypto inside the Workers runtime", async () =
 });
 
 it("rejects unsupported request methods in the Workers runtime", async () => {
-  const response = await SELF.fetch("https://workers.test/");
+  const response = await SELF.fetch("https://workers.test/", { method: "PUT" });
   expect(response.status).toBe(405);
+});
+
+it("loads the configured PostgreSQL driver in the Workers runtime", async () => {
+  const response = await SELF.fetch("https://workers.test/", { method: "GET" });
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ postgresPoolAvailable: true });
 });

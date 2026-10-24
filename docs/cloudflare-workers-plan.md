@@ -120,12 +120,14 @@ it is not an acceptance requirement or mandatory dependency.
 
 Migration: test resources only, using an isolated database and repository.
 
-The initial local harness runs request handling and Web Crypto in `workerd` via
-`pnpm --filter @herbie/service test:workers`. It establishes the runtime test
-seam; it does not yet validate the service modules or external integrations.
-Supavisor, auth/provider, Daytona, Git publication, and performance measurements
-remain outstanding and require isolated test resources. The current service
-entrypoint also imports Node APIs and must not be treated as Workers compatible.
+The local harness runs request handling, Web Crypto, and a `pg` package import in
+`workerd` via `pnpm --filter @herbie/service test:workers`. This establishes that
+the selected driver's module entrypoint loads in the runtime; it does not prove
+that it can open a TLS connection to Supavisor or validate service queries.
+Supavisor transactions, auth/provider, Daytona, Git publication, and performance
+measurements remain outstanding and require isolated test resources. The current
+service entrypoint also imports Node APIs and must not be treated as Workers
+compatible.
 
 ### 5. `feat: add versioned portable change artifacts`
 
