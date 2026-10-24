@@ -89,6 +89,14 @@ export interface Adapters {
   environmentLimits?(): Promise<Record<keyof EnvironmentResources, number | null>>;
   prepareEnvironment?(resources: EnvironmentResources | null, setupScript?: string): Promise<void>;
 
+  pullRequestAction?(
+    userId: string,
+    repository: string,
+    number: number,
+    action: "approve" | "merge",
+    headSha: string,
+    mergeMethod: "merge" | "squash" | "rebase",
+  ): Promise<void>;
   pullRequestDiff?(userId: string, repository: string, number: number): Promise<string>;
   feedback?(execution: Execution): Promise<PullRequestFeedback[]>;
   acknowledgeFeedback?(execution: Execution, requireLease: () => Promise<void>): Promise<void>;

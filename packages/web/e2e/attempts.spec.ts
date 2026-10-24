@@ -13,6 +13,7 @@ for (const [draft, checksPassed, label] of [
   test(`run selection and readiness: draft=${draft}, checks=${checksPassed}`, async ({ page }) => {
     const pr = (number: number) => ({
       number,
+      headSha: "1".repeat(40),
       ...(number === 2
         ? {
             title: "Improve project details",
@@ -134,6 +135,43 @@ for (const [draft, checksPassed, label] of [
     await expect(page.getByLabel("0 deletions", { exact: true })).toBeVisible();
     await expect(page.getByText("3 files changed", { exact: true })).toBeVisible();
     await expect(page.locator(".pr-metadata .badge")).toHaveText(label);
+    if (draft) {
+      await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Merge…", exact: true })).toBeDisabled();
+    } else {
+      const actions: string[] = [];
+      await page.route("**/api/projects/*/pull-requests/2/approve", (route) => {
+        expect(route.request().postDataJSON().headSha).toBe("1".repeat(40));
+        actions.push("approve");
+        return route.fulfill(json({ ok: true }));
+      });
+      await page.route("**/api/projects/*/pull-requests/2/merge", (route) => {
+        expect(route.request().postDataJSON()).toEqual({
+          headSha: "1".repeat(40),
+          mergeMethod: "rebase",
+        });
+        actions.push("merge");
+        return route.fulfill({
+          ...json({ error: "Required checks have not passed." }),
+          status: 409,
+        });
+      });
+      await page.getByRole("button", { name: "Approve", exact: true }).click();
+      await expect(page.getByText("Your approval was submitted.")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Approved", exact: true })).toBeDisabled();
+      await page.getByRole("button", { name: "Merge…", exact: true }).click();
+      expect(actions).toEqual(["approve"]);
+      await page.getByLabel("Merge method").selectOption("rebase");
+      await page.getByRole("button", { name: "Confirm merge", exact: true }).click();
+      await expect(page.getByRole("alert")).toHaveText("Required checks have not passed.");
+      await page.route("**/api/projects/*/pull-requests/2/merge", (route) =>
+        route.fulfill(json({ ok: true })),
+      );
+      await page.getByRole("button", { name: "Confirm merge", exact: true }).click();
+      await expect(page.getByText("Pull request merged.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Merge…", exact: true })).toHaveCount(0);
+    }
+
     await page.getByRole("link", { name: "Attempt history", exact: true }).click();
     await one.focus();
     await page.keyboard.press("Enter");

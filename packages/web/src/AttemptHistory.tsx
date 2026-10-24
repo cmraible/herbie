@@ -1,3 +1,4 @@
+import { PullRequestActions } from "./PullRequestActions.js";
 import { DiffCode } from "./DiffCode.js";
 import { PullRequestDiff } from "./PullRequestDiff.js";
 import Markdown from "react-markdown";
@@ -167,6 +168,13 @@ export function AttemptHistory({
                   </span>
                 )}
               </div>
+              {pr.state === "open" && (
+                <PullRequestActions
+                  key={`${pr.number}/${pr.headSha}`}
+                  projectId={project.id}
+                  pr={pr}
+                />
+              )}
               {pr.body && (
                 <div className="pr-description">
                   <Markdown remarkPlugins={[remarkGfm]} components={{ code: DiffCode }} skipHtml>

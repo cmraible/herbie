@@ -29,6 +29,8 @@ export async function githubFixture(t: TestContext) {
     installationId: 11,
     installationToken: "ghs_fixture",
     pr: false,
+    draft: true,
+    mergeSucceeds: true,
     prState: "open" as "open" | "closed",
     mergedAt: null as string | null,
     losePrResponse: false,
@@ -126,13 +128,18 @@ export async function githubFixture(t: TestContext) {
       req.headers.accept === "application/vnd.github.diff"
     )
       res.end(fixture.patch);
-    else if (path.startsWith("/repos/alice/project/pulls/8/files"))
+    else if (path === "/repos/alice/project/pulls/8/reviews")
+      res.end(JSON.stringify({ state: "APPROVED" }));
+    else if (path === "/repos/alice/project/pulls/8/merge") {
+      assert.equal(req.method, "PUT");
+      res.end(JSON.stringify({ merged: fixture.mergeSucceeds }));
+    } else if (path.startsWith("/repos/alice/project/pulls/8/files"))
       res.end(JSON.stringify([{ filename: "file.txt", status: "modified", patch: fixture.patch }]));
     else if (path.startsWith("/repos/alice/project/pulls")) {
       const pr = {
         title: "Fix bug",
         body: "Verified evidence",
-        draft: true,
+        draft: fixture.draft,
         additions: 12,
         deletions: 3,
         changed_files: 2,
@@ -1066,4 +1073,43 @@ test("GitHub secondary rate limit bodies still trigger the shared cooldown", asy
     message: "GitHub rate limit cooldown",
   });
   assert.equal(requests.length, 1);
+});
+
+test("PR actions pin approval and merge to the reviewed commit using the user token", async (t) => {
+  const { github, fixture, requests } = await githubFixture(t);
+  fixture.draft = false;
+  const sha = "1".repeat(40);
+  await github.pullRequestAction("user-token", "alice/project", 8, "approve", sha, "squash");
+  assert.deepEqual(requests.at(-1)?.body, { event: "APPROVE", commit_id: sha });
+  assert.equal(requests.at(-1)?.authorization, "Bearer user-token");
+  await github.pullRequestAction("user-token", "alice/project", 8, "merge", sha, "rebase");
+  assert.deepEqual(requests.at(-1)?.body, { sha, merge_method: "rebase" });
+  fixture.mergeSucceeds = false;
+  await assert.rejects(
+    github.pullRequestAction("user-token", "alice/project", 8, "merge", sha, "squash"),
+    /could not merge/,
+  );
+});
+
+test("PR actions reject draft, closed, and changed PRs before writing", async (t) => {
+  const { github, fixture, requests } = await githubFixture(t);
+  for (const action of ["approve", "merge"] as const) {
+    fixture.draft = true;
+    await assert.rejects(
+      github.pullRequestAction("token", "alice/project", 8, action, "1".repeat(40), "squash"),
+      /ready for review/,
+    );
+    fixture.draft = false;
+    await assert.rejects(
+      github.pullRequestAction("token", "alice/project", 8, action, "2".repeat(40), "squash"),
+      /has changed/,
+    );
+    fixture.prState = "closed";
+    await assert.rejects(
+      github.pullRequestAction("token", "alice/project", 8, action, "1".repeat(40), "squash"),
+      /open and ready/,
+    );
+    fixture.prState = "open";
+  }
+  assert.ok(requests.every((request) => request.body === null));
 });

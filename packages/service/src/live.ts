@@ -47,6 +47,18 @@ export function createLiveAdapters(
     ...(config?.provider === "e2b"
       ? { prepareEnvironment: createE2BEnvironmentPreparer(config) }
       : {}),
+    async pullRequestAction(userId, repository, number, action, headSha, mergeMethod) {
+      const token = await auth.userToken(userId);
+      const access = await github.authorize(token, repository);
+      await github.pullRequestAction(
+        token,
+        access.repository,
+        number,
+        action,
+        headSha,
+        mergeMethod,
+      );
+    },
     async pullRequestDiff(userId, repository, number) {
       const access = await github.authorize(await auth.userToken(userId), repository);
       const token = await github.installationToken(

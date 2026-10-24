@@ -149,6 +149,18 @@ export function createClient(options: { baseUrl?: string; token?: string; origin
     discoverRepositories,
     repositories: async () => (await discoverRepositories()).repositories,
     projects: () => request("/api/projects", z.array(projectSchema)),
+    pullRequestAction: (
+      id: string,
+      number: number,
+      action: "approve" | "merge",
+      headSha: string,
+      mergeMethod: "merge" | "squash" | "rebase" = "squash",
+    ) =>
+      request(
+        `${projectPath(id)}/pull-requests/${z.number().int().positive().parse(number)}/${z.enum(["approve", "merge"]).parse(action)}`,
+        z.object({ ok: z.literal(true) }),
+        { headSha, mergeMethod },
+      ),
     pullRequestDiff: (id: string, number: number) =>
       request(
         `${projectPath(id)}/pull-requests/${z.number().int().positive().parse(number)}/diff`,
