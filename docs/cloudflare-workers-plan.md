@@ -11,9 +11,11 @@ and resumable execution handlers. Runtime adapters handle HTTP serving, task
 delivery, configuration, and database connections.
 
 The initial Cloudflare deployment uses Workers, static assets, Queues, Cron
-Triggers, and Supabase PostgreSQL through Supavisor transaction pooling. Daytona
-continues to run agents independently. No persistent Cloudflare container is part
-of the target architecture.
+Triggers, and Supabase PostgreSQL through Supavisor transaction pooling. E2B, the
+production sandbox provider, continues to run agents independently. Daytona
+remains supported on k3s; its Workers integration is optional and does not gate
+this migration. No persistent Cloudflare container is part of the target
+architecture.
 
 Hyperdrive is optional. Start by validating Workers connecting directly to
 Supavisor using a compatible PostgreSQL driver. Supavisor protects database
@@ -93,7 +95,26 @@ and a schema version check before runtime startup. The existing Node startup
 migration path remains the default for rollout compatibility. Better Auth's
 migration module is loaded only by its explicit migration method.
 
-### 4. `test: establish Workers and Supavisor compatibility` — in progress
+### 4. `test: establish Workers and Supavisor compatibility` — harness complete; live verification deferred
+
+Sequencing decision: proceed to item 5. Do not stop at item 4 solely because live
+test resources are unavailable. The local harness is complete for its current
+scope; end-to-end compatibility has not been established. Independent
+implementation can continue, with the following deferred checks remaining gates:
+
+- Item 6 must prove the selected Git transport's atomic branch creation,
+  expected-head protection, ambiguous-write recovery, and representative resource
+  usage before it is considered complete. Item 7 must not enable it by default
+  without that evidence.
+- Item 14 must verify real Supavisor transaction-pool connectivity and service
+  queries, authentication/credential handling, and live E2B operations in Workers
+  before it is considered complete.
+- Item 16 must not activate a Workers release until those integration checks and
+  database setup/transaction latency and request-cost measurements are recorded.
+  Item 17 still gates production ownership handoff on recovery and rollout tests.
+
+Record commands, results, runtime versions, and measurements in the corresponding
+PRs. Local mocks and connector API checks do not satisfy these live gates.
 
 Create a small Workers test harness before selecting replacement libraries.
 Validate the actual Workers runtime, not just Node-based mocks:
@@ -104,7 +125,10 @@ Validate the actual Workers runtime, not just Node-based mocks:
 - Explicit transactions, row locks, conditional updates, transaction-local
   settings, private-schema access, and Better Auth queries.
 - Auth, credential encryption, GitHub signing, and dependency compatibility.
-- Required Daytona operations through compatible SDK imports or HTTP adapters.
+- Required E2B operations through compatible SDK imports or HTTP adapters: template
+  resolution, sandbox creation/reconnection, commands, file transfers, observation,
+  and confirmed cleanup. Validate the production provider rather than requiring
+  Daytona credentials.
 - Portable Git object construction and conditional ref updates, including CPU
   and memory consumption for representative artifacts.
 
@@ -122,12 +146,14 @@ Migration: test resources only, using an isolated database and repository.
 
 The local harness runs request handling, Web Crypto AES-GCM credential encryption
 and RSA signing round trips, rejects a modified AES-GCM ciphertext, and imports
-the `pg`, Better Auth, and Daytona SDK entrypoints in `workerd` via
-`pnpm --filter @herbie/service test:workers`. This establishes runtime primitive
-support and that these package entrypoints load; it does not exercise the service's
-encryption or signing code, prove that `pg` can
-open a TLS connection to Supavisor, or validate service queries. Supavisor
-transactions, auth/provider flows, Daytona operations, Git publication, and
+the `pg`, Better Auth, and Daytona SDK entrypoints plus the E2B provider in
+`workerd` via `pnpm --filter @herbie/service test:workers`. The E2B adapter also
+runs creation, reconnection, command execution, and cleanup with injected SDK
+responses; this checks local runtime behavior, not live provider transport.
+This establishes runtime primitive support and that these package entrypoints
+load; it does not exercise the service's encryption or signing code, prove that
+`pg` can open a TLS connection to Supavisor, or validate service queries. Supavisor
+transactions, auth/provider flows, live E2B operations, Git publication, and
 performance measurements remain outstanding and require isolated test resources.
 The current service entrypoint also imports Node APIs and must not be treated as
 Workers compatible.
@@ -137,8 +163,8 @@ Workers compatible.
 Introduce a versioned artifact containing changed paths, expected base entries,
 final file bytes, and Git modes. The trusted publisher validates changes against
 the captured base commit and constructs blobs, trees, and a commit without
-applying a patch through a subprocess. Native Git may remain inside Daytona for
-collecting changes.
+applying a patch through a subprocess. Native Git may remain inside the agent
+sandbox for collecting changes.
 
 Support binary files, deletion, executable bits, symlinks, and renames represented
 as deletion/addition. Define gitlink behavior explicitly and reject unsupported
@@ -153,7 +179,8 @@ reject malformed paths, mismatched base entries, and oversized content.
 
 ### 6. `feat: implement portable Git publication`
 
-Implement the transport proven in commit 4. Preserve the exact captured parent,
+Complete the Git transport evaluation deferred from item 4 and implement the
+proven transport. Preserve the exact captured parent,
 atomic branch creation, expected-head protection, authorization and lease checks
 immediately before writes, and existing verification/cleanup requirements.
 Persist the intended commit identity before a potentially ambiguous push and
@@ -231,7 +258,7 @@ repair, feedback, and publication recovery.
 Add bounded sweeps for undelivered outbox entries, expired operation leases,
 missing observations, cleanup deadlines, GitHub reconciliation, and delayed
 publication retries. Use GitHub webhooks for prompt work and periodic reads for
-recovery. Start with scheduled Daytona observations; completion callbacks are
+recovery. Start with scheduled sandbox observations; completion callbacks are
 optional later. A callback only triggers authenticated status verification.
 
 Migration: backfill eligible task intent idempotently. Uncertain publication
@@ -265,8 +292,8 @@ commits retain existing correctness.
 ### 14. `feat: add Workers runtime with Supavisor database access`
 
 Add HTTP, queue, and scheduled Workers entrypoints, static asset bindings, and
-runtime configuration. Promote the database adapter proven in commit 4 to the
-application runtime. Separate Node-only imports and configuration validation;
+runtime configuration. Complete the live database, auth, and E2B verification
+deferred from item 4 before promoting the proven adapter to the application runtime. Separate Node-only imports and configuration validation;
 the current rejection of transaction pooling remains for legacy Node paths but
 does not apply to the new transaction-safe Workers adapter.
 
