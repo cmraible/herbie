@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
+import type { PortableChangeArtifact } from "./portable-change-artifact.js";
 
 export class GitPublicationHeadChangedError extends Error {}
 
@@ -20,6 +21,7 @@ export async function createAndPushGitPublication(request: {
   baseCommit: string;
   title: string;
   patch: Buffer;
+  changeSet?: PortableChangeArtifact;
   expectedHead?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   beforeWrite?: () => Promise<void>;
@@ -65,9 +67,32 @@ export async function createAndPushGitPublication(request: {
     // Keep the exact captured tree and parent even when other work advances main.
     await git("merge-base", "--is-ancestor", request.baseCommit, "FETCH_HEAD");
     await git("read-tree", request.baseCommit);
-    const patchFile = join(directory, "changes.patch");
-    await writeFile(patchFile, request.patch);
-    await git("apply", "--cached", "--binary", patchFile);
+    if (request.changeSet) {
+      for (const change of request.changeSet.changes) {
+        const indexed = await git("ls-files", "--stage", "--", change.path);
+        const entry = indexed.trim().match(/^(\d+) ([0-9a-f]+) 0\t/);
+        if (
+          change.expectedBase === null
+            ? Boolean(entry)
+            : !entry ||
+              entry[1] !== change.expectedBase.mode ||
+              entry[2] !== change.expectedBase.objectId
+        )
+          throw new Error(`Captured base entry changed for ${change.path}`);
+        if (change.final === null) {
+          if (entry) await git("update-index", "--force-remove", "--", change.path);
+          continue;
+        }
+        const contentFile = join(directory, "content-" + Math.random().toString(16).slice(2));
+        await writeFile(contentFile, Buffer.from(change.final.contentBase64, "base64"));
+        const blob = await git("hash-object", "-w", contentFile);
+        await git("update-index", "--add", "--cacheinfo", change.final.mode, blob, change.path);
+      }
+    } else {
+      const patchFile = join(directory, "changes.patch");
+      await writeFile(patchFile, request.patch);
+      await git("apply", "--cached", "--binary", patchFile);
+    }
     const tree = await git("write-tree");
     if (tree === (await git("rev-parse", `${request.baseCommit}^{tree}`)))
       throw new Error("Patch has no repository changes");

@@ -211,6 +211,35 @@ test("publishes the checked bytes even if the caller mutates its buffer while pu
   assert.match(await git(remote, "show", `${commit}:add.mjs`), /return a \+ b/);
 });
 
+test("publishes versioned file entries as Git objects with the captured parent", async (t) => {
+  const { remote, changes, request, publish } = await fixture(t);
+  const baseBlob = await git(remote, "rev-parse", `${changes.baseCommit}:add.mjs`);
+  request.changes.changeSet = {
+    version: 1,
+    changes: [
+      {
+        path: "add.mjs",
+        expectedBase: { mode: "100644", objectId: baseBlob },
+        final: {
+          mode: "100644",
+          contentBase64: Buffer.from("export function add(a, b) {\n  return a + b;\n}\n").toString(
+            "base64",
+          ),
+        },
+      },
+    ],
+  };
+  request.changes.verification!.changeSetSha256 = createHash("sha256")
+    .update(JSON.stringify(request.changes.changeSet))
+    .digest("hex");
+  const result = await publish();
+  assert.equal(await git(remote, "rev-parse", `${result.commit}^`), changes.baseCommit);
+  assert.equal(
+    await git(remote, "show", `${result.commit}:add.mjs`),
+    "export function add(a, b) {\n  return a + b;\n}",
+  );
+});
+
 for (const overlapping of [false, true]) {
   test(`publishes the exact captured tree when main advances with ${overlapping ? "overlapping" : "unrelated"} changes`, async (t) => {
     const { repo, remote, changes, request, createPullRequest } = await fixture(t);
