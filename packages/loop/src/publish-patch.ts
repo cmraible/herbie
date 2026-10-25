@@ -118,6 +118,7 @@ export async function publishPatch(
       baseCommit,
       title,
       patch,
+      changeSet: changes.changeSet,
       expectedHead: update?.head,
       gitEnvironment: request.gitEnvironment,
       beforeWrite: request.beforeWrite,

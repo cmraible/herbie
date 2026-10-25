@@ -199,6 +199,14 @@ bound publication work around changed content and required trees.
 
 Migration: opt-in on k3s initially. Keep native Git available.
 
+Progress: the native publisher now constructs its Git tree from versioned portable
+file entries when available, validating each captured base entry and preserving
+the captured parent. Legacy patches still use the native patch adapter. Focused
+local tests cover artifact publication and concurrent base branch advancement.
+The step remains incomplete: the deferred Workers runtime transport evaluation,
+resource measurements, and durable persistence/reconciliation of intended commit
+identity across ambiguous pushes still require implementation and evidence.
+
 Validation: equivalence with native publication, concurrent head changes, existing
 branches, and lost responses after successful remote writes.
 
