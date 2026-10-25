@@ -20,6 +20,7 @@ import {
   type ProjectEvent,
 } from "@herbie/contracts";
 import { hasValidPublicationEvidence } from "@herbie/loop/publish-patch";
+import { parsePortableChangeArtifact } from "@herbie/loop/portable-change-artifact";
 import type { PullRequestFeedback, PublicationPhase, Execution } from "./adapters.js";
 import type { AgentAttemptChanges, AttemptCheckpoint } from "@herbie/loop/agent-attempt";
 
@@ -37,6 +38,7 @@ const databaseProject = z.object({
 const artifactSchema = z.object({
   baseCommit: z.string(),
   patchBase64: z.string(),
+  changeSet: z.unknown().optional(),
   publicationDecision: z
     .object({ action: z.literal("pause"), reason: z.string().trim().min(1).max(2000) })
     .optional(),
@@ -54,6 +56,7 @@ const artifactSchema = z.object({
       repoUrl: z.string(),
       baseCommit: z.string(),
       patchSha256: z.string(),
+      changeSetSha256: z.string().optional(),
       goalCompleted: z.literal(true),
       sandboxDeleted: z.literal(true),
       localChecksPassed: z.literal(true).optional(),
@@ -157,8 +160,12 @@ function decodeArtifact(
   encoded: z.infer<typeof artifactSchema> | null,
 ): AgentAttemptChanges | null {
   if (!encoded) return null;
-  const { patchBase64, ...metadata } = encoded;
-  return { ...metadata, patch: Buffer.from(patchBase64, "base64") };
+  const { patchBase64, changeSet, ...metadata } = encoded;
+  return {
+    ...metadata,
+    ...(changeSet === undefined ? {} : { changeSet: parsePortableChangeArtifact(changeSet) }),
+    patch: Buffer.from(patchBase64, "base64"),
+  };
 }
 function decodeJob(row: z.infer<typeof jobRow>, project: Project): Job {
   return {
@@ -897,9 +904,7 @@ export class Store {
     if (!row) throw conflict("Missing agent session");
     return {
       checkpoint: { ...row.checkpoint, transcriptOffset: Number(row.transcript_offset ?? 0) },
-      artifact: row.artifact
-        ? { ...row.artifact, patch: Buffer.from(row.artifact.patchBase64, "base64") }
-        : null,
+      artifact: row.artifact ? decodeArtifact(artifactSchema.parse(row.artifact)) : null,
     };
   }
 

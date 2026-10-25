@@ -158,7 +158,7 @@ performance measurements remain outstanding and require isolated test resources.
 The current service entrypoint also imports Node APIs and must not be treated as
 Workers compatible.
 
-### 5. `feat: add versioned portable change artifacts`
+### 5. `feat: add versioned portable change artifacts` — complete
 
 Introduce a versioned artifact containing changed paths, expected base entries,
 final file bytes, and Git modes. The trusted publisher validates changes against
@@ -176,6 +176,16 @@ binds the validated representation to the repository and base commit.
 
 Validation: compare resulting Git trees with native Git across supported changes;
 reject malformed paths, mismatched base entries, and oversized content.
+
+Completed with a versioned per-path artifact emitted alongside the legacy patch.
+It records the captured base blob/mode and final bytes/mode, covering binary
+content, additions, deletions, executable files, symlinks, and rename-as-delete
+plus-add. The host validates and persists both forms while legacy readers continue
+to use the patch, and host-issued verification evidence hashes the portable form.
+Gitlinks are explicitly rejected when changed; paths, duplicate
+entries, encodings, file counts, and aggregate bytes are bounded. Unit coverage
+checks binary data, modes, deletion, malformed paths, and invalid entries. The
+portable publisher and end-to-end native-tree equivalence remain item 6 work.
 
 ### 6. `feat: implement portable Git publication`
 

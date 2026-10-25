@@ -10,6 +10,7 @@
     "./publish-patch": "./dist/publish-patch.js",
     "./diagnostic-log": "./dist/diagnostic-log.js",
     "./agent-attempt": "./dist/agent-attempt.js",
+    "./portable-change-artifact": "./dist/portable-change-artifact.js",
     "./e2b": "./dist/e2b.js"
   },
   "scripts": {

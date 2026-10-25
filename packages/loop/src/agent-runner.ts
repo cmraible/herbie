@@ -1,5 +1,7 @@
 import { parsePublicationDecision } from "./publication-decision.js";
 import type { AgentAttemptArtifact } from "./agent-attempt.js";
+import { MAX_PATCH_BYTES } from "./artifact-limits.js";
+import type { PortableChange } from "./portable-change-artifact.js";
 import { parseFeedbackDecision } from "./feedback-decision.js";
 import { sandboxFailureOutput, registerDiagnosticSecret } from "./diagnostic-log.js";
 import { appendFileSync } from "node:fs";
@@ -126,6 +128,85 @@ Explain the specific change you actually made, why you chose it, and how it help
     "--",
   );
   const patch = await readFile(patchFile);
+  const baseTree = (await git("ls-tree", "-rz", "-r", "--full-tree", baseCommit))
+    .split("\0")
+    .filter(Boolean);
+  const indexTree = (await git("ls-files", "--stage", "-z")).split("\0").filter(Boolean);
+  const baseEntries = new Map<string, { mode: string; objectId: string }>();
+  const finalEntries = new Map<string, { mode: string; objectId: string }>();
+  const parseEntry = (record: string, indexed: boolean) => {
+    const tab = record.indexOf("\t");
+    if (tab < 0) throw new Error("Invalid Git tree entry");
+    const metadata = record.slice(0, tab).split(" ");
+    const path = record.slice(tab + 1);
+    if (indexed ? metadata.length !== 3 || metadata[2] !== "0" : metadata.length !== 3)
+      throw new Error("Unsupported conflicted or unmerged Git entry");
+    const [mode, typeOrObject, objectOrStage] = metadata;
+    const objectId = indexed ? typeOrObject : objectOrStage;
+    if (mode !== "160000" && mode !== "100644" && mode !== "100755" && mode !== "120000")
+      throw new Error("Unsupported Git file mode in portable change artifact");
+    return { path, entry: { mode, objectId } };
+  };
+  for (const record of baseTree) {
+    const { path, entry } = parseEntry(record, false);
+    baseEntries.set(path, entry);
+  }
+  for (const record of indexTree) {
+    const { path, entry } = parseEntry(record, true);
+    finalEntries.set(path, entry);
+  }
+  const changedPaths = [...new Set([...baseEntries.keys(), ...finalEntries.keys()])].filter(
+    (path) =>
+      baseEntries.get(path)?.objectId !== finalEntries.get(path)?.objectId ||
+      baseEntries.get(path)?.mode !== finalEntries.get(path)?.mode,
+  );
+  if (changedPaths.length > 10_000) throw new Error("Portable change artifact has too many files");
+  if (
+    changedPaths.some(
+      (path) =>
+        path.includes("\ufffd") ||
+        path.includes("\\") ||
+        path.startsWith("/") ||
+        path.split("/").some((part) => !part || part === "." || part === ".."),
+    )
+  )
+    throw new Error("Repository path cannot be represented in a portable change artifact");
+  if (
+    changedPaths.some(
+      (path) =>
+        baseEntries.get(path)?.mode === "160000" || finalEntries.get(path)?.mode === "160000",
+    )
+  )
+    throw new Error("Git submodule changes are not supported in portable change artifacts");
+  let portableBytes = 0;
+  const changeSet = await Promise.all(
+    changedPaths.map(async (path): Promise<PortableChange> => {
+      const base = baseEntries.get(path) ?? null;
+      const current = finalEntries.get(path) ?? null;
+      let final: PortableChange["final"] = null;
+      if (current) {
+        const content = await promisify(execFile)("git", ["cat-file", "blob", current.objectId], {
+          cwd,
+          encoding: "buffer",
+          maxBuffer: MAX_PATCH_BYTES,
+        });
+        portableBytes += content.stdout.length;
+        if (portableBytes > MAX_PATCH_BYTES)
+          throw new Error("Portable change artifact exceeds its byte limit");
+        final = {
+          mode: current.mode as "100644" | "100755" | "120000",
+          contentBase64: content.stdout.toString("base64"),
+        };
+      }
+      return {
+        path,
+        expectedBase: base
+          ? { mode: base.mode as "100644" | "100755" | "120000", objectId: base.objectId }
+          : null,
+        final,
+      };
+    }),
+  );
   if (publicationDecision && patch.length > 0)
     throw new Error("Pause decision requires an unchanged repository");
   if (feedbackDecision && (feedbackDecision.action === "update") !== patch.length > 0)
@@ -140,6 +221,7 @@ Explain the specific change you actually made, why you chose it, and how it help
       pullRequestBody,
       pullRequestTitle,
       patchBase64: patch.toString("base64"),
+      changeSet: { version: 1, changes: changeSet },
     } satisfies AgentAttemptArtifact),
   );
   process.stdout.write("herbie-attempt-completed\n");
