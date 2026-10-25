@@ -95,7 +95,26 @@ and a schema version check before runtime startup. The existing Node startup
 migration path remains the default for rollout compatibility. Better Auth's
 migration module is loaded only by its explicit migration method.
 
-### 4. `test: establish Workers and Supavisor compatibility` — in progress
+### 4. `test: establish Workers and Supavisor compatibility` — harness complete; live verification deferred
+
+Sequencing decision: proceed to item 5. Do not stop at item 4 solely because live
+test resources are unavailable. The local harness is complete for its current
+scope; end-to-end compatibility has not been established. Independent
+implementation can continue, with the following deferred checks remaining gates:
+
+- Item 6 must prove the selected Git transport's atomic branch creation,
+  expected-head protection, ambiguous-write recovery, and representative resource
+  usage before it is considered complete. Item 7 must not enable it by default
+  without that evidence.
+- Item 14 must verify real Supavisor transaction-pool connectivity and service
+  queries, authentication/credential handling, and live E2B operations in Workers
+  before it is considered complete.
+- Item 16 must not activate a Workers release until those integration checks and
+  database setup/transaction latency and request-cost measurements are recorded.
+  Item 17 still gates production ownership handoff on recovery and rollout tests.
+
+Record commands, results, runtime versions, and measurements in the corresponding
+PRs. Local mocks and connector API checks do not satisfy these live gates.
 
 Create a small Workers test harness before selecting replacement libraries.
 Validate the actual Workers runtime, not just Node-based mocks:
@@ -160,7 +179,8 @@ reject malformed paths, mismatched base entries, and oversized content.
 
 ### 6. `feat: implement portable Git publication`
 
-Implement the transport proven in commit 4. Preserve the exact captured parent,
+Complete the Git transport evaluation deferred from item 4 and implement the
+proven transport. Preserve the exact captured parent,
 atomic branch creation, expected-head protection, authorization and lease checks
 immediately before writes, and existing verification/cleanup requirements.
 Persist the intended commit identity before a potentially ambiguous push and
@@ -272,8 +292,8 @@ commits retain existing correctness.
 ### 14. `feat: add Workers runtime with Supavisor database access`
 
 Add HTTP, queue, and scheduled Workers entrypoints, static asset bindings, and
-runtime configuration. Promote the database adapter proven in commit 4 to the
-application runtime. Separate Node-only imports and configuration validation;
+runtime configuration. Complete the live database, auth, and E2B verification
+deferred from item 4 before promoting the proven adapter to the application runtime. Separate Node-only imports and configuration validation;
 the current rejection of transaction pooling remains for legacy Node paths but
 does not apply to the new transaction-safe Workers adapter.
 
