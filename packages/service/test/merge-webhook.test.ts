@@ -60,8 +60,14 @@ for (const enabled of [true, false]) {
     const store = {
       requestCiReview: async () => {},
       requestFeedbackReview: async () => {},
-      reviewJobs: async (_mode: unknown, _pending: unknown, repository: string) => {
+      reviewJobs: async (
+        _mode: unknown,
+        _pending: unknown,
+        repository: string,
+        number?: number,
+      ) => {
         assert.equal(repository, "org/repo");
+        assert.ok(number === undefined || number === 1);
         return [job];
       },
       reconcilePullRequestHead: async () => false,
@@ -104,6 +110,7 @@ for (const enabled of [true, false]) {
         body: JSON.stringify({
           repository: { full_name: repository },
           review: { state: "approved" },
+          pull_request: { number: 1 },
         }),
       });
     assert.equal((await send("pull_request_review", "forged")).status, 401);
@@ -112,7 +119,7 @@ for (const enabled of [true, false]) {
     // The response must finish even while authoritative GitHub reads are blocked.
     assert.equal((await send("pull_request_review")).status, 200);
     if (enabled) await until(() => reads === 1);
-    for (const event of ["check_run", "check_suite", "status"]) {
+    for (const event of ["pull_request_review", "pull_request_review"]) {
       assert.equal((await send(event)).status, 200);
     }
     assert.equal(reads, enabled ? 1 : 0);
@@ -127,5 +134,60 @@ for (const enabled of [true, false]) {
       if (enabled) await until(() => merges > before);
     }
     assert.equal(merges, enabled ? 4 : 0);
+  });
+}
+
+for (const event of ["pull_request_review", "pull_request"]) {
+  test(`${event} targets its PR without waiting for another PR`, async (t) => {
+    const reads: number[] = [];
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    t.after(release);
+    const server = createApiServer({
+      store: {
+        requestCiReview: async () => {},
+        requestFeedbackReview: async () => {},
+        reviewJobs: async (
+          _mode: unknown,
+          _pending: unknown,
+          repository: string,
+          number: number,
+        ) => {
+          assert.equal(repository, "org/repo");
+          assert.ok(number === 1 || number === 2, "must not reconcile the whole repository");
+          reads.push(number);
+          if (number === 1) await gate;
+          return [];
+        },
+      } as unknown as Store,
+      auth: testAuth(),
+      publicUrl: "http://localhost:8787",
+      executionEnabled: true,
+      verifyWebhook: () => true,
+      adapters: { ...createDemoAdapters(), mode: "live" },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const send = (number: unknown) =>
+      fetch(`http://127.0.0.1:${address.port}/api/webhooks/github`, {
+        method: "POST",
+        signal: AbortSignal.timeout(2000),
+        headers: { "x-github-event": event, "x-hub-signature-256": "valid" },
+        body: JSON.stringify({ repository: { full_name: "org/repo" }, pull_request: { number } }),
+      });
+    for (const invalid of [undefined, 0, -1, "1", 1.5]) {
+      assert.equal((await send(invalid)).status, 200);
+    }
+    assert.equal(reads.length, 0);
+    assert.equal((await send(1)).status, 200);
+    await until(() => reads.includes(1));
+    assert.equal((await send(2)).status, 200);
+    await until(() => reads.includes(2));
+    assert.deepEqual(reads, [1, 2]);
+    release();
   });
 }

@@ -293,10 +293,11 @@ export async function reconcileReviews(
   store: Store,
   adapters: Adapters,
   repository?: string,
+  pullRequestNumber?: number,
 ): Promise<void> {
   // Recovery of a past write must not depend on current CI, project state, or PR state.
   if (adapters.readinessState)
-    for (const job of await store.reviewJobs(adapters.mode, true, repository)) {
+    for (const job of await store.reviewJobs(adapters.mode, true, repository, pullRequestNumber)) {
       try {
         const state = await adapters.readinessState(await executionFor(adapters, job, true));
         if (
@@ -319,7 +320,7 @@ export async function reconcileReviews(
         });
       }
     }
-  for (const job of await store.reviewJobs(adapters.mode, false, repository)) {
+  for (const job of await store.reviewJobs(adapters.mode, false, repository, pullRequestNumber)) {
     try {
       const current = await adapters.reconcile(await executionFor(adapters, job, true));
       if (current?.state === "open" && current.headSha) {

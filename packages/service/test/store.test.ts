@@ -445,6 +445,19 @@ integration(
       });
     }
     assert.equal((await store.reviewJobs()).length, 2);
+    assert.deepEqual(
+      (await store.reviewJobs("demo", false, request.repository, 2)).map((job) => job.id),
+      [claimed[1]!.id],
+    );
+    assert.deepEqual(await store.reviewJobs("demo", false, "other/repo", 2), []);
+    assert.deepEqual(await store.reviewJobs("demo", false, request.repository, 99), []);
+    await store.pool.query("UPDATE jobs SET readiness_pending=true WHERE id=$1", [claimed[1]!.id]);
+    assert.deepEqual(
+      (await store.reviewJobs("demo", true, request.repository, 2)).map((job) => job.id),
+      [claimed[1]!.id],
+    );
+    assert.deepEqual(await store.reviewJobs("demo", true, request.repository, 1), []);
+
     const firstJob = claimed.find((job) => job?.project.id === first.id);
     assert.ok(firstJob);
     await store.reconcile(firstJob.id, "merged");
