@@ -101,15 +101,22 @@ export async function createAndPushGitPublication(request: {
     await request.beforeWrite?.();
     await request.onPhase?.("pushing");
     // An empty expected value makes branch creation atomic: never replace an existing ref.
-    const pushed = await git(
-      "push",
-      "--porcelain",
-      `--force-with-lease=${headRef}:${request.expectedHead ?? ""}`,
-      "origin",
-      `${commit}:${headRef}`,
-    );
-    if (!pushed.split("\n").some((line) => line.startsWith(request.expectedHead ? " \t" : "*\t")))
-      throw new Error("Push did not create a new branch");
+    try {
+      const pushed = await git(
+        "push",
+        "--porcelain",
+        `--force-with-lease=${headRef}:${request.expectedHead ?? ""}`,
+        "origin",
+        `${commit}:${headRef}`,
+      );
+      if (!pushed.split("\n").some((line) => line.startsWith(request.expectedHead ? " \t" : "*\t")))
+        throw new Error("Push did not create a new branch");
+    } catch (pushError) {
+      // A transport error can arrive after the server accepted the ref update.
+      // Confirm the exact intended commit before classifying the write as uncertain.
+      const confirmedHead = (await git("ls-remote", "--heads", "origin", headRef)).split("\t")[0];
+      if (confirmedHead !== commit) throw pushError;
+    }
     result = { commit };
   } catch (error) {
     failures.push(error);

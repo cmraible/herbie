@@ -203,9 +203,12 @@ Progress: the native publisher now constructs its Git tree from versioned portab
 file entries when available, validating each captured base entry and preserving
 the captured parent. Legacy patches still use the native patch adapter. Focused
 local tests cover artifact publication and concurrent base branch advancement.
+The publisher now also checks the remote branch after an ambiguous push response
+and treats the write as successful only when it points to the exact intended
+commit. A local bare-repository test covers acceptance followed by a lost response.
 The step remains incomplete: the deferred Workers runtime transport evaluation,
-resource measurements, and durable persistence/reconciliation of intended commit
-identity across ambiguous pushes still require implementation and evidence.
+resource measurements, and durable persistence of intended commit identity across
+process restarts still require implementation and evidence.
 
 Validation: equivalence with native publication, concurrent head changes, existing
 branches, and lost responses after successful remote writes.

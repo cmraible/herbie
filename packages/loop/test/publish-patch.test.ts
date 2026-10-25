@@ -322,6 +322,14 @@ test("a push failure reports uncertain remote state without opening a PR or retr
   assert.deepEqual(await readdir(scratch), []);
 });
 
+test("confirms the intended commit when the remote accepts a push but loses its response", async (t) => {
+  const { remote, request, createPullRequest, publish } = await fixture(t);
+  await writeFile(join(remote, "hooks", "post-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  const result = await publish();
+  assert.equal(await git(remote, "rev-parse", request.branch), result.commit);
+  assert.equal(createPullRequest.mock.callCount(), 1);
+});
+
 test("a lost GitHub response retains the pushed branch and blocks blind retry", async (t) => {
   const { remote, scratch, request, createPullRequest, publish } = await fixture(t);
   createPullRequest.mock.mockImplementation(async () => {
