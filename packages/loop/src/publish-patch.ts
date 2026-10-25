@@ -69,7 +69,10 @@ export function hasValidPublicationEvidence(
     verification.baseCommit === baseCommit &&
     /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(baseCommit) &&
     [remoteUrl, remoteUrl.slice(0, -4)].includes(verification.repoUrl) &&
-    verification.patchSha256 === createHash("sha256").update(patch).digest("hex")
+    verification.patchSha256 === createHash("sha256").update(patch).digest("hex") &&
+    (changes.changeSet === undefined ||
+      verification.changeSetSha256 ===
+        createHash("sha256").update(JSON.stringify(changes.changeSet)).digest("hex"))
   );
 }
 

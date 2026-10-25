@@ -25,6 +25,10 @@ import {
 
 import { agentNodePath, environmentPath } from "./environment-runtime.js";
 import { MAX_ARTIFACT_BYTES, MAX_PATCH_BYTES } from "./artifact-limits.js";
+import {
+  parsePortableChangeArtifact,
+  type PortableChangeArtifact,
+} from "./portable-change-artifact.js";
 import { registerDiagnosticSecret } from "./diagnostic-log.js";
 
 export const AGENT_RUNTIME_FILES = [
@@ -37,11 +41,13 @@ export const AGENT_RUNTIME_FILES = [
   "publication-decision.js",
   "diagnostic-log.js",
   "repository-checkout.js",
+  "artifact-limits.js",
 ] as const;
 
 export interface AgentAttemptArtifact {
   baseCommit: string;
   patchBase64: string;
+  changeSet?: PortableChangeArtifact;
   pullRequestTitle?: string;
   pullRequestBody?: string;
   publicationDecision?: PublicationDecision;
@@ -71,6 +77,8 @@ export type AttemptRequest = {
 export interface AgentAttemptChanges {
   baseCommit: string;
   patch: Buffer;
+  /** Present on artifacts produced by portable-aware agents; legacy patches remain readable. */
+  changeSet?: PortableChangeArtifact;
   publicationDecision?: PublicationDecision;
   feedbackDecision?: FeedbackDecision;
   // Absent for explicit pause decisions and artifacts saved before agent-authored descriptions.
@@ -85,6 +93,7 @@ export interface AgentAttemptChanges {
     repoUrl: string;
     baseCommit: string;
     patchSha256: string;
+    changeSetSha256?: string;
     goalCompleted: true;
     sandboxDeleted: true;
     localChecksPassed?: true;
@@ -498,6 +507,8 @@ export async function runAgentAttempt(
     if (patch.length > MAX_PATCH_BYTES) throw new Error("Repository patch exceeds its byte limit");
     if (patch.toString("base64") !== artifact.patchBase64)
       throw new Error("Invalid repository patch encoding");
+    const changeSet =
+      "changeSet" in artifact ? parsePortableChangeArtifact(artifact.changeSet) : undefined;
     const publicationDecision =
       "publicationDecision" in artifact
         ? parsePublicationDecision(artifact.publicationDecision)
@@ -546,6 +557,7 @@ export async function runAgentAttempt(
           }),
       baseCommit: artifact.baseCommit,
       patch,
+      ...(changeSet ? { changeSet } : {}),
     };
     await emit(`Changes retrieved from sandbox ${sandbox.id}`);
   } catch (cause) {
@@ -610,6 +622,13 @@ export async function runAgentAttempt(
       repoUrl: repo.href,
       baseCommit: changes.baseCommit,
       patchSha256: createHash("sha256").update(changes.patch).digest("hex"),
+      ...(changes.changeSet
+        ? {
+            changeSetSha256: createHash("sha256")
+              .update(JSON.stringify(changes.changeSet))
+              .digest("hex"),
+          }
+        : {}),
       goalCompleted: true,
       sandboxDeleted: true,
     };
