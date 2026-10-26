@@ -67,11 +67,13 @@ Issues permission to subscribe to [Issue comment events](https://docs.github.com
 existing installations must accept that permission update. Conversation-comment reactions
 use Issues write; inline-comment reactions use the existing Pull requests write permission.
 
-Signed pull request review and CI webhooks immediately trigger repository-scoped merge
-reconciliation without waiting for the next poll. Webhooks are acknowledged without waiting
+Signed pull request and pull request review webhooks immediately reconcile only the
+affected PR. CI webhooks retain repository-scoped merge reconciliation. Neither waits
+for the next poll. Webhooks are acknowledged without waiting
 for GitHub API calls; approval, current head, and checks are re-read before merging.
-Concurrent events for a repository are coalesced, retaining a follow-up read for events
-received during reconciliation. The 30-second PR poll recovers missed events or restarts;
+Concurrent events for the same repository and PR are coalesced, retaining a follow-up
+read for events received during reconciliation. Different PRs proceed independently;
+CI events are coalesced separately by repository. The 30-second PR poll recovers missed events or restarts;
 a separate ten-minute poll covers CI repair and feedback. Ensure the App subscribes to
 Pull request review, Check run, Check suite, and Status events listed above.
 The browser receives project, PR, and run-event updates over `/api/stream` WebSockets

@@ -1951,13 +1951,15 @@ export class Store {
     mode?: "demo" | "live",
     pendingReadiness = false,
     repository?: string,
+    pullRequestNumber?: number,
   ): Promise<Job[]> {
     const result = await this.pool.query<Record<string, unknown>>(
       `SELECT j.*, (j.lease_expires_at > clock_timestamp()) IS TRUE AS lease_valid FROM jobs j JOIN projects g ON g.id=j.project_id
       WHERE ${pendingReadiness ? "j.readiness_pending" : "j.stage IN ('awaiting_review','cancelled') AND j.pull_request->>'state'='open'"}
       AND ($1::text IS NULL OR g.mode=$1)
-      AND ($2::text IS NULL OR g.repository=$2) ORDER BY j.created_at`,
-      [mode ?? null, repository ?? null],
+      AND ($2::text IS NULL OR lower(g.repository)=lower($2))
+      AND ($3::text IS NULL OR j.pull_request->>'number'=$3) ORDER BY j.created_at`,
+      [mode ?? null, repository ?? null, pullRequestNumber?.toString() ?? null],
     );
     const jobs: Job[] = [];
     for (const selected of result.rows) {

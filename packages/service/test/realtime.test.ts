@@ -157,7 +157,7 @@ test("authenticated stream delivers committed worker and webhook changes, isolat
           "x-hub-signature-256": "valid-test-signature",
           "x-github-event": "pull_request",
         },
-        body: "{}",
+        body: JSON.stringify({ repository: { full_name: project.repository }, pull_request: pr }),
       })
     ).status,
     200,

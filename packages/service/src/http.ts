@@ -98,24 +98,25 @@ export function createApiServer(options: ApiOptions) {
   const executionEnabled = options.executionEnabled ?? true;
   const pendingReviews = new Set<string>();
   const activeReviews = new Set<string>();
-  function requestReviewReconciliation(repository: string) {
-    pendingReviews.add(repository);
-    if (activeReviews.has(repository)) return;
-    activeReviews.add(repository);
+  function requestReviewReconciliation(repository: string, pullRequestNumber?: number) {
+    const key = `${repository}:${pullRequestNumber ?? "all"}`;
+    pendingReviews.add(key);
+    if (activeReviews.has(key)) return;
+    activeReviews.add(key);
     // Acknowledge delivery without waiting for GitHub API calls. Coalesce bursts,
     // but retain a wake-up arriving during a read so approvals aren't missed.
     // The worker's 30-second reconciliation recovers process exits or API failures.
     void (async () => {
       try {
-        while (pendingReviews.delete(repository)) {
+        while (pendingReviews.delete(key)) {
           try {
-            await reconcileReviews(store, adapters, repository);
+            await reconcileReviews(store, adapters, repository, pullRequestNumber);
           } catch (error) {
             logFailure(error, { component: "webhook-review-reconciliation" });
           }
         }
       } finally {
-        activeReviews.delete(repository);
+        activeReviews.delete(key);
       }
     })();
   }
@@ -333,8 +334,25 @@ export function createApiServer(options: ApiOptions) {
       if (typeof signature !== "string" || !options.verifyWebhook?.(payload, signature))
         throw new HttpError(401, "Invalid webhook signature");
       // Only trusted API reads drive transitions. Duplicate/out-of-order webhook bodies are harmless.
-      if (request.headers["x-github-event"] === "pull_request")
-        await reconcileReviews(store, adapters);
+      if (
+        ["pull_request", "pull_request_review"].includes(String(request.headers["x-github-event"]))
+      ) {
+        const event = z
+          .object({
+            repository: z.object({ full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }),
+            pull_request: z.object({ number: z.number().int().positive() }),
+          })
+          .safeParse(JSON.parse(payload.toString("utf8")));
+        if (
+          event.success &&
+          (request.headers["x-github-event"] === "pull_request" ||
+            (executionEnabled && adapters.mode === "live"))
+        )
+          requestReviewReconciliation(
+            event.data.repository.full_name,
+            event.data.pull_request.number,
+          );
+      }
       if (
         executionEnabled &&
         adapters.mode === "live" &&
@@ -369,9 +387,7 @@ export function createApiServer(options: ApiOptions) {
       if (
         executionEnabled &&
         adapters.mode === "live" &&
-        ["pull_request_review", "check_run", "check_suite", "status"].includes(
-          String(request.headers["x-github-event"]),
-        )
+        ["check_run", "check_suite", "status"].includes(String(request.headers["x-github-event"]))
       ) {
         const event = z
           .object({ repository: z.object({ full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/) }) })
