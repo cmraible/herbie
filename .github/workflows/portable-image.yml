@@ -35,6 +35,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     concurrency:
       group: herbie-image-publish
       cancel-in-progress: false
@@ -55,6 +56,11 @@ jobs:
           mkdir "$RUNNER_TEMP/flux-bin"
           tar -xzf "$RUNNER_TEMP/flux.tar.gz" -C "$RUNNER_TEMP/flux-bin" flux
           echo "$RUNNER_TEMP/flux-bin" >> "$GITHUB_PATH"
+      - name: Install Cosign
+        if: inputs.release_sequence != '' && inputs.release_sequence != '0'
+        uses: sigstore/cosign-installer@b9c35392b7c1401bcc77d30c9b07cf4b1c7a7b07
+        with:
+          cosign-release: v3.1.4
       - name: Reject a superseded main commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,12 +82,8 @@ jobs:
           digest="$(bash scripts/promote-portable-image.sh "$IMAGE_REPOSITORY" "$tree" "$REVISION" "$RELEASE_SEQUENCE")"
           if [[ "$RELEASE_SEQUENCE" =~ ^[1-9][0-9]*$ ]]; then
             node scripts/build-release-artifact.mjs "$digest" "$REVISION" "$RUNNER_TEMP/release-artifact"
-            # Recheck after promotion, immediately before announcing a release.
-            current="$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-            test "$current" = "$REVISION" || { echo 'Main advanced; refusing release artifact.' >&2; exit 1; }
-            flux push artifact "oci://$IMAGE_REPOSITORY:0.0.$RELEASE_SEQUENCE" \
-              --path="$RUNNER_TEMP/release-artifact" --source="$REPOSITORY_URL" \
-              --revision="main@sha1:$REVISION"
+            bash scripts/publish-release-artifact.sh "$IMAGE_REPOSITORY" "$RELEASE_SEQUENCE" \
+              "$REVISION" "$RUNNER_TEMP/release-artifact"
             printf '\nFlux release artifact: `%s:0.0.%s`\n' "$IMAGE_REPOSITORY" "$RELEASE_SEQUENCE" >> "$GITHUB_STEP_SUMMARY"
           fi
           printf 'Revision: `%s`\n\nImmutable image: `%s`\n' "$REVISION" "$digest" >> "$GITHUB_STEP_SUMMARY"
