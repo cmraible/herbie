@@ -206,9 +206,14 @@ local tests cover artifact publication and concurrent base branch advancement.
 The publisher now also checks the remote branch after an ambiguous push response
 and treats the write as successful only when it points to the exact intended
 commit. A local bare-repository test covers acceptance followed by a lost response.
-The step remains incomplete: the deferred Workers runtime transport evaluation,
-resource measurements, and durable persistence of intended commit identity across
-process restarts still require implementation and evidence.
+Local verification in this checkout passed with
+`pnpm --filter @herbie/loop exec tsx --test --test-name-pattern='publication|portable|lost response|captured tree' test/publish-patch.test.ts test/portable-change-artifact.test.ts`
+(14 tests) and `pnpm --filter @herbie/service test:workers` (5 tests). These checks
+exercise native bare-repository publication and Workers package/runtime compatibility
+with injected provider responses; they do not exercise GitHub transport from
+Workers. The step remains incomplete: the deferred Workers runtime transport
+evaluation, resource measurements, and durable persistence of intended commit
+identity across process restarts still require implementation and evidence.
 
 Validation: equivalence with native publication, concurrent head changes, existing
 branches, and lost responses after successful remote writes.
