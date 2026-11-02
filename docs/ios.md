@@ -1,7 +1,7 @@
 # Herbie for iOS
 
 Native SwiftUI client for iPhone and iPad, targeting iOS 17+. Open
-`Herbie.xcodeproj`, select the Herbie scheme and an iOS Simulator, then Run.
+`apps/ios/Herbie.xcodeproj`, select the Herbie scheme and an iOS Simulator, then Run.
 For a physical device, select your development team and a unique bundle ID in
 Signing & Capabilities. No third-party Swift dependencies are required.
 
