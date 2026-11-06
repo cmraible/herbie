@@ -28,7 +28,7 @@ Copy the App ID, client ID, client secret, private key, and webhook secret into
 ## Project behavior
 
 Postgres preserves jobs and results across restarts. Coding runs in disposable
-Daytona sandboxes; GitHub write credentials stay on the Herbie host.
+Daytona or E2B sandboxes; GitHub write credentials stay on the Herbie host.
 
 - `targetWip` sets the desired number of open PRs plus queued/running runs. Polling replenishes missing work;
   closing one without merging pauses the project. Projects have no total attempt or dollar cap.
