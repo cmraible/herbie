@@ -36,4 +36,3 @@ To run your own Herbie service, follow the [setup guide](docs/setup.md).
 - [Development and testing](docs/development.md)
 - [Service operations and recovery](docs/service.md)
 - [Deployment](docs/portable-deployment.md)
-- [Earlier ChatGPT demo](docs/demo.md)
