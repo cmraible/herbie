@@ -2,8 +2,7 @@
 
 Herbie turns coding tasks into GitHub pull requests and keeps them moving through
 CI and human review. Give it a repository and a brief, then follow its progress
-from the web app, CLI, or native iPhone and iPad client. Work continues after you
-close the app.
+from the web app or CLI. Work continues after you close the app.
 
 ## Two ways to work
 
@@ -37,5 +36,4 @@ To run your own Herbie service, follow the [setup guide](docs/setup.md).
 - [Development and testing](docs/development.md)
 - [Service operations and recovery](docs/service.md)
 - [Deployment](docs/portable-deployment.md)
-- [iOS client setup and status](docs/ios.md)
 - [Earlier ChatGPT demo](docs/demo.md)
