@@ -109,10 +109,9 @@ environment approval and disabled execution until separately approved.
 
 ## Earlier local experiments
 
-The workspace retains the original foreground experiments:
+The workspace retains the original foreground experiment:
 
 - **`@herbie/loop`** (`packages/loop`): runs one foreground Codex improvement attempt for a local repository and project.
-- **`@herbie/demo`** (`packages/demo`): the local ChatGPT sign-in and streaming demo. See its [README](demo.md).
 
 ### Foreground experiment setup
 
@@ -121,7 +120,6 @@ Requires Node.js 24+ and pnpm.
 ```sh
 pnpm install
 pnpm start --repo /path/to/checkout --project "Improve error messages"
-pnpm demo    # Run the web demo at http://127.0.0.1:3210
 ```
 
 The CLI requires `codex` on PATH, already configured and authenticated. It asks Codex
@@ -131,7 +129,7 @@ there is no PR publication, persistence, or automatic repetition.
 The command preserves Codex's exit code and exits nonzero if it cannot start or is
 terminated by a signal. Use `pnpm start --help` for usage.
 
-Press Ctrl+C to stop either process. Demo credentials remain in `.herbie/` at the workspace root.
+Press Ctrl+C to stop the process.
 
 ## Workspace checks and internals
 
@@ -141,7 +139,7 @@ pnpm test
 pnpm build
 ```
 
-These commands run across the workspace. To target one package, use `pnpm --filter @herbie/demo test` or `pnpm --filter @herbie/loop build`.
+These commands run across the workspace. To target one package, use `pnpm --filter @herbie/service test` or `pnpm --filter @herbie/loop build`.
 
 Run `pnpm lint` and `pnpm format:check` to check the repo with Oxlint and Oxfmt.
 Use `pnpm lint:fix` and `pnpm format` to apply fixes and formatting. Both tools use their default configurations.
@@ -224,7 +222,6 @@ After building:
 
 ```sh
 node packages/loop/dist/index.js --repo /path/to/checkout --project "Improve error messages"
-node packages/demo/dist/index.js
 ```
 
 ### Opt-in Daytona lifecycle smoke

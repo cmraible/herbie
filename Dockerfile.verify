@@ -8,7 +8,6 @@ RUN node -e 'const fs=require("node:fs");fs.mkdirSync("/etc/ssl/certs",{recursiv
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 COPY packages/cli/package.json packages/cli/
 COPY packages/contracts/package.json packages/contracts/
-COPY packages/demo/package.json packages/demo/
 COPY packages/loop/package.json packages/loop/
 COPY packages/service/package.json packages/service/
 COPY packages/web/package.json packages/web/
