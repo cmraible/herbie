@@ -107,13 +107,6 @@ Node container, private Supabase database, and automatic GHCR → Flux OCI → k
 Production releases use [GitHub Actions](github-actions.md), with verification,
 environment approval and disabled execution until separately approved.
 
-## Native iOS client
-
-The initial SwiftUI iPhone/iPad client lives in [apps/ios](ios.md).
-Open `apps/ios/Herbie.xcodeproj` in Xcode to run it against an existing HTTPS service,
-or use its offline Debug preview. The iOS README tracks coverage and remaining
-parity/validation work.
-
 ## Earlier local experiments
 
 The workspace retains the original foreground experiments:
