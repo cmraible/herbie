@@ -15,10 +15,21 @@ Verified locally: all packages build and typecheck; 24 integration tests pass, i
 
 Verified live: one paid E2B session produced [draft PR #224](https://github.com/cmraible/herbie/pull/224), changing only a smoke-test document. Sandbox deletion was independently confirmed. This operator-script test establishes execution/publication, not end-to-end web/CLI login.
 
-Remaining before launch completion:
+Deployed on 2026-11-10 at [herbie.raible.dev](https://herbie.raible.dev):
 
-- Publish the verified image and cut over the existing URL after confirming no active original Herbie work. Preserve the original image/configuration and database for rollback.
-- Verify real GitHub login and repository discovery, CLI device approval, and a persisted run from each client, including reopen/polling and confirmed cleanup.
-- Record the deployed revision, final acceptance evidence, and rollback procedure.
+- Source merged in [#225](https://github.com/cmraible/herbie/pull/225), runtime packaging improved in [#226](https://github.com/cmraible/herbie/pull/226).
+- Running revision: `ddf35c96e4ab7c7bc10b205d3eb5c93908b4b054`.
+- Image: `ghcr.io/cmraible/herbie-prompt-to-pr@sha256:9a6320dd80083d1c856a73e3b02c0ad0092babc71b2695f31ad431a14aec838d`.
+- Deployment: [homelab #30](https://github.com/cmraible/homelab/pull/30). Both API and worker are ready; public health returns the expected revision.
+- The new private schema has seven tables, with RLS enabled and no anonymous/authenticated Data API grants. Original Herbie data remains intact; no original projects/jobs were active at cutover.
+- OAuth initiation uses the existing App/callback and secure HttpOnly cookies. Anonymous run access returns 401. The deployed sign-in page was visually inspected.
+- The exact production image has zero HIGH/CRITICAL Trivy findings in local and CI scans. The broader homelab scan remains red on pre-existing unrelated image references/findings; it is not represented as passing.
+- Rollback configuration and prior image/release digests are recorded in the private deployment repository's `kubernetes/prompt-to-pr/README.md`.
 
-No production data migration or deployment change has been applied yet.
+Remaining before full acceptance:
+
+- Complete real GitHub sign-in in the browser. An interactive sign-in request is pending with the user; no production login/session is fabricated for testing.
+- Verify repository discovery and a persisted run from the web client, including reopening while it runs.
+- Approve CLI device login and verify a persisted CLI run, then confirm both draft PRs and sandbox cleanup.
+
+The direct live operator test and automated client/auth tests passed, but they do not replace these remaining interactive checks.
