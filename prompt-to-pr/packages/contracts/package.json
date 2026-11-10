@@ -1,6 +1,9 @@
 {
   "name": "@prompt-to-pr/contracts",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": {

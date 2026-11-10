@@ -487,7 +487,23 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Database reachable"
+            "description": "Database reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "deploymentId"],
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    },
+                    "deploymentId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "500": {
             "description": "Request failed",
@@ -498,6 +514,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/live": {
+      "get": {
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Process is serving requests"
           }
         }
       }
