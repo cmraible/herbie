@@ -1,0 +1,24 @@
+{
+  "name": "prompt-to-pr",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "verify": "pnpm build && pnpm typecheck && pnpm test",
+    "start": "node packages/service/dist/main.js api",
+    "worker": "node packages/service/dist/main.js worker",
+    "migrate": "node packages/service/dist/main.js migrate",
+    "cli": "node packages/cli/dist/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "packageManager": "pnpm@10.34.6"
+}

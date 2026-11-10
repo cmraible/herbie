@@ -1,0 +1,52 @@
+name: Prompt to PR
+on:
+  pull_request:
+    paths:
+      - prompt-to-pr/**
+      - .github/workflows/prompt-to-pr.yml
+  push:
+    branches: [main]
+    paths:
+      - prompt-to-pr/**
+      - .github/workflows/prompt-to-pr.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288
+        with:
+          version: 10.34.6
+          run_install: false
+      - run: pnpm --dir prompt-to-pr install --frozen-lockfile
+      - run: pnpm --dir prompt-to-pr verify
+      - name: Build standalone image
+        env:
+          REVISION: ${{ github.sha }}
+        run: docker build --build-arg REVISION="$REVISION" --label org.opencontainers.image.source=https://github.com/cmraible/herbie --label org.opencontainers.image.revision="$REVISION" -t "ghcr.io/cmraible/herbie-prompt-to-pr:$REVISION" prompt-to-pr
+      - name: Exercise container startup and migrations
+        env:
+          REVISION: ${{ github.sha }}
+        run: node prompt-to-pr/scripts/container-smoke.mjs "ghcr.io/cmraible/herbie-prompt-to-pr:$REVISION"
+      - name: Publish verified image
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          REVISION: ${{ github.sha }}
+        run: |
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          docker push "ghcr.io/cmraible/herbie-prompt-to-pr:$REVISION"

@@ -1,0 +1,1 @@
+Keep the application minimal. Web and CLI use the same HTTP API. Run repository code only in disposable sandboxes; GitHub write credentials stay on the trusted worker. Never automatically repeat an uncertain agent launch or publication. Run pnpm verify after implementation changes.

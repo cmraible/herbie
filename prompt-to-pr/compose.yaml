@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: prompt_to_pr
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U bot -d prompt_to_pr]
+      interval: 2s
+      retries: 30
+  migrate:
+    build: .
+    image: prompt-to-pr:local
+    env_file: .env
+    command: migrate
+    depends_on:
+      db: { condition: service_healthy }
+  api:
+    image: prompt-to-pr:local
+    env_file: .env
+    command: api
+    ports: ["127.0.0.1:8787:8787"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+  worker:
+    image: prompt-to-pr:local
+    env_file: .env
+    command: worker
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30m
+    restart: unless-stopped
+volumes:
+  database:

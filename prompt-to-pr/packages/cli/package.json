@@ -1,0 +1,16 @@
+{
+  "name": "@prompt-to-pr/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "prompt-to-pr": "dist/main.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@prompt-to-pr/contracts": "workspace:*"
+  }
+}
