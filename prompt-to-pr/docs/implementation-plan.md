@@ -14,7 +14,7 @@ Assumptions: small private beta, service-funded model access, GitHub repositorie
 
 Herbie's [service contract](../../docs/service-contract.md) already establishes useful behavior: authenticated web and CLI clients, durable queued work, repository authorization, disposable execution, and trusted publication with write credentials outside the agent.
 
-Its [workflow experiments](../../research_notes/Workflow%20evaluation/shared/FINDINGS.md) show why blind retries are dangerous: a lost launch response can duplicate paid execution, and a lost publication response can duplicate PRs. A workflow engine alone does not remove these problems.
+Herbie's workflow experiments showed why blind retries are dangerous: a lost launch response can duplicate paid execution, and a lost publication response can duplicate PRs. A workflow engine alone does not remove these problems.
 
 Keep those lessons. Drop the project lifecycle, recurring work, separate feedback/repair machinery, model/resource selectors, provider switching, live WebSockets, and deployment portability work.
 

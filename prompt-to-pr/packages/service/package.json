@@ -1,6 +1,9 @@
 {
   "name": "@prompt-to-pr/service",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/schema.sql dist/schema.sql"
