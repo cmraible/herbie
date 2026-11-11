@@ -56,4 +56,4 @@ Login displays a URL and code. Sign in in the browser, enter the code from your 
 
 One prompt creates one run and at most one draft PR. No-change outcomes explain why no PR was warranted. Failed or uncertain work stops visibly. A PR is never automatically merged or marked ready. CI repairs, comment handling, and work after merge are deferred.
 
-See [implementation plan](docs/implementation-plan.md) and [implementation status](docs/status.md) for remaining work and verification evidence. The rebuild is deployed at [herbie.raible.dev](https://herbie.raible.dev). The direct live execution/publication smoke test passed; final web/CLI acceptance is waiting for interactive GitHub sign-in.
+See [implementation plan](docs/implementation-plan.md) and [implementation status](docs/status.md) for architecture and verification evidence. The rebuild is deployed at [herbie.raible.dev](https://herbie.raible.dev). Real GitHub login, repository discovery, and prompt-to-draft-PR runs passed independently through both web and CLI, including retrieving results after closing each client.
