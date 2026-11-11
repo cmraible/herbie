@@ -10,6 +10,7 @@ const authMethods = new Map([
   ["/sign-in/social", "POST"],
   ["/sign-out", "POST"],
   ["/get-session", "GET"],
+  ["/error", "GET"],
   ["/callback/github", "GET"],
   ["/device/code", "POST"],
   ["/device/token", "POST"],

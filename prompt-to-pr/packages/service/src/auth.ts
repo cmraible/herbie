@@ -29,11 +29,18 @@ export function createIdentity(config: Config, pool: Pool) {
     },
     user: {
       additionalFields: {
-        githubId: { type: "string", required: true, input: false },
-        login: { type: "string", required: true, input: false },
+        // Provider mappings obey input rules too. Generic signup/profile writes are not mounted.
+        githubId: { type: "string", required: true, input: true },
+        login: { type: "string", required: true, input: true },
       },
-      validateUserInfo({ user }) {
-        if (typeof user.githubId !== "string" || !allowed.has(user.githubId))
+      validateUserInfo({ user, source }) {
+        const githubId = String(source.oauth?.profile?.id ?? "");
+        if (
+          source.method !== "oauth" ||
+          source.oauth?.providerId !== "github" ||
+          user.githubId !== githubId ||
+          !allowed.has(githubId)
+        )
           return {
             error: "beta_access",
             errorDescription: "This account is not enabled for the private beta",
