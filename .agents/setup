@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Credential-free development and CI tools for Amp's Debian orbs.
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+started=$SECONDS
+
+echo 'Preparing Node 24 and the pinned package manager'
+toolchain="$HOME/.local/share/herbie/toolchain"
+export PATH="$toolchain/node_modules/.bin:$PATH"
+node_version=24.19.0
+pnpm_version="$(node -p 'require("./package.json").packageManager.split("@")[1]')"
+if [[ "$(node --version)" != "v$node_version" ]] ||
+  [[ ! -x "$toolchain/node_modules/.bin/pnpm" ]] ||
+  [[ "$(pnpm --version)" != "$pnpm_version" ]]; then
+  npm install --prefix "$toolchain" --no-audit --no-fund "node@$node_version" "pnpm@$pnpm_version"
+fi
+# Amp preserves PATH additions from setup when it creates a shared snapshot.
+profile_marker='# Herbie orb toolchain'
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile"; then
+  printf '\n%s\nexport PATH="%s/node_modules/.bin:$PATH"\n' "$profile_marker" "$toolchain" >> "$HOME/.bash_profile"
+fi
+node --version
+pnpm --version
+
+echo "Installing system prerequisites (${SECONDS}s elapsed)"
+packages=()
+for package in postgresql-17 docker-compose-plugin docker-buildx-plugin; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+    packages+=("$package")
+  fi
+done
+if ((${#packages[@]})); then
+  sudo apt-get update -qq
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
+fi
+sudo systemctl enable --now docker
+
+echo "Preparing disposable PostgreSQL 17 databases (${SECONDS}s elapsed)"
+# Keep the test cluster separate from Compose's default PostgreSQL port.
+sudo pg_conftool 17 main set port 55432
+sudo pg_conftool 17 main set listen_addresses localhost
+sudo pg_conftool 17 main set fsync off
+sudo pg_conftool 17 main set synchronous_commit off
+sudo pg_conftool 17 main set full_page_writes off
+sudo systemctl enable postgresql
+sudo systemctl restart postgresql@17-main
+# Test fixtures create/drop schemas and roles; never use these databases for live data.
+sudo -u postgres psql -p 55432 -v ON_ERROR_STOP=1 <<'SQL'
+SELECT 'CREATE ROLE herbie_orb LOGIN SUPERUSER'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'herbie_orb') \gexec
+ALTER ROLE herbie_orb PASSWORD 'herbie-orb-local-only';
+SELECT 'CREATE DATABASE herbie_orb_test OWNER herbie_orb'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'herbie_orb_test') \gexec
+SELECT 'CREATE DATABASE herbie_orb_ci OWNER herbie_orb'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'herbie_orb_ci') \gexec
+SQL
+
+echo "Installing workspace dependencies (${SECONDS}s elapsed)"
+pnpm install --frozen-lockfile --prefer-offline
+echo "Installing Playwright Chromium (${SECONDS}s elapsed)"
+pnpm --filter @herbie/web exec playwright install --with-deps chromium --only-shell
+
+echo "Building workspace dependencies (${SECONDS}s elapsed)"
+pnpm build
+echo "Orb setup finished in $((SECONDS-started))s"

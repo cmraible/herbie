@@ -148,3 +148,6 @@ artifacts/
 
 # Generated Cloudflare Worker types
 /packages/cloudflare/worker-configuration.d.ts
+
+# Orb-specific portal URLs
+.amp/portals/
