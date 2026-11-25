@@ -3,6 +3,29 @@
 Requires Docker with Compose. The stack builds your current checkout and runs
 Herbie, Postgres, and a Cloudflare Tunnel. GitHub, Daytona, and OpenAI calls are real.
 
+## Amp orbs
+
+Amp runs `.agents/setup` for fresh orbs to install Node 24.19.0, the pinned pnpm,
+workspace dependencies, PostgreSQL 17, Docker Compose/Buildx, and Playwright
+Chromium, then builds the workspace. `.agents/resume` restores test database
+defaults in new login shells and checks the system-managed database and Docker.
+Both hooks are safe to rerun.
+
+Run `amp orb services ensure` for a credential-free UI preview using the existing
+fixture API. Open the portal URL it prints. This is not the live Herbie service
+and does not call GitHub, Daytona, or OpenAI.
+
+Use `bash scripts/ci-verify.sh all` for the credential-free build, unit,
+PostgreSQL integration, and browser checks. The orb provides separate disposable
+test and CI databases on loopback port 55432 through `HERBIE_TEST_DATABASE_URL`
+and `HERBIE_CI_DATABASE_URL`; explicitly supplied values are preserved. The test
+role is a local-only superuser and durability is disabled: do not store live data
+in this cluster. `pnpm verify` remains the Docker-based verification alternative
+(use `sudo` for Docker if required by the orb).
+
+Setup does not create or overwrite `.env`, configure credentials, or start the
+live Compose stack. Follow the configuration below only for live development.
+
 ## Configure
 
 Copy `.env.example` to `.env` and fill its settings. Use separate development

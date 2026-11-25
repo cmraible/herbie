@@ -1,0 +1,7 @@
+services:
+  web:
+    command: pnpm --filter @herbie/web preview:ui --host 0.0.0.0 --port "$PORT"
+    health: /
+    portal:
+      title: Herbie UI preview
+      description: Credential-free fixture data, not the live service. Changes reset when the preview restarts.
